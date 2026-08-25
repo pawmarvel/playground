@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-08-25T21:45:46.038616+00:00",
+  "pipeline": {
+    "sample_design": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/examples/charlie-well-trained/reference-design.png",
+    "art_prompt": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/examples/charlie-well-trained/art-template.md",
+    "pet_prompt_baseline": null,
+    "pet_image": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/examples/charlie-well-trained/pet-input.png",
+    "pet_name": "FLUFFY",
+    "name_method": "font",
+    "font": "/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf",
+    "template_dir": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/charlie-well-trained",
+    "run_dir": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/charlie-well-trained/runs/white-fluffy-dog",
+    "art_size": "1024x1136",
+    "pet_size": "1024x1024",
+    "layout_mode": "interactive",
+    "image_model": "gpt-image-2",
+    "prompt_model": "gpt-5.6",
+    "quality": "low",
+    "api_key_source": "OPENAI_API_KEY"
+  },
+  "sources": {
+    "sample_design": {
+      "path": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/examples/charlie-well-trained/reference-design.png",
+      "sha256": "b9034ae5dbbaed2c0efb33d8ba63a15277d54c5f6251a6993e6acc16e17abd76"
+    },
+    "art_prompt": {
+      "path": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/examples/charlie-well-trained/art-template.md",
+      "sha256": "d1fc92cee208b36c4109718d057c89cfe7e4a350bea995b5bdd68e565a9eff1e"
+    },
+    "pet_image": {
+      "path": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/examples/charlie-well-trained/pet-input.png",
+      "sha256": "e162eadafb1bd8b7d6ca80977fec2104a98e31c1cca7cdabb2ac9c7a629971f6"
+    },
+    "pet_prompt_baseline": null
+  },
+  "name_generation": {
+    "method": "font"
+  },
+  "artifacts": {
+    "art": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/charlie-well-trained/art.png",
+    "pet_prompt": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/charlie-well-trained/pet-transform.md",
+    "pet_prompt_analysis": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/charlie-well-trained/pet-transform.analysis.json",
+    "layout": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/charlie-well-trained/layout.json",
+    "layout_snapshot": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/charlie-well-trained/runs/white-fluffy-dog/layout.snapshot.json",
+    "transformed_pet": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/charlie-well-trained/runs/white-fluffy-dog/transformed-pet.png",
+    "generated_name": null,
+    "preview": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/charlie-well-trained/runs/white-fluffy-dog/preview.png",
+    "preview_debug": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/charlie-well-trained/runs/white-fluffy-dog/preview-debug.png"
+  }
+}

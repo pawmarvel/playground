@@ -1,0 +1,15 @@
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.DS_Store
+.env
+.env.*
+.venv/
+*.py[cod]
+*.egg-info/
+output/
+/work/
+/examples/life-is-good/work/
+*OPENAI_API_KEY*
+

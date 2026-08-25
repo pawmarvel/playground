@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "generator": {
+    "strategy": "direct",
+    "model": "gpt-5.6",
+    "reasoning_effort": "high",
+    "image_detail": "original",
+    "critic_pass": true,
+    "response_ids": [
+      "resp_0df3bf4c4434a091016a8e03b7599887d08e168e473e4d464f",
+      "resp_0de66fe3fd48170a016a8e03cbea6887d0862b5cddeed6d46e"
+    ]
+  },
+  "sources": {
+    "sample_design": {
+      "path": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/life-is-good/reference-design.png",
+      "sha256": "54761c41bd6bb351b0be67801b71db078611f2bef78fdb79001010c94c52b472",
+      "width": 242,
+      "height": 265
+    },
+    "art": {
+      "path": "/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator/work/life-is-good/art.png",
+      "sha256": "753fcbb9db41b4dbc08c3025d083fe79f5470180007fa563ebad084171681d9d",
+      "width": 1024,
+      "height": 1120
+    },
+    "baseline_prompt": null
+  },
+  "prompt": {
+    "draft_sha256": "15b2cd6c307294c67db3718b04474dc8486c18afc129aa6ea81ed10f3b6bc071",
+    "final_sha256": "2a98e27b4b8acd197bac35b441183e10d147ed4e5cd6304a74c83aa955f508ad",
+    "draft_word_count": 292,
+    "final_word_count": 296,
+    "critic_changed": true
+  }
+}

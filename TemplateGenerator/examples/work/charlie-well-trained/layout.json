@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "art": "art.png",
+  "pet": {
+    "box": {
+      "x": 205,
+      "y": 204,
+      "width": 614,
+      "height": 636
+    },
+    "rotation_degrees": 0
+  },
+  "name": {
+    "box": {
+      "x": 102,
+      "y": 863,
+      "width": 819,
+      "height": 159
+    },
+    "font": "fonts/DIN Condensed Bold.ttf",
+    "font_size_px": 91,
+    "min_font_size_px": 34,
+    "color": "#F7E7C6FF",
+    "horizontal_align": "center",
+    "vertical_align": "middle"
+  }
+}

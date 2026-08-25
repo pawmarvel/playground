@@ -1,0 +1,23 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  background: #17191d;
+  color: #f4f2eb;
+}
+
+body { margin: 0; padding: 1rem 1.5rem 2rem; }
+header, main { max-width: 1280px; margin: 0 auto; }
+h1 { margin-bottom: .25rem; }
+h2 { font-size: 1rem; }
+.visuals { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
+article, fieldset { background: #23262c; border: 1px solid #414650; border-radius: 8px; padding: 1rem; }
+img, canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; background: #101216; }
+canvas { touch-action: none; cursor: crosshair; }
+.controls { margin-top: 1rem; display: grid; gap: 1rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; }
+label { display: grid; gap: .25rem; font-size: .85rem; }
+input, select, button { font: inherit; padding: .5rem; border-radius: 5px; border: 1px solid #626977; }
+input:disabled { opacity: .5; cursor: not-allowed; }
+button { cursor: pointer; background: #f0cf71; color: #17191d; font-weight: 700; }
+.actions { display: flex; gap: .75rem; }
+#status { min-height: 1.5em; color: #b9c8db; }

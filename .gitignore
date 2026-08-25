@@ -1,0 +1,11 @@
+.DS_Store
+.venv/
+TemplateGenerator/.venv/
+TemplateGenerator/work/
+TemplateGenerator/examples/life-is-good/work/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.env.*
+*OPENAI_API_KEY*

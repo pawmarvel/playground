@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PawMarvel Layout Configurator</title>
+    <link rel="stylesheet" href="/assets/layout.css">
+  </head>
+  <body>
+    <header>
+      <h1>PawMarvel Layout Configurator</h1>
+      <p>Drag a box to move it. Drag its lower-right handle to resize it.</p>
+    </header>
+    <main>
+      <section class="visuals">
+        <article>
+          <h2>Reference</h2>
+          <img id="reference" alt="Design reference">
+        </article>
+        <article>
+          <h2>Authoritative Pillow preview</h2>
+          <canvas id="preview"></canvas>
+          <p id="status" role="status">Loading preview…</p>
+        </article>
+      </section>
+      <section class="controls">
+        <fieldset>
+          <legend>Pet box</legend>
+          <div id="pet-controls" class="grid"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Name box and text</legend>
+          <p id="name-mode"></p>
+          <div id="name-controls" class="grid"></div>
+        </fieldset>
+        <div class="actions">
+          <button id="refresh" type="button">Refresh preview</button>
+          <button id="save" type="button">Save layout</button>
+          <button id="complete" type="button">Save &amp; continue</button>
+        </div>
+      </section>
+    </main>
+    <script>window.PAWMARVEL_BOOTSTRAP = __PAWMARVEL_BOOTSTRAP__;</script>
+    <script src="/assets/layout.js"></script>
+  </body>
+</html>
