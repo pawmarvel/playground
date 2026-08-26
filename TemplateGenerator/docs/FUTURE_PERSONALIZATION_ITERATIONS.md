@@ -2,7 +2,7 @@
 
 Status: Deferred roadmap  
 Depends on: Successful low-resolution MVP validation  
-Last updated: 2026-08-24
+Last updated: 2026-08-26
 
 ## 1. Purpose
 
@@ -56,6 +56,28 @@ Potential capabilities:
 
 Keep automatic detection advisory. Operators should remain able to override all
 suggested geometry.
+
+#### Deferred issue — Charlie Well Trained pet shadow
+
+The `charlie-well-trained` reference design includes a pet shadow that the
+current automated art-template workflow does not reproduce reliably. Supporting
+this effect requires more than generating a shadow in the background artwork:
+
+- The shadow position, dimensions, shape, softness, opacity, and color must
+  match the reference design.
+- The shadow must be positioned relative to the final transformed pet rather
+  than treated as a fixed part of `art.png`.
+- Changes to the transformed pet's crop, scale, or placement must move or adjust
+  the shadow consistently so the two elements remain visually connected.
+- The compositor and layout schema may need an explicit shadow layer or another
+  pet-relative effect representation, with deterministic layer ordering.
+
+This coupling adds complexity to template extraction, layout authoring, and
+preview composition. Shadow extraction and pet-relative shadow placement are
+therefore excluded from the current MVP. For MVP validation, the Charlie
+example may omit or approximate the shadow; it must not be treated as evidence
+that automated shadow handling is supported. Revisit this issue in Iteration 2
+after the basic art-template, transformed-pet, and layout workflow is validated.
 
 ### Iteration 3 — High-resolution and print-ready assets
 
@@ -322,6 +344,7 @@ Address these before external production use:
 | Preview and print geometry diverge | Use shared derivation, render metadata, and cross-resolution tests |
 | Font rendering differs by environment | Bundle fonts and pin rendering dependencies |
 | Customer overrides break composition | Use product-defined bounds and server-side validation |
+| Reference shadows do not stay aligned with transformed pets | Add an explicit pet-relative shadow layer and validate its geometry and compositing order |
 | Approved files are changed accidentally | Add immutable revisions and content hashes |
 | Operational review does not scale | Add an approval portal and role-based workflow |
 | Vendor specifications differ by product | Add explicit product/vendor print profiles |
