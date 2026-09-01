@@ -40,7 +40,8 @@ from .print_upscale import (
     PrintOutputs,
     PrintUpscaleError,
     _read_token as _resolve_bria_token,
-    prepare_print_assets,
+    prepare_print_pet,
+    prepare_print_template,
 )
 from .renderer import RenderError, render_to_files
 
@@ -851,21 +852,41 @@ def run_pipeline(
     )
 
     print_outputs: PrintOutputs | None = None
+    print_pet_manifest: Path | None = None
     published_bundle: Path | None = None
     if bundle_requested:
         assert profile is not None
-        announce("Upscale preview layers and derive print layout")
-        print_outputs = prepare_print_assets(
+        announce("Upscale reusable template art and derive print layout")
+        template_print_outputs = prepare_print_template(
             template_dir=template_dir,
             layout_path=layout_path,
-            transformed_pet=transformed_pet,
-            name_image=name_image,
             target_size=(profile.print_size.width, profile.print_size.height),
             output_dir=print_dir,
             backend=args.upscale_backend,
             bria_token_file=args.bria_api_key_file,
             product_profile=staged_profile,
             force=replace_outputs,
+        )
+        announce("Upscale the representative transformed-pet layer")
+        pet_print_outputs = prepare_print_pet(
+            template_dir=template_dir,
+            layout_path=layout_path,
+            print_layout_path=template_print_outputs.layout,
+            transformed_pet=transformed_pet,
+            name_image=name_image,
+            output_dir=print_dir,
+            backend=args.upscale_backend,
+            bria_token_file=args.bria_api_key_file,
+            force=replace_outputs,
+        )
+        print_pet_manifest = pet_print_outputs.manifest
+        print_outputs = PrintOutputs(
+            art=template_print_outputs.art,
+            pet=pet_print_outputs.pet,
+            name=pet_print_outputs.name,
+            layout=template_print_outputs.layout,
+            manifest=template_print_outputs.manifest,
+            product_profile=template_print_outputs.product_profile,
         )
 
         announce("Render profile-sized print candidate")
@@ -928,7 +949,10 @@ def run_pipeline(
             else None
         ),
         "print_layout": str(print_outputs.layout) if print_outputs else None,
-        "print_manifest": str(print_outputs.manifest) if print_outputs else None,
+        "template_print_manifest": (
+            str(print_outputs.manifest) if print_outputs else None
+        ),
+        "print_pet_manifest": str(print_pet_manifest) if print_pet_manifest else None,
         "final_print": str(final_print) if print_outputs else None,
         "final_print_debug": str(final_print_debug) if print_outputs else None,
     }
@@ -1013,7 +1037,8 @@ def run_pipeline(
                 "print_art": print_outputs.art,
                 "print_transformed_pet": print_outputs.pet,
                 "print_layout": print_outputs.layout,
-                "print_manifest": print_outputs.manifest,
+                "template_print_manifest": print_outputs.manifest,
+                "print_pet_manifest": print_pet_manifest,
                 "final_print": final_print,
                 "final_print_debug": final_print_debug,
                 "bundle": published_bundle,

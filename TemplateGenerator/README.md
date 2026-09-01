@@ -19,9 +19,11 @@ The MVP provides:
 - `pawmarvel-pipeline`: one-command template authoring, tracked preview, print
   preparation, and optional clean bundle publication using font-rendered name
   lettering by default.
-- `pawmarvel-upscale`: prepare independently upscaled print layers, a derived
-  `layout-print.json`, and a checksum manifest using deterministic Lanczos or
-  Bria Increase Resolution.
+- `pawmarvel-upscale-template`: prepare reusable print art/layout once per
+  template.
+- `pawmarvel-upscale-pet`: prepare only the customer transformed-pet layer and
+  bind it to approved print geometry.
+- `pawmarvel-upscale`: backward-compatible coordinator for both operations.
 - `pawmarvel-product-profile`: derive reusable, exact-aspect preview art and pet
   dimensions plus reserved future name-image dimensions from a product print
   canvas; optional screenshot normalization is diagnostic only and is not used
@@ -61,6 +63,8 @@ python3 -m venv .venv
 .venv/bin/pawmarvel-poc-run --help
 .venv/bin/pawmarvel-pipeline --help
 .venv/bin/pawmarvel-upscale --help
+.venv/bin/pawmarvel-upscale-template --help
+.venv/bin/pawmarvel-upscale-pet --help
 .venv/bin/pawmarvel-product-profile --help
 .venv/bin/pawmarvel-bundle --help
 ```
@@ -92,14 +96,13 @@ provenance, and any requested print/bundle outputs. Layout-only reruns are
 offline. Selective reruns require the existing `run.json` and cannot be combined
 with broad `--force`.
 
-After preview inspection, pass the template directory, transformed pet, and
-product profile directly to `pawmarvel-upscale`; it reads
-`TEMPLATE_DIR/layout.json` by default. No `layout.snapshot.json`, pipeline
-`run.json`, or approval artifact is required, so the manual command sequence can
-complete the same print test. The final `pawmarvel-render` invocation validates
-the prepared print bundle against the profile and writes a final-review
-manifest. A profile whose vendor requirements are not confirmed produces a
-print candidate, not an automatic vendor-ready certification.
+After preview inspection, run `pawmarvel-upscale-template` once for the reusable
+art/layout and `pawmarvel-upscale-pet` for each transformed pet. No
+`layout.snapshot.json`, pipeline `run.json`, or approval artifact is required.
+The final `pawmarvel-render` invocation validates both manifests against the
+profile and writes a final-review manifest. A profile whose vendor requirements
+are not confirmed produces a print candidate, not an automatic vendor-ready
+certification.
 
 Design-specific prompts are treated like source code. For pet transformation,
 `pawmarvel-generate` sends one finished design first for pose, expression, crop,

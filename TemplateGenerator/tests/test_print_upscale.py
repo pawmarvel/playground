@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -11,9 +12,13 @@ from PIL import Image
 from helpers import copy_font, layout_data, make_image, make_transparent_mark
 from pawmarvel_generator.config import load_layout
 from pawmarvel_generator.print_upscale import (
+    PET_PRINT_MANIFEST_NAME,
+    TEMPLATE_PRINT_MANIFEST_NAME,
     PrintUpscaleError,
     parse_target_size,
     prepare_print_assets,
+    prepare_print_pet,
+    prepare_print_template,
 )
 from pawmarvel_generator.renderer import render_to_files
 
@@ -94,6 +99,55 @@ class PrintUpscaleTests(unittest.TestCase):
         )
         self.assertIsNone(outputs.name)
         self.assertFalse((self.output / "name-print.png").exists())
+
+    def test_template_and_pet_can_be_upscaled_independently(self) -> None:
+        template_outputs = prepare_print_template(
+            template_dir=self.template,
+            target_size=(400, 600),
+            output_dir=self.output,
+        )
+        self.assertTrue(template_outputs.art.is_file())
+        self.assertTrue((self.output / TEMPLATE_PRINT_MANIFEST_NAME).is_file())
+        self.assertFalse((self.output / "transformed-pet-print.png").exists())
+
+        art_hash = template_outputs.art.read_bytes()
+        customer_output = self.root / "customer-print"
+        pet_outputs = prepare_print_pet(
+            template_dir=self.template,
+            transformed_pet=self.pet,
+            print_layout_path=template_outputs.layout,
+            output_dir=customer_output,
+        )
+        with Image.open(pet_outputs.pet) as image:
+            self.assertEqual(image.size, (160, 120))
+        self.assertTrue((customer_output / PET_PRINT_MANIFEST_NAME).is_file())
+        self.assertEqual(template_outputs.art.read_bytes(), art_hash)
+        self.assertFalse((customer_output / "art-print.png").exists())
+        self.assertFalse((customer_output / "layout-print.json").exists())
+
+        manifest = json.loads(pet_outputs.manifest.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["artifact_kind"], "pet-print")
+        self.assertEqual(
+            manifest["template_binding"]["print_layout_sha256"],
+            hashlib.sha256(template_outputs.layout.read_bytes()).hexdigest(),
+        )
+
+    def test_pet_upscale_rejects_layout_not_derived_from_preview(self) -> None:
+        template_outputs = prepare_print_template(
+            template_dir=self.template,
+            target_size=(400, 600),
+            output_dir=self.output,
+        )
+        data = json.loads(template_outputs.layout.read_text(encoding="utf-8"))
+        data["pet"]["box"]["x"] += 1
+        template_outputs.layout.write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaisesRegex(PrintUpscaleError, "uniformly scaled"):
+            prepare_print_pet(
+                template_dir=self.template,
+                transformed_pet=self.pet,
+                print_layout_path=template_outputs.layout,
+                output_dir=self.root / "customer-print",
+            )
 
     def test_force_without_name_removes_stale_optional_name(self) -> None:
         self.output.mkdir()

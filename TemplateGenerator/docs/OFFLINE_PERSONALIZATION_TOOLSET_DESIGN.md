@@ -338,14 +338,16 @@ records `run_mode: selective-rerun` and the exact `rerun_steps` list.
 
 ## 13. Print preparation
 
-`pawmarvel-upscale` accepts the preview template, transformed pet, layout, and
-product profile. It:
+Print preparation is split by asset lifetime:
 
-1. independently upscales the complete art and pet canvases;
-2. preserves alpha and visible bounds;
-3. uniformly scales rectangle edges and font sizes into `layout-print.json`;
-4. copies font/license/profile inputs; and
-5. writes a checksum manifest.
+1. `pawmarvel-upscale-template` runs once per template. It upscales `art.png`,
+   uniformly derives `layout-print.json`, copies font/license/profile inputs,
+   and writes `template-print-manifest.json`.
+2. `pawmarvel-upscale-pet` runs once per customer-approved transformed pet. It
+   derives scale from the approved preview/print layout pair, upscales only the
+   cutout, and writes `pet-print-manifest.json` with template geometry hashes.
+3. `pawmarvel-upscale` remains a backward-compatible combined coordinator for
+   older scripts; new bundle-consumer code must use the pet-only command.
 
 The deterministic backend uses geometry-preserving Lanczos. The optional Bria
 backend may add a supported detail pass before normalization to exact profile
@@ -414,7 +416,8 @@ work/life-is-good/
     transformed-pet-print.png
     layout-print.json
     product-profile.json
-    print-manifest.json
+    template-print-manifest.json
+    pet-print-manifest.json
     final-print.png
     final-print-debug.png
     final-print.manifest.json
@@ -436,8 +439,10 @@ src/pawmarvel_generator/
   render_cli.py          # render command
   product_profile.py     # profile schema and derivation
   profile_cli.py         # profile command
-  print_upscale.py       # layer upscale and geometry scaling
-  upscale_cli.py         # print-preparation command
+  print_upscale.py       # split layer upscale and geometry contracts
+  upscale_template_cli.py # reusable template print preparation
+  upscale_pet_cli.py     # customer-specific pet print preparation
+  upscale_cli.py         # legacy combined coordinator
   bundle.py              # clean bundle validation/publication
   bundle_cli.py          # bundle command
   name_prompt_cli.py     # deferred AI-name experiment

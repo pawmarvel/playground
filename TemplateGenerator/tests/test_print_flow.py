@@ -15,6 +15,8 @@ from pawmarvel_generator.image_size import ImageSize
 from pawmarvel_generator.print_upscale import (
     PrintUpscaleError,
     prepare_print_assets,
+    prepare_print_pet,
+    prepare_print_template,
     verify_print_bundle,
 )
 from pawmarvel_generator.product_profile import (
@@ -145,6 +147,34 @@ class ManualPrintFlowTests(unittest.TestCase):
         )
         self.assertEqual(result, 0)
         self.assertFalse((self.root / "print" / "product-profile.json").exists())
+
+    def test_split_upscale_manifests_support_profile_validated_render(self) -> None:
+        print_dir = self.root / "print"
+        template_outputs = prepare_print_template(
+            template_dir=self.template,
+            target_size=(1600, 2400),
+            output_dir=print_dir,
+            product_profile=self.profile,
+        )
+        pet_outputs = prepare_print_pet(
+            template_dir=self.template,
+            transformed_pet=self.pet,
+            print_layout_path=template_outputs.layout,
+            output_dir=print_dir,
+        )
+        final = print_dir / "final-print.png"
+        result = render_main(
+            [
+                "--template-dir", str(print_dir),
+                "--layout", str(template_outputs.layout),
+                "--pet", str(pet_outputs.pet),
+                "--pet-name", "BUDDY",
+                "--product-profile", str(template_outputs.product_profile),
+                "--output", str(final),
+            ]
+        )
+        self.assertEqual(result, 0)
+        self.assertTrue(final.is_file())
 
     def test_upscale_cli_explains_profile_preview_aspect_mismatch(self) -> None:
         blanket_profile = create_product_profile(

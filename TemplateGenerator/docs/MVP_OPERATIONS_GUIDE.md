@@ -59,6 +59,8 @@ Confirm the installed commands:
 .venv/bin/pawmarvel-poc-run --help
 .venv/bin/pawmarvel-pipeline --help
 .venv/bin/pawmarvel-upscale --help
+.venv/bin/pawmarvel-upscale-template --help
+.venv/bin/pawmarvel-upscale-pet --help
 .venv/bin/pawmarvel-product-profile --help
 .venv/bin/pawmarvel-bundle --help
 ```
@@ -180,7 +182,8 @@ work/life-is-good/
       transformed-pet-print.png
       layout-print.json
       product-profile.json
-      print-manifest.json
+      template-print-manifest.json
+      pet-print-manifest.json
       final-print.png
       final-print-debug.png
       fonts/Anton-Regular.ttf
@@ -459,23 +462,42 @@ There is no separate pipeline rerun selector for rendering. Every
 `pawmarvel_pipeline_debug --rerun-step ...` command automatically performs this
 preview render after its selected authoring stages.
 
-## 10. Upscale the approved layers and layout
+## 10. Prepare reusable print art, then the representative print pet
+
+First upscale the reusable template assets. This is the offline,
+once-per-template operation:
 
 ```bash
 PAWMARVEL_PRINT="$PAWMARVEL_TEMPLATE/print/sausage-dog-puppy"
 
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-upscale" \
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-upscale-template" \
   --template-dir "$PAWMARVEL_TEMPLATE" \
-  --transformed-pet "$PAWMARVEL_TEMPLATE/qa/transformed-pet.png" \
   --product-profile "$PAWMARVEL_TEMPLATE/product-profile.json" \
   --output-dir "$PAWMARVEL_PRINT" \
   --backend deterministic
 ```
 
-The command reads `TEMPLATE_DIR/layout.json`; no pipeline `run.json` or
-`layout.snapshot.json` is required. It independently writes `art-print.png` and
-`transformed-pet-print.png`, derives uniformly scaled `layout-print.json`, and
-records hashes in `print-manifest.json`.
+It writes `art-print.png`, mechanically derives `layout-print.json`, copies the
+font, OFL license, and profile, and records hashes in
+`template-print-manifest.json`. It never accepts or generates a customer pet.
+
+Next upscale only the representative transformed pet used by this offline E2E
+test:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-upscale-pet" \
+  --template-dir "$PAWMARVEL_TEMPLATE" \
+  --print-layout "$PAWMARVEL_PRINT/layout-print.json" \
+  --transformed-pet "$PAWMARVEL_TEMPLATE/qa/transformed-pet.png" \
+  --output-dir "$PAWMARVEL_PRINT" \
+  --backend deterministic
+```
+
+This writes only `transformed-pet-print.png` and `pet-print-manifest.json`. The
+pet manifest binds the customer layer to hashes of the approved preview layout,
+print layout, and print art. No pipeline `run.json` or `layout.snapshot.json` is
+required for either command. `pawmarvel-upscale` remains as a backward-compatible
+one-command coordinator for older scripts.
 
 The deterministic backend preserves geometry with Lanczos but cannot invent
 missing detail. `--backend bria` can provide a visual enhancement pass when
@@ -483,8 +505,8 @@ missing detail. `--backend bria` can provide a visual enhancement pass when
 human inspection at 100% zoom.
 
 The section 4 debug function retains all print and publication flags, so every
-selective rerun automatically repeats this upscale stage. To debug only through
-low-resolution preview, invoke the pipeline without `--print-dir`,
+selective rerun automatically repeats both print-preparation stages. To debug
+only through low-resolution preview, invoke the pipeline without `--print-dir`,
 `--bundle-output-dir`, and `--template-id`.
 
 ## 11. Render the print candidate
@@ -500,8 +522,8 @@ low-resolution preview, invoke the pipeline without `--print-dir`,
   --debug-output "$PAWMARVEL_PRINT/final-print-debug.png"
 ```
 
-The renderer verifies the print manifest and exact profile dimensions, then
-writes `final-print.manifest.json`. A profile with
+The renderer verifies both split print manifests and exact profile dimensions,
+then writes `final-print.manifest.json`. A profile with
 `vendor_requirements_confirmed: false` produces a print candidate, not an
 automatic vendor-ready certification.
 
@@ -612,19 +634,19 @@ layout for one customer.
 ### 13.2 Scale the second transformed pet for the bundled print layout
 
 ```bash
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-upscale" \
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-upscale-pet" \
   --template-dir "$PAWMARVEL_BUNDLE" \
   --layout "$PAWMARVEL_BUNDLE/layout.json" \
+  --print-layout "$PAWMARVEL_BUNDLE/layout-print.json" \
   --transformed-pet "$PAWMARVEL_SECOND_PREVIEW/transformed-pet.png" \
-  --target-size 9375x12375 \
   --output-dir "$PAWMARVEL_SECOND_PRINT" \
   --backend deterministic
 ```
 
-The MVP upscale command creates a complete staging set, including another
-scaled art layer. For bundle consumption, use only its customer-specific
-`transformed-pet-print.png`; the approved reusable print art remains
-`$PAWMARVEL_BUNDLE/print/art.png`.
+The command derives scale from the bundle's approved preview/print layout pair
+and creates only customer-specific `transformed-pet-print.png` plus
+`pet-print-manifest.json`. It neither regenerates nor copies art. The reusable
+print art remains `$PAWMARVEL_BUNDLE/print/art.png`.
 
 ### 13.3 Render the second print-size personalized design
 

@@ -94,9 +94,10 @@ Goal: graduate exact-size print candidates into vendor-qualified deliverables
 without changing the approved composition.
 
 Implemented POC baseline (2026-08-31): named profiles define preview and print
-canvases plus print-contract metadata; `pawmarvel-upscale` accepts explicit
-manual or pipeline artifact paths and performs exact-canvas layer scaling,
-`layout-print.json` derivation, source-alpha preservation, and bundle hashing;
+canvases plus print-contract metadata; `pawmarvel-upscale-template` prepares
+reusable art/layout once and `pawmarvel-upscale-pet` prepares each customer
+cutout against that immutable geometry, with exact-canvas scaling,
+source-alpha preservation, and separate checksum manifests;
 the renderer verifies the bundle/profile and creates an exact-size final-review
 manifest. Formal preview approval is deliberately deferred. This still produces
 print *candidates*, not vendor-qualified deliverables.

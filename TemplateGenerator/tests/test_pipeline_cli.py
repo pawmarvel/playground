@@ -480,12 +480,19 @@ class PipelineCliTests(unittest.TestCase):
             "print_art",
             "print_transformed_pet",
             "print_layout",
-            "print_manifest",
+            "template_print_manifest",
+            "print_pet_manifest",
             "final_print",
             "final_print_debug",
             "bundle",
         ):
             self.assertTrue(outputs[key].exists(), key)
+        self.assertEqual(
+            outputs["template_print_manifest"].name,
+            "template-print-manifest.json",
+        )
+        self.assertEqual(outputs["print_pet_manifest"].name, "pet-print-manifest.json")
+        self.assertFalse((print_dir / "print-manifest.json").exists())
         with Image.open(outputs["final_print"]) as final:
             self.assertEqual(final.size, (1600, 2400))
             self.assertAlmostEqual(final.info["dpi"][0], 300, delta=1)
