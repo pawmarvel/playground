@@ -49,8 +49,8 @@ Potential capabilities:
 - Evaluate AI-generated pet-name PNGs as an alternative to deterministic font
   rendering, including spelling reliability, isolated lettering extraction,
   transparent-background quality, long-name handling, and approval criteria.
-  The experimental commands already present in the repository are not part of
-  the current MVP acceptance flow.
+  No implementation remains in the MVP repository; reintroduce it only after
+  the font-rendered workflow is validated and there is evidence it is needed.
 - Foreground masks and controlled occlusion.
 - Multiple representative-pet fixtures and name-length test cases.
 - A pet-prompt evaluation set spanning breeds, coat lengths, colors, markings,

@@ -32,14 +32,6 @@
     "transformed_pet": {
       "width": 816,
       "height": 816
-    },
-    "name_standard": {
-      "width": 1440,
-      "height": 480
-    },
-    "name_long": {
-      "width": 2016,
-      "height": 672
     }
   },
   "geometry": {
@@ -56,14 +48,6 @@
       "transformed_pet": {
         "width": 9562,
         "height": 9562
-      },
-      "name_standard": {
-        "width": 16875,
-        "height": 5625
-      },
-      "name_long": {
-        "width": 23625,
-        "height": 7875
       }
     }
   }

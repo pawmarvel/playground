@@ -24,7 +24,7 @@ from .font_catalog import FontCandidate, FontCatalogError, discover_font_catalog
 from .expanded_font_catalog import ExpandedFontCatalogError, materialize_expanded_fonts
 from .font_license import resolve_ofl_license
 from .font_match import rank_fonts
-from .renderer import RenderError, render_with_layout, validate_name_image
+from .renderer import RenderError, render_with_layout
 
 
 MAX_REQUEST_BYTES = 1024 * 1024
@@ -65,7 +65,6 @@ class EditorConfig:
     font_license: Path | None = None
     font_catalogs: tuple[Path, ...] = ()
     runtime_model: str | None = "gpt-image-2"
-    name_image: Path | None = None
     force: bool = False
     auto_font: bool = False
     font_catalog_mode: str = "local"
@@ -100,9 +99,6 @@ def _validate_editor_config(
             path.expanduser().resolve() for path in config.font_catalogs
         ),
         runtime_model=config.runtime_model,
-        name_image=(
-            config.name_image.expanduser().resolve() if config.name_image else None
-        ),
         force=config.force,
         auto_font=auto_font,
         font_catalog_mode=config.font_catalog_mode,
@@ -120,13 +116,6 @@ def _validate_editor_config(
             raise ConfigError(f"{label} does not exist: {path}")
     if not resolved.pet_name:
         raise ConfigError("pet name must not be empty")
-    if resolved.name_image is not None:
-        if not resolved.name_image.is_file():
-            raise ConfigError(f"name image does not exist: {resolved.name_image}")
-        try:
-            validate_name_image(resolved.name_image)
-        except RenderError as exc:
-            raise ConfigError(str(exc)) from exc
     if resolved.output.name != "layout.json":
         raise ConfigError("--output must end with layout.json")
     try:
@@ -336,7 +325,6 @@ def _make_handler(
         "layout": initial_layout,
         "canvas": canvas,
         "petName": config.pet_name,
-        "nameMode": "image" if config.name_image else "font",
         "referenceDataUrl": _data_url(config.reference),
         "selectedFontId": selected_candidate.candidate_id,
         "fontCandidates": [
@@ -450,7 +438,6 @@ def _make_handler(
                         layout,
                         config.pet,
                         config.pet_name,
-                        name_image=config.name_image,
                     )
                     self._send(HTTPStatus.OK, "image/png", _png_bytes(preview))
                     return
@@ -466,7 +453,6 @@ def _make_handler(
                     layout,
                     config.pet,
                     config.pet_name,
-                    name_image=config.name_image,
                     debug=True,
                 )
                 bundled_font = config.template_dir / selected_font.relative_name
@@ -512,7 +498,6 @@ def _make_handler(
                     "font_id": selected_font.candidate_id,
                     "font_label": selected_font.label,
                     "font_recommendation": str(recommendation_output),
-                    "name_mode": "image" if config.name_image else "font",
                 }
                 self._send(
                     HTTPStatus.OK,

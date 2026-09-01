@@ -23,11 +23,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pet", type=Path, required=True)
     parser.add_argument("--pet-name", required=True)
     parser.add_argument(
-        "--name-image",
-        type=Path,
-        help="future-extension name PNG experiment; MVP defaults to font preview",
-    )
-    parser.add_argument(
         "--font", type=Path,
         help="explicit OFL font override; omit to auto-match from --font-catalog",
     )
@@ -95,7 +90,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "gpt-image-2" if args.runtime_model == "gpt-image-2" else None
                 ),
                 output=args.output,
-                name_image=args.name_image,
                 force=args.force,
             ),
             port=args.port,

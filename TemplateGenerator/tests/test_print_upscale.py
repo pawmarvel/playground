@@ -39,7 +39,6 @@ class PrintUpscaleTests(unittest.TestCase):
             json.dumps(layout_data()), encoding="utf-8"
         )
         self.pet = make_transparent_mark(self.root / "transformed-pet.png", size=(80, 60))
-        self.name = make_transparent_mark(self.root / "name.png", size=(100, 40))
         self.output = self.root / "print"
 
     def tearDown(self) -> None:
@@ -50,21 +49,17 @@ class PrintUpscaleTests(unittest.TestCase):
         self.assertEqual(parse_target_size("400*600"), (400, 600))
         self.assertEqual(parse_target_size("400×600"), (400, 600))
 
-    def test_prepares_scaled_bundle_with_optional_name(self) -> None:
+    def test_prepares_scaled_bundle(self) -> None:
         outputs = prepare_print_assets(
             template_dir=self.template,
             transformed_pet=self.pet,
-            name_image=self.name,
             target_size=(400, 600),
             output_dir=self.output,
         )
-        self.assertEqual(outputs.name, self.output.resolve() / "name-print.png")
         with Image.open(outputs.art) as image:
             self.assertEqual(image.size, (400, 600))
         with Image.open(outputs.pet) as image:
             self.assertEqual(image.size, (160, 120))
-        with Image.open(outputs.name) as image:
-            self.assertEqual(image.size, (200, 80))
 
         layout = load_layout(self.output, layout_path=outputs.layout)
         self.assertEqual(layout.art_relative, "art-print.png")
@@ -88,17 +83,6 @@ class PrintUpscaleTests(unittest.TestCase):
             manifest["print"]["layer_dimensions"]["pet"],
             {"width": 160, "height": 120},
         )
-        self.assertIsNotNone(manifest["output_sha256"]["name_image"])
-
-    def test_name_is_optional(self) -> None:
-        outputs = prepare_print_assets(
-            template_dir=self.template,
-            transformed_pet=self.pet,
-            target_size=(400, 600),
-            output_dir=self.output,
-        )
-        self.assertIsNone(outputs.name)
-        self.assertFalse((self.output / "name-print.png").exists())
 
     def test_template_and_pet_can_be_upscaled_independently(self) -> None:
         template_outputs = prepare_print_template(
@@ -148,19 +132,6 @@ class PrintUpscaleTests(unittest.TestCase):
                 print_layout_path=template_outputs.layout,
                 output_dir=self.root / "customer-print",
             )
-
-    def test_force_without_name_removes_stale_optional_name(self) -> None:
-        self.output.mkdir()
-        stale = self.output / "name-print.png"
-        stale.write_bytes(b"stale")
-        prepare_print_assets(
-            template_dir=self.template,
-            transformed_pet=self.pet,
-            target_size=(400, 600),
-            output_dir=self.output,
-            force=True,
-        )
-        self.assertFalse(stale.exists())
 
     def test_fractional_scale_uses_scaled_edges(self) -> None:
         outputs = prepare_print_assets(
@@ -253,7 +224,6 @@ class PrintUpscaleTests(unittest.TestCase):
         outputs = prepare_print_assets(
             template_dir=self.template,
             transformed_pet=self.pet,
-            name_image=self.name,
             target_size=(400, 600),
             output_dir=self.output,
         )
@@ -264,7 +234,6 @@ class PrintUpscaleTests(unittest.TestCase):
             layout_path=outputs.layout,
             pet_image=outputs.pet,
             pet_name="BUDDY",
-            name_image=outputs.name,
             output=final,
             debug_output=debug,
         )

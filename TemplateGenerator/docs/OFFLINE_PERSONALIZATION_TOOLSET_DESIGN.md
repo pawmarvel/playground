@@ -79,7 +79,7 @@ The POC succeeds when an operator can:
 - Cross-resolution visual scoring.
 - Production queues, databases, services, or customer accounts.
 - Automatic pet-relative shadow reconstruction.
-- AI-generated pet-name images in the main flow.
+- AI-generated pet-name images; the MVP contains no implementation for this path.
 
 ## 5. Repository asset organization
 
@@ -445,7 +445,6 @@ src/pawmarvel_generator/
   upscale_cli.py         # legacy combined coordinator
   bundle.py              # clean bundle validation/publication
   bundle_cli.py          # bundle command
-  name_prompt_cli.py     # deferred AI-name experiment
   config.py              # layout parsing/validation
 ```
 
@@ -482,10 +481,3 @@ All API clients are mocked in the default suite.
 - Final output matches the product profile's exact print dimensions.
 - Bundle output passes its strict allowlist, contains both prompt contract files,
   and contains no customer source data.
-
-## 19. Future extension: AI pet-name images
-
-The implemented name-image experiment may continue to reuse the `name.box` in
-`layout.json`, but it remains outside the main MVP. If adopted later, its prompt
-and constraints should follow the same reviewed, design-owned source principle
-rather than creating untracked prompt drift.

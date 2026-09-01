@@ -13,7 +13,6 @@ dependencies = ["openai>=2.48.0,<3", "Pillow"]
 [project.scripts]
 pawmarvel-generate = "pawmarvel_generator.cli:main"
 pawmarvel-layout-config = "pawmarvel_generator.layout_cli:main"
-pawmarvel-name-prompt = "pawmarvel_generator.name_prompt_cli:main"
 pawmarvel-render = "pawmarvel_generator.render_cli:main"
 pawmarvel-poc-run = "pawmarvel_generator.poc_runner:main"
 pawmarvel-pipeline = "pawmarvel_generator.pipeline_cli:main"

@@ -209,7 +209,6 @@ class ManualPrintFlowTests(unittest.TestCase):
                 template_dir=self.root / "print",
                 layout_path=outputs.layout,
                 transformed_pet=outputs.pet,
-                name_image=None,
                 product_profile=outputs.product_profile,
             )
 
@@ -223,7 +222,6 @@ class ManualPrintFlowTests(unittest.TestCase):
                 template_dir=self.root / "print",
                 layout_path=outputs.layout,
                 transformed_pet=outputs.pet,
-                name_image=None,
                 product_profile=outputs.product_profile,
             )
 

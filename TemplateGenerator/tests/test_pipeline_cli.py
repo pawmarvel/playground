@@ -75,7 +75,7 @@ class PipelineCliTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def args(self, name_method: str = "font", *extra: str) -> argparse.Namespace:
+    def args(self, *extra: str) -> argparse.Namespace:
         return self.parser.parse_args(
             [
                 "--sample-design",
@@ -88,8 +88,6 @@ class PipelineCliTests(unittest.TestCase):
                 str(self.pet),
                 "--pet-name",
                 "SAUSAGE",
-                "--name-method",
-                name_method,
                 "--font",
                 str(self.font),
                 "--template-dir",
@@ -145,7 +143,6 @@ class PipelineCliTests(unittest.TestCase):
         ):
             self.assertTrue(outputs[key].is_file(), key)
         record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
-        self.assertEqual(record["name_generation"]["method"], "font")
         self.assertEqual(record["pipeline"]["pet_name"], "SAUSAGE")
         self.assertEqual(record["pipeline"]["runtime_model"], "gpt-image-2")
         self.assertIsNotNone(record["artifact_sha256"]["font"])
@@ -159,25 +156,6 @@ class PipelineCliTests(unittest.TestCase):
             [Path(file.name).name for file in client.images.calls[1]["image"]],
             ["source-reference-design.png", "input-pet.png"],
         )
-
-    def test_ai_name_pipeline_generates_name_asset(self) -> None:
-        client = CombinedClient()
-
-        outputs = run_pipeline(
-            self.args("ai"), client=client, layout_runner=self.save_layout
-        )
-
-        self.assertEqual(client.images.call_count, 3)
-        self.assertTrue(outputs["generated_name"].is_file())
-        record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
-        self.assertEqual(record["name_generation"]["method"], "ai")
-        self.assertTrue(Path(record["name_generation"]["prompt"]).is_file())
-        name_config = json.loads(
-            (self.template / "name-generation.json").read_text(encoding="utf-8")
-        )
-        self.assertEqual(name_config["style_reference_mode"], "full")
-        with Image.open(self.template / "name-style-reference.png") as reference:
-            self.assertEqual(reference.size, (200, 300))
 
     def test_preflight_stops_before_paid_calls(self) -> None:
         self.run.mkdir()
@@ -197,7 +175,7 @@ class PipelineCliTests(unittest.TestCase):
 
         with self.assertRaisesRegex(PipelineError, "OFL"):
             run_pipeline(
-                self.args("font", "--font-catalog", str(catalog.parent)),
+                self.args("--font-catalog", str(catalog.parent)),
                 client=client,
                 layout_runner=self.save_layout,
             )
@@ -220,7 +198,7 @@ class PipelineCliTests(unittest.TestCase):
             self.fail("art-only rerun must not open the layout editor")
 
         outputs = run_pipeline(
-            self.args("font", "--rerun-step", "art"),
+            self.args("--rerun-step", "art"),
             client=client,
             layout_runner=unexpected_layout,
         )
@@ -238,7 +216,7 @@ class PipelineCliTests(unittest.TestCase):
         rejected_client = CombinedClient()
         with self.assertRaisesRegex(PipelineError, "include --rerun-step pet"):
             run_pipeline(
-                self.args("font", "--rerun-step", "art"),
+                self.args("--rerun-step", "art"),
                 client=rejected_client,
                 layout_runner=unexpected_layout,
             )
@@ -252,7 +230,7 @@ class PipelineCliTests(unittest.TestCase):
             (self.template / "art.png").read_bytes()
         ).hexdigest()
         replacement = make_image(self.root / "replacement-pet.png", size=(96, 72))
-        rerun = self.args("font", "--rerun-step", "pet")
+        rerun = self.args("--rerun-step", "pet")
         rerun.pet_image = replacement
         client = CombinedClient()
 
@@ -282,7 +260,7 @@ class PipelineCliTests(unittest.TestCase):
             self.save_layout(config, **kwargs)
 
         outputs = run_pipeline(
-            self.args("font", "--rerun-step", "layout"),
+            self.args("--rerun-step", "layout"),
             client=client,
             layout_runner=save_again,
         )
@@ -296,7 +274,7 @@ class PipelineCliTests(unittest.TestCase):
         client = CombinedClient()
         with self.assertRaisesRegex(PipelineError, "existing pipeline manifest"):
             run_pipeline(
-                self.args("font", "--rerun-step", "art"),
+                self.args("--rerun-step", "art"),
                 client=client,
                 layout_runner=self.save_layout,
             )
@@ -304,14 +282,14 @@ class PipelineCliTests(unittest.TestCase):
 
         with self.assertRaisesRegex(PipelineError, "cannot be combined"):
             run_pipeline(
-                self.args("font", "--rerun-step", "art", "--force"),
+                self.args("--rerun-step", "art", "--force"),
                 client=client,
                 layout_runner=self.save_layout,
             )
 
     def test_dry_run_only_prints_plan(self) -> None:
         outputs = run_pipeline(
-            self.args("font", "--dry-run"),
+            self.args("--dry-run"),
             client=CombinedClient(),
             layout_runner=self.save_layout,
         )
@@ -362,7 +340,6 @@ class PipelineCliTests(unittest.TestCase):
             "--pet-prompt", str(self.pet_prompt),
             "--pet-image", str(self.pet),
             "--pet-name", "SAUSAGE",
-            "--name-method", "font",
             "--font", str(self.font),
             "--template-dir", str(self.template),
             "--run-dir", str(self.run),
@@ -455,7 +432,6 @@ class PipelineCliTests(unittest.TestCase):
                 "--pet-prompt", str(self.pet_prompt),
                 "--pet-image", str(self.pet),
                 "--pet-name", "SAUSAGE",
-                "--name-method", "font",
                 "--font", str(self.font),
                 "--template-dir", str(self.template),
                 "--run-dir", str(self.run),
@@ -544,7 +520,6 @@ class PipelineCliTests(unittest.TestCase):
     def test_bundle_publication_requires_product_profile_before_paid_calls(self) -> None:
         client = CombinedClient()
         args = self.args(
-            "font",
             "--template-id", "life-is-good",
             "--bundle-output-dir", str(self.root / "bundles"),
         )

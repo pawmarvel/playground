@@ -36,8 +36,6 @@ class ProductProfile:
     print_size: ImageSize
     preview_art_size: ImageSize
     preview_pet_size: ImageSize
-    preview_name_standard_size: ImageSize
-    preview_name_long_size: ImageSize
     preview_target_long_edge: int
     reference_fit: str
     print_spec: Mapping[str, Any]
@@ -54,20 +52,6 @@ class ProductProfile:
                 "width": max(1, round(self.preview_pet_size.width * self.scale)),
                 "height": max(1, round(self.preview_pet_size.height * self.scale)),
             },
-            "name_standard": {
-                "width": max(
-                    1, round(self.preview_name_standard_size.width * self.scale)
-                ),
-                "height": max(
-                    1, round(self.preview_name_standard_size.height * self.scale)
-                ),
-            },
-            "name_long": {
-                "width": max(1, round(self.preview_name_long_size.width * self.scale)),
-                "height": max(
-                    1, round(self.preview_name_long_size.height * self.scale)
-                ),
-            },
         }
         return {
             "schema_version": 1,
@@ -81,8 +65,6 @@ class ProductProfile:
                 "reference_fit": self.reference_fit,
                 "art": self.preview_art_size.to_dict(),
                 "transformed_pet": self.preview_pet_size.to_dict(),
-                "name_standard": self.preview_name_standard_size.to_dict(),
-                "name_long": self.preview_name_long_size.to_dict(),
             },
             "geometry": {
                 "aspect_ratio": {
@@ -160,20 +142,6 @@ def _closest_square(target_edge: int) -> ImageSize:
     return min(candidates, key=lambda value: abs(value.width - target_edge))
 
 
-def _name_size(target_height: int) -> ImageSize:
-    candidates: list[ImageSize] = []
-    for height in range(GPT_IMAGE_2_EDGE_MULTIPLE, GPT_IMAGE_2_MAX_EDGE + 1, 16):
-        candidate = ImageSize(height * 3, height)
-        if candidate.width > GPT_IMAGE_2_MAX_EDGE:
-            break
-        try:
-            validate_gpt_image_2_size(candidate, "derived name size")
-        except ImageSizeError:
-            continue
-        candidates.append(candidate)
-    return min(candidates, key=lambda value: abs(value.height - target_height))
-
-
 def create_product_profile(
     *,
     profile_id: str,
@@ -214,8 +182,6 @@ def create_product_profile(
             "print canvas must be larger than the derived preview canvas in both axes"
         )
     pet = _closest_square(min(art.width, art.height))
-    standard_name = _name_size(480)
-    long_name = _name_size(round(480 * math.sqrt(2)))
     physical_size = (
         {
             "width": print_size.width / dpi,
@@ -248,8 +214,6 @@ def create_product_profile(
         print_size=print_size,
         preview_art_size=art,
         preview_pet_size=pet,
-        preview_name_standard_size=standard_name,
-        preview_name_long_size=long_name,
         preview_target_long_edge=preview_target_long_edge,
         reference_fit=reference_fit,
         print_spec=print_spec,
@@ -296,13 +260,9 @@ def load_product_profile(path: Path) -> ProductProfile:
     print_size = _size_from_mapping(print_data.get("canvas"), "print.canvas")
     art = _size_from_mapping(preview.get("art"), "preview.art")
     pet = _size_from_mapping(preview.get("transformed_pet"), "preview.transformed_pet")
-    standard_name = _size_from_mapping(preview.get("name_standard"), "preview.name_standard")
-    long_name = _size_from_mapping(preview.get("name_long"), "preview.name_long")
     for label, size in (
         ("preview.art", art),
         ("preview.transformed_pet", pet),
-        ("preview.name_standard", standard_name),
-        ("preview.name_long", long_name),
     ):
         try:
             validate_gpt_image_2_size(size, label)
@@ -411,8 +371,6 @@ def load_product_profile(path: Path) -> ProductProfile:
         print_size=print_size,
         preview_art_size=art,
         preview_pet_size=pet,
-        preview_name_standard_size=standard_name,
-        preview_name_long_size=long_name,
         preview_target_long_edge=target,
         reference_fit=reference_fit,
         print_spec=print_spec,

@@ -23,7 +23,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--layout", type=Path)
     parser.add_argument("--print-layout", type=Path, required=True)
     parser.add_argument("--transformed-pet", type=Path, required=True)
-    parser.add_argument("--name-image", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
         "--backend", choices=("deterministic", "bria"), default="deterministic"
@@ -41,7 +40,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "layout": str(args.layout.expanduser().resolve()) if args.layout else None,
         "print_layout": str(args.print_layout.expanduser().resolve()),
         "transformed_pet": str(args.transformed_pet.expanduser().resolve()),
-        "name_image": str(args.name_image.expanduser().resolve()) if args.name_image else None,
         "output_dir": str(args.output_dir.expanduser().resolve()),
         "backend": args.backend,
     }
@@ -53,7 +51,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             layout_path=args.layout,
             print_layout_path=args.print_layout,
             transformed_pet=args.transformed_pet,
-            name_image=args.name_image,
             output_dir=args.output_dir,
             backend=args.backend,
             bria_token_file=args.bria_api_key_file,

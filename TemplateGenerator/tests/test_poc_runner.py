@@ -6,8 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
-
 from helpers import (
     FakeClient,
     copy_font,
@@ -41,21 +39,17 @@ class PocRunnerTests(unittest.TestCase):
         )
         self.pet = make_image(self.root / "pet.png")
         self.reference = make_image(self.root / "reference.png")
-        self.name_image = make_transparent_mark(self.root / "name.png")
         self.key = self.root / "OPENAI_API_KEY.rtf"
         self.key.write_text("sk-test_1234567890abcdefghij", encoding="utf-8")
 
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def args(
-        self, *, force: bool = False, name_image: Path | None = None
-    ) -> argparse.Namespace:
+    def args(self, *, force: bool = False) -> argparse.Namespace:
         return argparse.Namespace(
             template_dir=self.template,
             pet_image=self.pet,
             pet_name="BUDDY",
-            name_image=name_image,
             api_key_file=self.key,
             output_dir=None,
             model="gpt-image-2",
@@ -87,25 +81,9 @@ class PocRunnerTests(unittest.TestCase):
             run_poc(self.args(), client=client)
         self.assertEqual(client.images.call_count, 0)
 
-    def test_uses_pre_generated_name_image(self) -> None:
-        client = FakeClient()
-        _, final, _ = run_poc(
-            self.args(name_image=self.name_image), client=client
-        )
-        self.assertEqual(client.images.call_count, 1)
-        with Image.open(final) as image:
-            self.assertEqual(image.getpixel((100, 215))[:3], (0, 255, 0))
-
-    def test_invalid_name_image_fails_before_paid_call(self) -> None:
-        client = FakeClient()
-        missing = self.root / "missing-name.png"
-        with self.assertRaisesRegex(UserInputError, "name image does not exist"):
-            run_poc(self.args(name_image=missing), client=client)
-        self.assertEqual(client.images.call_count, 0)
-
     def test_reuses_supplied_transformed_pet_without_paid_call(self) -> None:
         transformed = make_transparent_mark(self.root / "approved-transformed.png")
-        args = self.args(name_image=self.name_image)
+        args = self.args()
         args.pet_image = None
         args.transformed_pet = transformed
         args.layout = self.template / "layout.json"

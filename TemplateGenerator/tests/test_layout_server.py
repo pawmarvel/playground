@@ -7,7 +7,7 @@ import unittest
 import urllib.request
 from pathlib import Path
 
-from helpers import copy_font, layout_data, make_image, make_transparent_mark
+from helpers import copy_font, layout_data, make_image
 from pawmarvel_generator.font_catalog import discover_font_catalog
 from pawmarvel_generator.layout_server import EditorConfig, create_server
 
@@ -25,7 +25,6 @@ class LayoutServerTests(unittest.TestCase):
         self.pet = make_image(
             self.root / "pet.png", size=(80, 80), color=(200, 100, 50, 255)
         )
-        self.name_image = make_transparent_mark(self.root / "name.png")
         external = self.root / "external"
         external.mkdir()
         self.font = copy_font(external)
@@ -43,7 +42,6 @@ class LayoutServerTests(unittest.TestCase):
                 font=self.font,
                 font_catalogs=(self.font_catalog,),
                 output=self.output,
-                name_image=self.name_image,
             )
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -70,7 +68,6 @@ class LayoutServerTests(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/") as response:
             html = response.read()
             self.assertIn(b"PawMarvel Layout Configurator", html)
-            self.assertIn(b'"nameMode": "image"', html)
             self.assertIn(b'"fontCandidates"', html)
             self.assertIn(b"Amatic SC Bold", html)
             self.assertIn(b"Save &amp; continue", html)
@@ -99,7 +96,6 @@ class LayoutServerTests(unittest.TestCase):
         self.assertTrue((self.root / "fonts" / "OFL.txt").is_file())
         self.assertEqual(json.loads(self.output.read_text())["model"], "gpt-image-2")
         self.assertTrue((self.root / "qa" / "calibration-preview.png").is_file())
-        self.assertEqual(saved["name_mode"], "image")
 
     def test_selected_catalog_font_is_previewed_and_saved(self) -> None:
         selected = next(

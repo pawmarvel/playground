@@ -12,7 +12,7 @@ from typing import Any, Sequence
 
 from .cli import UserInputError, generate
 from .config import ConfigError, load_layout
-from .renderer import RenderError, render_to_files, validate_name_image
+from .renderer import RenderError, render_to_files
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,11 +36,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="reuse an approved transformed pet and skip the paid image API call",
     )
     parser.add_argument("--pet-name", required=True)
-    parser.add_argument(
-        "--name-image",
-        type=Path,
-        help="future-extension name PNG experiment; MVP defaults to font rendering",
-    )
     parser.add_argument("--api-key-file", type=Path)
     parser.add_argument(
         "--reference-design",
@@ -72,10 +67,6 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
     )
     layout_arg = getattr(args, "layout", None)
     layout_path = layout_arg.expanduser().resolve() if layout_arg else None
-    name_image_arg = getattr(args, "name_image", None)
-    name_image = (
-        name_image_arg.expanduser().resolve() if name_image_arg is not None else None
-    )
     output_dir = (
         args.output_dir.expanduser().resolve()
         if args.output_dir
@@ -110,13 +101,6 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
             )
     if not args.pet_name.strip():
         raise UserInputError("pet name must not be empty")
-    if name_image is not None:
-        if not name_image.is_file():
-            raise UserInputError(f"name image does not exist: {name_image}")
-        try:
-            validate_name_image(name_image)
-        except RenderError as exc:
-            raise UserInputError(str(exc)) from exc
     targets = (
         (final, debug)
         if supplied_transformed is not None
@@ -137,8 +121,6 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
         ),
         "pet_source_mode": "reuse" if supplied_transformed else "generate",
         "pet_name": args.pet_name,
-        "name_image": str(name_image) if name_image else None,
-        "name_rendering": "image" if name_image else "font",
         "prompt_file": str(prompt_file) if supplied_transformed is None else None,
         "reference_design": (
             str(reference_design) if supplied_transformed is None else None
@@ -177,7 +159,6 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
         template_dir=template_dir,
         pet_image=generated,
         pet_name=args.pet_name,
-        name_image=name_image,
         output=final,
         debug_output=debug,
         layout_path=layout_path,

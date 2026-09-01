@@ -30,11 +30,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--transformed-pet", type=Path, required=True)
     parser.add_argument(
-        "--name-image",
-        type=Path,
-        help="future-extension name PNG; omitted in the MVP flow",
-    )
-    parser.add_argument(
         "--target-size",
         help="exact print canvas; defaults to the product profile",
     )
@@ -73,9 +68,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             else template_dir / "layout.json"
         )
         transformed_pet = args.transformed_pet.expanduser().resolve()
-        name_image = (
-            args.name_image.expanduser().resolve() if args.name_image else None
-        )
         profile_path = (
             args.product_profile.expanduser().resolve() if args.product_profile else None
         )
@@ -102,7 +94,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "template_dir": str(template_dir),
             "layout": str(layout),
             "transformed_pet": str(transformed_pet),
-            "name_image": str(name_image) if name_image else None,
             "product_profile": str(profile_path) if profile_path else None,
             "target_size": {"width": target_size[0], "height": target_size[1]},
             "output_dir": str(args.output_dir.expanduser().resolve()),
@@ -139,7 +130,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             template_dir=template_dir,
             layout_path=layout,
             transformed_pet=transformed_pet,
-            name_image=name_image,
             target_size=target_size,
             output_dir=args.output_dir,
             backend=args.backend,

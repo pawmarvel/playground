@@ -14,7 +14,7 @@ ALPHA_THRESHOLD = 8
 
 
 class RenderError(ValueError):
-    """A pet, text, or generated-name input cannot be rendered."""
+    """A pet or text input cannot be rendered."""
 
 
 def _open_rgba(source: Path | BinaryIO, label: str) -> Image.Image:
@@ -38,34 +38,6 @@ def _trim_visible(image: Image.Image, label: str) -> Image.Image:
     return image.crop(_visible_bounds(image, label))
 
 
-def _open_name_image(source: Path | BinaryIO) -> Image.Image:
-    try:
-        with Image.open(source) as image:
-            image.load()
-            if image.format != "PNG":
-                raise RenderError("name image must be a PNG")
-            if "A" not in image.getbands() and "transparency" not in image.info:
-                raise RenderError("name image must contain an alpha channel")
-            rgba = image.convert("RGBA")
-    except RenderError:
-        raise
-    except (FileNotFoundError, UnidentifiedImageError, OSError) as exc:
-        raise RenderError(f"name image is not a readable image: {source}") from exc
-
-    alpha_min, _ = rgba.getchannel("A").getextrema()
-    if alpha_min > ALPHA_THRESHOLD:
-        raise RenderError("name image must contain a transparent background")
-    _visible_bounds(rgba, "name image")
-    return rgba
-
-
-def validate_name_image(source: Path | BinaryIO) -> tuple[int, int]:
-    """Validate a generated name asset and return its visible alpha dimensions."""
-    image = _open_name_image(source)
-    left, top, right, bottom = _visible_bounds(image, "name image")
-    return right - left, bottom - top
-
-
 def _fit_contain(image: Image.Image, box: Rect) -> Image.Image:
     scale = min(box.width / image.width, box.height / image.height)
     width = max(1, round(image.width * scale))
@@ -85,31 +57,6 @@ def _place_pet(canvas: Image.Image, pet: Image.Image, layout: Layout) -> tuple[i
     y = layout.pet_box.y + layout.pet_box.height - pet.height
     canvas.alpha_composite(pet, (x, y))
     return x, y, x + pet.width, y + pet.height
-
-
-def _place_name_image(
-    canvas: Image.Image, name_image: Image.Image, layout: Layout
-) -> tuple[int, int, int, int]:
-    name_image = _fit_contain(
-        _trim_visible(name_image, "name image"), layout.name_box
-    )
-    box = layout.name_box
-    if layout.horizontal_align == "left":
-        x = box.x
-    elif layout.horizontal_align == "right":
-        x = box.right - name_image.width
-    else:
-        x = box.x + (box.width - name_image.width) // 2
-
-    if layout.vertical_align == "top":
-        y = box.y
-    elif layout.vertical_align == "bottom":
-        y = box.bottom - name_image.height
-    else:
-        y = box.y + (box.height - name_image.height) // 2
-
-    canvas.alpha_composite(name_image, (x, y))
-    return x, y, x + name_image.width, y + name_image.height
 
 
 def _text_bbox(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont) -> tuple[int, int, int, int]:
@@ -181,7 +128,6 @@ def render_with_layout(
     pet_image: Path | BinaryIO,
     pet_name: str,
     *,
-    name_image: Path | BinaryIO | None = None,
     debug: bool = False,
 ) -> Image.Image:
     pet_name = pet_name.strip()
@@ -194,15 +140,9 @@ def render_with_layout(
     pet_bounds = _place_pet(canvas, pet, layout)
 
     draw = ImageDraw.Draw(canvas)
-    rendered_name_bounds: tuple[int, int, int, int] | None = None
-    if name_image is not None:
-        rendered_name_bounds = _place_name_image(
-            canvas, _open_name_image(name_image), layout
-        )
-    else:
-        font, text_bounds = _select_font(draw, pet_name, layout)
-        text_origin = _aligned_text_origin(layout, text_bounds)
-        draw.text(text_origin, pet_name, font=font, fill=_parse_rgba(layout.color))
+    font, text_bounds = _select_font(draw, pet_name, layout)
+    text_origin = _aligned_text_origin(layout, text_bounds)
+    draw.text(text_origin, pet_name, font=font, fill=_parse_rgba(layout.color))
 
     if debug:
         draw = ImageDraw.Draw(canvas)
@@ -217,12 +157,6 @@ def render_with_layout(
             outline=(64, 192, 255, 255),
             width=2,
         )
-        if rendered_name_bounds:
-            draw.rectangle(
-                rendered_name_bounds,
-                outline=(64, 255, 128, 255),
-                width=2,
-            )
     return canvas
 
 
@@ -242,13 +176,10 @@ def render_preview(
     pet_image: Path | BinaryIO,
     pet_name: str,
     *,
-    name_image: Path | BinaryIO | None = None,
     layout_path: Path | None = None,
 ) -> bytes:
     layout = load_layout(template_dir, layout_path=layout_path)
-    return _png_bytes(
-        render_with_layout(layout, pet_image, pet_name, name_image=name_image)
-    )
+    return _png_bytes(render_with_layout(layout, pet_image, pet_name))
 
 
 def render_to_files(
@@ -256,7 +187,6 @@ def render_to_files(
     template_dir: Path,
     pet_image: Path,
     pet_name: str,
-    name_image: Path | None = None,
     output: Path,
     debug_output: Path | None = None,
     layout_path: Path | None = None,
@@ -275,15 +205,11 @@ def render_to_files(
         )
 
     layout = load_layout(template_dir, layout_path=layout_path)
-    final_image = render_with_layout(
-        layout, pet_image, pet_name, name_image=name_image
-    )
+    final_image = render_with_layout(layout, pet_image, pet_name)
     _atomic_write_bytes(output, _png_bytes(final_image, dpi=png_dpi))
     final_image.close()
     if debug_output:
-        debug_image = render_with_layout(
-            layout, pet_image, pet_name, name_image=name_image, debug=True
-        )
+        debug_image = render_with_layout(layout, pet_image, pet_name, debug=True)
         _atomic_write_bytes(debug_output, _png_bytes(debug_image, dpi=png_dpi))
         debug_image.close()
     return output, debug_output

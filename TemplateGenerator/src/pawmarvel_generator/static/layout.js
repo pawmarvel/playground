@@ -6,11 +6,9 @@ const canvas = document.querySelector("#preview");
 const context = canvas.getContext("2d");
 const statusNode = document.querySelector("#status");
 const reference = document.querySelector("#reference");
-const nameMode = document.querySelector("#name-mode");
 reference.src = boot.referenceDataUrl;
-nameMode.textContent = boot.nameMode === "image"
-  ? "Preview source: generated name image. Font size and color controls are inactive."
-  : "Preview source: configured font. Production chooses the largest fitting size and ink-centers vertically.";
+document.querySelector("#name-mode").textContent =
+  "Preview source: configured font. Production chooses the largest fitting size and ink-centers vertically.";
 canvas.width = boot.canvas.width;
 canvas.height = boot.canvas.height;
 
@@ -51,7 +49,6 @@ function buildFontCatalog() {
     button.className = "font-candidate";
     button.dataset.fontId = candidate.id;
     button.setAttribute("aria-pressed", candidate.id === selectedFontId ? "true" : "false");
-    button.disabled = boot.nameMode === "image";
     const label = document.createElement("strong");
     label.textContent = showRank ? `#${candidate.rank} ${candidate.label}` : candidate.label;
     if (candidate.recommended) label.textContent += " — recommended";
@@ -172,7 +169,6 @@ colorLabel.textContent = "Text color";
 const colorInput = document.createElement("input");
 colorInput.type = "color";
 colorInput.value = state.name.color.slice(0, 7);
-colorInput.disabled = boot.nameMode === "image";
 colorInput.addEventListener("input", () => { state.name.color = `${colorInput.value}FF`; schedulePreview(); });
 colorLabel.append(colorInput);
 document.querySelector("#name-controls").append(colorLabel);

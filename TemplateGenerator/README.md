@@ -11,8 +11,6 @@ The MVP provides:
   preview-art or transformed-pet size from `product-profile.json`.
 - `pawmarvel-layout-config`: localhost visual editor for `layout.json`, using
   deterministic font-name preview in the MVP.
-- `pawmarvel-name-prompt`: implemented experimental support for a future
-  AI-generated name-image extension; excluded from the MVP workflow.
 - `pawmarvel-render`: deterministic Pillow composition of art, pet, and a
   font-rendered name in the MVP.
 - `pawmarvel-poc-run`: one-command pet transformation and final preview test.
@@ -25,9 +23,8 @@ The MVP provides:
   bind it to approved print geometry.
 - `pawmarvel-upscale`: backward-compatible coordinator for both operations.
 - `pawmarvel-product-profile`: derive reusable, exact-aspect preview art and pet
-  dimensions plus reserved future name-image dimensions from a product print
-  canvas; optional screenshot normalization is diagnostic only and is not used
-  by the pipeline.
+  dimensions from a product print canvas; optional screenshot normalization is
+  diagnostic only and is not used by the pipeline.
 - `pawmarvel-bundle`: publish a clean, OFL-licensed template bundle containing
   low-resolution web art/layout, high-resolution print art/layout, one finished
   design reference, both design-specific prompts, and a representative
@@ -58,7 +55,6 @@ python3 -m venv .venv
 ```bash
 .venv/bin/pawmarvel-generate --help
 .venv/bin/pawmarvel-layout-config --help
-.venv/bin/pawmarvel-name-prompt --help
 .venv/bin/pawmarvel-render --help
 .venv/bin/pawmarvel-poc-run --help
 .venv/bin/pawmarvel-pipeline --help
@@ -69,9 +65,9 @@ python3 -m venv .venv
 .venv/bin/pawmarvel-bundle --help
 ```
 
-Tool 1 reads the API key from `--api-key-file` or `OPENAI_API_KEY`. The layout,
-name-prompt, and render tools work offline. The POC runner calls Tool 1 once and
-the renderer once.
+Tool 1 reads the API key from `--api-key-file` or `OPENAI_API_KEY`. The layout
+and render tools work offline. The POC runner calls Tool 1 once and the renderer
+once.
 It can instead reuse `--transformed-pet` with an explicit `--layout`, which is
 the no-generation path used to inspect a prepared print bundle.
 
@@ -81,13 +77,12 @@ design's pet prompt plus exactly one finished reference, waits for the local
 layout editor to be saved and closed, then renders a preview/debug pair and
 can continue through print upscaling, print rendering, bundle publication, and
 `run.json` provenance. It makes image API calls only; it does not derive prompts
-through a text model. Use the default `--name-method font` for the MVP. Supply
+through a text model. Pet names are always rendered with the bundled font. Supply
 `--template-id` with `--bundle-output-dir` to enable the complete publication
 path; this mode requires a product profile. The command otherwise requires
 either `--product-profile` (recommended) or the legacy
 `--art-resolution WIDTHxHEIGHT`. A profile derives the preview art, transformed
-pet, reserved future name-image, and print dimensions rather than trusting
-screenshot pixels.
+pet, and print dimensions rather than trusting screenshot pixels.
 
 After a successful run, repeat the same command with `--rerun-step art`,
 `--rerun-step pet`, or `--rerun-step layout` to replace only that authoring
@@ -129,10 +124,6 @@ cache, validates both the TTF and OFL 1.1 license, and ranks them with the local
 fallback catalog. Only the operator-confirmed font is copied into the template
 and bundle. `--font-offline` prohibits downloads and uses cached plus local
 candidates.
-
-AI-generated name images remain implemented only for future experimentation.
-They are documented in Appendix A of the operations guide and are not part of
-MVP template acceptance or print preparation.
 
 ## Tests
 

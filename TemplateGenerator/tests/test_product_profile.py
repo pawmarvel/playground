@@ -34,8 +34,6 @@ class ProductProfileTests(unittest.TestCase):
         )
         self.assertEqual(profile.preview_art_size, ImageSize(800, 1056))
         self.assertEqual(profile.preview_pet_size, ImageSize(816, 816))
-        self.assertEqual(profile.preview_name_standard_size, ImageSize(1440, 480))
-        self.assertEqual(profile.preview_name_long_size, ImageSize(2016, 672))
         self.assertEqual(profile.scale, 11.71875)
         self.assertEqual(profile.print_spec["physical_size"]["width"], 31.25)
         self.assertEqual(profile.reference_fit, "contain")

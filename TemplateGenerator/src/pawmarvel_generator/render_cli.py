@@ -43,11 +43,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--pet", type=Path, required=True, help="transformed pet PNG")
     parser.add_argument("--pet-name", required=True)
-    parser.add_argument(
-        "--name-image",
-        type=Path,
-        help="future-extension name PNG experiment; MVP defaults to font rendering",
-    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--debug-output", type=Path)
     parser.add_argument(
@@ -72,10 +67,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         "layout": str(args.layout.expanduser().resolve()) if args.layout else None,
         "pet": str(args.pet.expanduser().resolve()),
         "pet_name": args.pet_name,
-        "name_image": (
-            str(args.name_image.expanduser().resolve()) if args.name_image else None
-        ),
-        "name_rendering": "image" if args.name_image else "font",
         "output": str(args.output.expanduser().resolve()),
         "debug_output": (
             str(args.debug_output.expanduser().resolve()) if args.debug_output else None
@@ -105,7 +96,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 template_dir=args.template_dir,
                 layout_path=layout_path,
                 transformed_pet=args.pet,
-                name_image=args.name_image,
                 product_profile=args.product_profile,
             )
             manifest_output = (
@@ -123,7 +113,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             template_dir=args.template_dir,
             pet_image=args.pet,
             pet_name=args.pet_name,
-            name_image=args.name_image,
             output=args.output,
             debug_output=args.debug_output,
             layout_path=args.layout,
@@ -148,11 +137,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "inputs_sha256": {
                     "art": _sha256(args.template_dir.expanduser().resolve() / "art-print.png"),
                     "transformed_pet": _sha256(args.pet.expanduser().resolve()),
-                    "name_image": (
-                        _sha256(args.name_image.expanduser().resolve())
-                        if args.name_image
-                        else None
-                    ),
                     "layout": _sha256(
                         args.layout.expanduser().resolve()
                         if args.layout

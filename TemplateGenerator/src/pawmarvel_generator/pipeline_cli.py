@@ -29,7 +29,6 @@ from .expanded_font_catalog import ExpandedFontCatalogError, materialize_expande
 from .font_license import FontLicenseError, resolve_ofl_license
 from .image_size import ImageSizeError, validate_generation_size
 from .layout_server import EditorConfig, serve_layout_editor
-from .name_prompt_cli import NamePromptError, configure, create_prompt
 from .product_profile import (
     ProductProfile,
     ProductProfileError,
@@ -73,15 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--pet-image", type=Path, required=True)
     parser.add_argument("--pet-name", required=True)
-    parser.add_argument(
-        "--name-method",
-        choices=("font", "ai"),
-        default="font",
-        help=(
-            "font is the supported MVP path; ai enables the future-extension "
-            "experiment (default: font)"
-        ),
-    )
     parser.add_argument(
         "--font", type=Path,
         help="explicit OFL font override; omit to auto-match from --font-catalog",
@@ -327,7 +317,6 @@ def run_pipeline(
     run_art = full_run or "art" in rerun_steps
     run_pet = full_run or "pet" in rerun_steps
     run_layout = full_run or "layout" in rerun_steps
-    run_name = args.name_method == "ai" and (full_run or "layout" in rerun_steps)
     replace_outputs = args.force or selective_rerun
     font_catalogs = tuple(
         path.expanduser().resolve() for path in getattr(args, "font_catalog", [])
@@ -492,18 +481,6 @@ def run_pipeline(
         planned.extend([final_print, final_print_debug])
         if bundle_path is not None:
             planned.append(bundle_path)
-    if args.name_method == "ai":
-        planned.extend(
-            [
-                template_dir / "name-generation.json",
-                template_dir / "name-prompt-template.md",
-                template_dir / "name-style-reference.png",
-                template_dir / "qa" / "name-slot-debug.png",
-                run_dir / f"name-{_slug(pet_name)}.md",
-                run_dir / f"name-{_slug(pet_name)}.request.json",
-                run_dir / "generated-name.png",
-            ]
-        )
     if args.layout_mode == "interactive":
         planned.extend(
             [
@@ -556,7 +533,6 @@ def run_pipeline(
                 profile.print_size.api_value() if profile is not None else None,
             ),
             ("runtime_model", args.runtime_model),
-            ("name_method", args.name_method),
         ):
             if previous_plan.get(key) != current:
                 raise PipelineError(
@@ -599,9 +575,6 @@ def run_pipeline(
                 "existing layout runtime model does not match --runtime-model"
             )
 
-    if selective_rerun and args.name_method == "ai" and not run_name:
-        _validate_image(run_dir / "generated-name.png", "existing generated name")
-
     if full_run:
         existing = [path for path in planned if path.exists()]
         if bundle_requested and print_dir.is_dir() and any(print_dir.iterdir()):
@@ -612,7 +585,7 @@ def run_pipeline(
                 "(pass --force to replace pipeline outputs)"
             )
 
-    needs_image_client = run_art or run_pet or run_name
+    needs_image_client = run_art or run_pet
     plan = {
         "run_mode": "selective-rerun" if selective_rerun else "full",
         "rerun_steps": list(rerun_steps),
@@ -624,7 +597,6 @@ def run_pipeline(
         "pet_prompt": str(pet_prompt_source),
         "pet_image": str(pet_source),
         "pet_name": pet_name,
-        "name_method": args.name_method,
         "font": str(font) if explicit_font else None,
         "font_license": str(font_license) if explicit_font else None,
         "font_selection": "explicit" if explicit_font else "reference_visual_match_v1",
@@ -683,8 +655,6 @@ def run_pipeline(
             if args.layout_mode == "interactive"
             else "Reuse existing layout"
         )
-    if run_name:
-        stage_labels.append("Create layout-aware AI name prompt")
     stage_labels.append("Render final preview and debug overlay")
     if bundle_requested:
         stage_labels.extend(
@@ -787,65 +757,11 @@ def run_pipeline(
     except FontLicenseError as exc:
         raise PipelineError(str(exc)) from exc
 
-    name_image: Path | None = None
-    name_outputs: dict[str, Any] | None = None
-    if run_name:
-        announce("Create layout-aware AI name prompt")
-        configure(
-            argparse.Namespace(
-                sample_design=source_reference,
-                art=art,
-                layout=layout_path,
-                output_dir=template_dir,
-                min_characters=2,
-                max_characters_advisory=15,
-                min_natural_width_ratio=0.20,
-                min_font_scale_ratio=0.60,
-                long_name_scale_threshold=0.80,
-                crop_padding_ratio=0.0,
-                style_reference_mode="full",
-                product_profile=staged_profile if profile is not None else None,
-                force=replace_outputs,
-            )
-        )
-        name_prompt = run_dir / f"name-{_slug(pet_name)}.md"
-        name_request = run_dir / f"name-{_slug(pet_name)}.request.json"
-        name_outputs = create_prompt(
-            argparse.Namespace(
-                config=template_dir / "name-generation.json",
-                pet_name=pet_name,
-                output=name_prompt,
-                request_output=name_request,
-                force=replace_outputs,
-            )
-        )
-        params = name_outputs["api_parameters"]
-        name_image = run_dir / "generated-name.png"
-        generate(
-            _generation_args(
-                sample_design=name_outputs["style_reference"],
-                pet_image=None,
-                prompt_file=name_outputs["prompt"],
-                api_key_file=args.api_key_file,
-                output_dir=run_dir,
-                output_name=name_image.name,
-                model=str(params["model"]),
-                size=str(params["size"]),
-                quality=str(params["quality"]),
-                background=str(params["background"]),
-                force=replace_outputs,
-            ),
-            client=client,
-        )
-    elif args.name_method == "ai":
-        name_image = run_dir / "generated-name.png"
-
     announce("Render final preview and debug overlay")
     render_to_files(
         template_dir=template_dir,
         pet_image=transformed_pet,
         pet_name=pet_name,
-        name_image=name_image,
         output=preview,
         debug_output=preview_debug,
         force=replace_outputs,
@@ -873,7 +789,6 @@ def run_pipeline(
             layout_path=layout_path,
             print_layout_path=template_print_outputs.layout,
             transformed_pet=transformed_pet,
-            name_image=name_image,
             output_dir=print_dir,
             backend=args.upscale_backend,
             bria_token_file=args.bria_api_key_file,
@@ -883,7 +798,6 @@ def run_pipeline(
         print_outputs = PrintOutputs(
             art=template_print_outputs.art,
             pet=pet_print_outputs.pet,
-            name=pet_print_outputs.name,
             layout=template_print_outputs.layout,
             manifest=template_print_outputs.manifest,
             product_profile=template_print_outputs.product_profile,
@@ -895,7 +809,6 @@ def run_pipeline(
             layout_path=print_outputs.layout,
             pet_image=print_outputs.pet,
             pet_name=pet_name,
-            name_image=print_outputs.name,
             output=final_print,
             debug_output=final_print_debug,
             png_dpi=(
@@ -935,7 +848,6 @@ def run_pipeline(
         "layout": str(layout_path),
         "layout_snapshot": str(layout_snapshot),
         "transformed_pet": str(transformed_pet),
-        "generated_name": str(name_image) if name_image else None,
         "preview": str(preview),
         "preview_debug": str(preview_debug),
         "product_profile": str(staged_profile) if profile is not None else None,
@@ -943,11 +855,6 @@ def run_pipeline(
         "font_license": str(active_font_license),
         "print_art": str(print_outputs.art) if print_outputs else None,
         "print_transformed_pet": str(print_outputs.pet) if print_outputs else None,
-        "print_name": (
-            str(print_outputs.name)
-            if print_outputs is not None and print_outputs.name is not None
-            else None
-        ),
         "print_layout": str(print_outputs.layout) if print_outputs else None,
         "template_print_manifest": (
             str(print_outputs.manifest) if print_outputs else None
@@ -986,20 +893,6 @@ def run_pipeline(
                 "role": "visual-context-only-not-layout-geometry",
             },
         },
-        "name_generation": (
-            {
-                "method": "ai",
-                "prompt": str(name_outputs["prompt"]),
-                "request": str(name_outputs["request"]),
-                "validation": name_outputs["validation"],
-            }
-            if name_outputs is not None
-            else (
-                {"method": "ai", "reused": True, "asset": str(name_image)}
-                if name_image is not None
-                else {"method": "font"}
-            )
-        ),
         "publication": (
             {
                 "bundle": str(published_bundle),
@@ -1028,7 +921,6 @@ def run_pipeline(
         "preview_debug": preview_debug,
         "layout_snapshot": layout_snapshot,
         "manifest": manifest,
-        **({"generated_name": name_image} if name_image is not None else {}),
     }
     if print_outputs is not None and published_bundle is not None:
         outputs.update(
@@ -1044,8 +936,6 @@ def run_pipeline(
                 "bundle": published_bundle,
             }
         )
-        if print_outputs.name is not None:
-            outputs["print_name"] = print_outputs.name
     return outputs
 
 
@@ -1057,7 +947,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         PipelineError,
         UserInputError,
-        NamePromptError,
         ProductProfileError,
         PrintUpscaleError,
         BundleError,

@@ -54,7 +54,6 @@ Confirm the installed commands:
 ```bash
 .venv/bin/pawmarvel-generate --help
 .venv/bin/pawmarvel-layout-config --help
-.venv/bin/pawmarvel-name-prompt --help
 .venv/bin/pawmarvel-render --help
 .venv/bin/pawmarvel-poc-run --help
 .venv/bin/pawmarvel-pipeline --help
@@ -132,7 +131,6 @@ pawmarvel_pipeline_debug() {
     --pet-prompt "$PAWMARVEL_PET_PROMPT" \
     --pet-image "$PAWMARVEL_PET" \
     --pet-name "SAUSAGE" \
-    --name-method font \
     --product-profile "$PAWMARVEL_PROFILE" \
     --font "$PAWMARVEL_FONT" \
     --font-license "$PAWMARVEL_FONT_LICENSE" \
@@ -235,9 +233,9 @@ those publication flags when only a low-resolution preview refresh is needed.
 
 Selective reruns require the current `run.json` and unchanged reusable
 prerequisites. The command rejects an unselected changed prompt/input, a
-different reference design, product profile, layer dimensions, runtime model,
-or name method before making an API call. Include the corresponding rerun step
-for a changed art prompt, pet prompt, or pet input. A layout-only rerun makes no
+different reference design, product profile, layer dimensions, or runtime model
+before making an API call. Include the corresponding rerun step for a changed
+art prompt, pet prompt, or pet input. A layout-only rerun makes no
 image API call and does not require an OpenAI API key. Do not combine
 `--rerun-step` with `--force`: the selected rerun is already scoped permission
 to replace its stage and downstream outputs. Use a full run in a new working
@@ -424,7 +422,6 @@ PAWMARVEL_CHARLIE_RUN="$PAWMARVEL_CHARLIE_TEMPLATE/runs/sausage-dog-puppy"
   --pet-prompt "$PAWMARVEL_PROJECT/examples/charlie-well-trained/pet-transform.md" \
   --pet-image "$PAWMARVEL_PROJECT/examples/pet-inputs/sausage-dog-puppy.png" \
   --pet-name "SAUSAGE" \
-  --name-method font \
   --product-profile "$PAWMARVEL_PROFILE" \
   --font-catalog "$PAWMARVEL_FONT_CATALOG" \
   --template-dir "$PAWMARVEL_CHARLIE_TEMPLATE" \
@@ -720,12 +717,3 @@ reference-guided transformation and renders the preview:
 When rendering an already transformed preview or print layer, use
 `--transformed-pet` instead of `--pet-image`; reference and prompt inputs are
 then unnecessary because no image API call occurs.
-
-## Appendix B: Future extension — AI-generated pet-name images
-
-AI name-image support remains outside the main MVP flow. `pawmarvel-name-prompt`
-can still configure a layout-aware name style and create a per-name request,
-and `pawmarvel-generate` can generate that transparent PNG. The renderer and
-layout editor accept it through `--name-image`. This extension reuses the same
-name box in `layout.json`; it does not change the required finished-design plus
-user-pet contract for pet transformation.

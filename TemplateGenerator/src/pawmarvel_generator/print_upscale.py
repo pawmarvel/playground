@@ -28,7 +28,6 @@ from .renderer import ALPHA_THRESHOLD
 TARGET_SIZE_PATTERN = re.compile(r"^\s*(\d+)\s*[xX*×]\s*(\d+)\s*$")
 PRINT_ART_NAME = "art-print.png"
 PRINT_PET_NAME = "transformed-pet-print.png"
-PRINT_NAME_NAME = "name-print.png"
 PRINT_LAYOUT_NAME = "layout-print.json"
 PRINT_MANIFEST_NAME = "print-manifest.json"
 TEMPLATE_PRINT_MANIFEST_NAME = "template-print-manifest.json"
@@ -52,13 +51,10 @@ class PrintOutputs:
     pet: Path
     layout: Path
     manifest: Path
-    name: Path | None = None
     product_profile: Path | None = None
 
     def paths(self) -> tuple[Path, ...]:
         values = [self.art, self.pet]
-        if self.name is not None:
-            values.append(self.name)
         if self.product_profile is not None:
             values.append(self.product_profile)
         values.extend((self.layout, self.manifest))
@@ -87,12 +83,9 @@ class PetPrintOutputs:
 
     pet: Path
     manifest: Path
-    name: Path | None = None
 
     def paths(self) -> tuple[Path, ...]:
         values = [self.pet]
-        if self.name is not None:
-            values.append(self.name)
         values.append(self.manifest)
         return tuple(values)
 
@@ -332,7 +325,6 @@ def verify_print_bundle(
     template_dir: Path,
     layout_path: Path,
     transformed_pet: Path,
-    name_image: Path | None,
     product_profile: Path,
 ) -> Path:
     """Verify that every final-render input belongs to one prepared upscale run."""
@@ -343,7 +335,6 @@ def verify_print_bundle(
             root=root,
             layout_path=layout_path.expanduser().resolve(),
             transformed_pet=transformed_pet.expanduser().resolve(),
-            name_image=name_image.expanduser().resolve() if name_image else None,
             product_profile=product_profile.expanduser().resolve(),
         )
     manifest = _load_print_manifest(manifest_path)
@@ -355,11 +346,6 @@ def verify_print_bundle(
     expected_paths: dict[str, Path | None] = {
         "art": root / str(print_data.get("art")),
         "transformed_pet": root / str(print_data.get("transformed_pet")),
-        "name_image": (
-            root / str(print_data.get("name_image"))
-            if print_data.get("name_image") is not None
-            else None
-        ),
         "layout": root / str(print_data.get("layout")),
         "font": root / str(print_data.get("font")),
         "font_license": root / str(print_data.get("font_license")),
@@ -368,7 +354,6 @@ def verify_print_bundle(
     supplied_paths: dict[str, Path | None] = {
         "art": root / PRINT_ART_NAME,
         "transformed_pet": transformed_pet.expanduser().resolve(),
-        "name_image": name_image.expanduser().resolve() if name_image else None,
         "layout": layout_path.expanduser().resolve(),
         "font": expected_paths["font"],
         "font_license": expected_paths["font_license"],
@@ -402,7 +387,6 @@ def _verify_split_print_bundle(
     root: Path,
     layout_path: Path,
     transformed_pet: Path,
-    name_image: Path | None,
     product_profile: Path,
 ) -> Path:
     template_manifest_path = root / TEMPLATE_PRINT_MANIFEST_NAME
@@ -451,26 +435,12 @@ def _verify_split_print_bundle(
     assert isinstance(pet_hashes, Mapping)
     assert isinstance(binding, Mapping)
     expected_pet = pet_manifest_path.parent / str(pet_print.get("transformed_pet"))
-    expected_name = (
-        pet_manifest_path.parent / str(pet_print.get("name_image"))
-        if pet_print.get("name_image") is not None
-        else None
-    )
     if expected_pet.resolve() != transformed_pet or not transformed_pet.is_file():
         raise PrintUpscaleError(
             "final render transformed_pet is not the prepared pet-print artifact"
         )
     if _file_sha256(transformed_pet) != pet_hashes.get("transformed_pet"):
         raise PrintUpscaleError("pet-print artifact changed after upscale: transformed_pet")
-    if (expected_name is None) != (name_image is None):
-        raise PrintUpscaleError("final render name_image does not match the pet-print manifest")
-    if expected_name is not None and name_image is not None:
-        if expected_name.resolve() != name_image or not name_image.is_file():
-            raise PrintUpscaleError(
-                "final render name_image is not the prepared pet-print artifact"
-            )
-        if _file_sha256(name_image) != pet_hashes.get("name_image"):
-            raise PrintUpscaleError("pet-print artifact changed after upscale: name_image")
     binding_checks = {
         "print_layout_sha256": _file_sha256(layout_path),
         "print_art_sha256": _file_sha256(root / PRINT_ART_NAME),
@@ -746,7 +716,6 @@ def prepare_print_pet(
     print_layout_path: Path,
     output_dir: Path,
     layout_path: Path | None = None,
-    name_image: Path | None = None,
     backend: str = "deterministic",
     bria_token_file: Path | None = None,
     force: bool = False,
@@ -758,44 +727,27 @@ def prepare_print_pet(
     print_layout_path = print_layout_path.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     layout_path = layout_path.expanduser().resolve() if layout_path else None
-    name_image = name_image.expanduser().resolve() if name_image else None
     preview = load_layout(template_dir, layout_path=layout_path)
     print_layout = load_layout(print_layout_path.parent, layout_path=print_layout_path)
     scale = _assert_scaled_layout(preview, print_layout)
 
     pet_source = _open_image(transformed_pet, "transformed pet")
     _validate_cutout(pet_source, "transformed pet")
-    name_source = _open_image(name_image, "name image") if name_image else None
-    if name_source is not None:
-        _validate_cutout(name_source, "name image")
     bria_increase, provider = _upscale_provider(
         backend=backend,
         scale=scale,
-        sources=[pet_source] + ([name_source] if name_source is not None else []),
+        sources=[pet_source],
         bria_token_file=bria_token_file,
         bria_provider=bria_provider,
     )
-    optional_name_output = output_dir / PRINT_NAME_NAME
     outputs = PetPrintOutputs(
         pet=output_dir / PRINT_PET_NAME,
-        name=optional_name_output if name_source is not None else None,
         manifest=output_dir / PET_PRINT_MANIFEST_NAME,
     )
-    _reject_existing(
-        list(outputs.paths()) + ([] if outputs.name else [optional_name_output]),
-        force=force,
-    )
+    _reject_existing(list(outputs.paths()), force=force)
     pet_size = (
         max(1, round(pet_source.width * scale)),
         max(1, round(pet_source.height * scale)),
-    )
-    name_size = (
-        (
-            max(1, round(name_source.width * scale)),
-            max(1, round(name_source.height * scale)),
-        )
-        if name_source is not None
-        else None
     )
     pet_bytes = _render_upscaled_layer(
         label="pet",
@@ -806,29 +758,13 @@ def prepare_print_pet(
         bria_increase=bria_increase,
         provider=provider,
     )
-    name_bytes = (
-        _render_upscaled_layer(
-            label="name",
-            source=name_source,
-            size=name_size,
-            cutout=True,
-            backend=backend,
-            bria_increase=bria_increase,
-            provider=provider,
-        )
-        if name_source is not None and name_size is not None
-        else None
-    )
     source_layout = layout_path or template_dir / "layout.json"
     manifest = {
         "schema_version": 1,
         "artifact_kind": "pet-print",
         "backend": backend,
         "bria_desired_increase": bria_increase,
-        "source": {
-            "transformed_pet": str(transformed_pet),
-            "name_image": str(name_image) if name_image else None,
-        },
+        "source": {"transformed_pet": str(transformed_pet)},
         "template_binding": {
             "preview_layout": str(source_layout),
             "print_layout": str(print_layout_path),
@@ -844,32 +780,20 @@ def prepare_print_pet(
         },
         "print": {
             "transformed_pet": PRINT_PET_NAME,
-            "name_image": PRINT_NAME_NAME if name_bytes is not None else None,
             "layer_dimensions": {
                 "pet": {"width": pet_size[0], "height": pet_size[1]},
-                **(
-                    {"name": {"width": name_size[0], "height": name_size[1]}}
-                    if name_size is not None
-                    else {}
-                ),
             },
         },
         "alpha_policy": "source alpha scaled deterministically; visible cutout bounds preserved",
         "source_sha256": {
             "transformed_pet": _file_sha256(transformed_pet),
-            "name_image": _file_sha256(name_image) if name_image else None,
         },
         "output_sha256": {
             "transformed_pet": _sha256(pet_bytes),
-            "name_image": _sha256(name_bytes) if name_bytes is not None else None,
         },
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     _atomic_write_bytes(outputs.pet, pet_bytes)
-    if outputs.name is not None and name_bytes is not None:
-        _atomic_write_bytes(outputs.name, name_bytes)
-    elif force:
-        optional_name_output.unlink(missing_ok=True)
     _atomic_write_bytes(
         outputs.manifest, (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
     )
@@ -883,7 +807,6 @@ def prepare_print_assets(
     target_size: tuple[int, int],
     output_dir: Path,
     layout_path: Path | None = None,
-    name_image: Path | None = None,
     backend: str = "deterministic",
     bria_token_file: Path | None = None,
     product_profile: Path | None = None,
@@ -894,7 +817,6 @@ def prepare_print_assets(
     transformed_pet = transformed_pet.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     layout_path = layout_path.expanduser().resolve() if layout_path else None
-    name_image = name_image.expanduser().resolve() if name_image else None
     product_profile = (
         product_profile.expanduser().resolve() if product_profile else None
     )
@@ -923,15 +845,9 @@ def prepare_print_assets(
     art_source = _open_image(layout.art_path, "art")
     pet_source = _open_image(transformed_pet, "transformed pet")
     _validate_cutout(pet_source, "transformed pet")
-    name_source = _open_image(name_image, "name image") if name_image else None
-    if name_source is not None:
-        _validate_cutout(name_source, "name image")
-
-    optional_name_output = output_dir / PRINT_NAME_NAME
     outputs = PrintOutputs(
         art=output_dir / PRINT_ART_NAME,
         pet=output_dir / PRINT_PET_NAME,
-        name=optional_name_output if name_source is not None else None,
         layout=output_dir / PRINT_LAYOUT_NAME,
         manifest=output_dir / PRINT_MANIFEST_NAME,
         product_profile=(output_dir / PRINT_PROFILE_NAME if product_profile else None),
@@ -939,8 +855,6 @@ def prepare_print_assets(
     font_output = output_dir / layout.font_relative
     font_license_output = font_output.parent / "OFL.txt"
     targets = list(outputs.paths()) + [font_output, font_license_output]
-    if outputs.name is None:
-        targets.append(optional_name_output)
     if len(set(targets)) != len(targets):
         raise PrintUpscaleError("print output paths collide with the configured font path")
     existing = [path for path in targets if path.exists()]
@@ -956,12 +870,6 @@ def prepare_print_assets(
             max(1, round(pet_source.height * scale)),
         ),
     }
-    if name_source is not None:
-        layer_sizes["name"] = (
-            max(1, round(name_source.width * scale)),
-            max(1, round(name_source.height * scale)),
-        )
-
     if backend not in {"deterministic", "bria"}:
         raise PrintUpscaleError("backend must be deterministic or bria")
     bria_increase: int | None = None
@@ -969,8 +877,6 @@ def prepare_print_assets(
     if backend == "bria":
         bria_increase = 2 if scale <= 2 else 4
         bria_sources = [art_source, pet_source]
-        if name_source is not None:
-            bria_sources.append(name_source)
         oversized = next(
             (
                 source
@@ -992,8 +898,6 @@ def prepare_print_assets(
 
     sources = [("art", art_source, False)]
     sources.append(("pet", pet_source, True))
-    if name_source is not None:
-        sources.append(("name", name_source, True))
 
     rendered: dict[str, bytes] = {}
     for label, source, cutout in sources:
@@ -1061,7 +965,6 @@ def prepare_print_assets(
             "layout": str(layout_path or template_dir / "layout.json"),
             "art": str(layout.art_path),
             "transformed_pet": str(transformed_pet),
-            "name_image": str(name_image) if name_image else None,
             "canvas": {"width": layout.canvas_width, "height": layout.canvas_height},
         },
         "print": {
@@ -1069,7 +972,6 @@ def prepare_print_assets(
             "scale": scale,
             "art": PRINT_ART_NAME,
             "transformed_pet": PRINT_PET_NAME,
-            "name_image": PRINT_NAME_NAME if name_source is not None else None,
             "layout": PRINT_LAYOUT_NAME,
             "font": layout.font_relative,
             "font_license": "fonts/OFL.txt",
@@ -1082,7 +984,6 @@ def prepare_print_assets(
         "source_sha256": {
             "art": _file_sha256(layout.art_path),
             "transformed_pet": _file_sha256(transformed_pet),
-            "name_image": _file_sha256(name_image) if name_image else None,
             "layout": _file_sha256(layout_path or template_dir / "layout.json"),
             "font": _file_sha256(layout.font_path),
             "font_license": _file_sha256(font_license),
@@ -1091,7 +992,6 @@ def prepare_print_assets(
         "output_sha256": {
             "art": _sha256(rendered["art"]),
             "transformed_pet": _sha256(rendered["pet"]),
-            "name_image": _sha256(rendered["name"]) if "name" in rendered else None,
             "layout": _sha256(layout_bytes),
             "font": _file_sha256(layout.font_path),
             "font_license": _file_sha256(font_license),
@@ -1103,10 +1003,6 @@ def prepare_print_assets(
     output_dir.mkdir(parents=True, exist_ok=True)
     _atomic_write_bytes(outputs.art, rendered["art"])
     _atomic_write_bytes(outputs.pet, rendered["pet"])
-    if outputs.name is not None:
-        _atomic_write_bytes(outputs.name, rendered["name"])
-    elif force:
-        optional_name_output.unlink(missing_ok=True)
     _atomic_write_bytes(outputs.layout, layout_bytes)
     _atomic_write_bytes(outputs.manifest, manifest_bytes)
     if outputs.product_profile is not None and product_profile is not None:
