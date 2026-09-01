@@ -60,7 +60,7 @@ class CliTests(unittest.TestCase):
         request = client.images.kwargs
         self.assertEqual(
             [Path(file.name).name for file in request["image"]],
-            ["template.png", "pet.png"],
+            ["pet.png", "template.png"],
         )
         self.assertIn("USER PET", request["prompt"])
         self.assertIn("REFERENCE DESIGN", request["prompt"])
@@ -106,7 +106,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(output.name, "pet.png")
         self.assertIn("USER PET", client.images.kwargs["prompt"])
 
-    def test_accepts_ordered_repeated_references_before_pet(self) -> None:
+    def test_accepts_ordered_repeated_references_after_pet(self) -> None:
         second = make_image(self.root / "second.png")
         client = FakeClient()
         args = self.args(
@@ -118,7 +118,7 @@ class CliTests(unittest.TestCase):
         generate(args, client=client)
         self.assertEqual(
             [Path(file.name).name for file in client.images.kwargs["image"]],
-            ["template.png", "second.png", "pet.png"],
+            ["pet.png", "template.png", "second.png"],
         )
         self.assertIn(
             "ADDITIONAL REFERENCE DESIGNS", client.images.kwargs["prompt"]

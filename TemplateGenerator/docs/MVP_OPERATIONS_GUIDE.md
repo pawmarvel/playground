@@ -14,10 +14,10 @@ examples/<design>/art-template.md
 examples/<design>/pet-transform.md
 ```
 
-Every new pet transformation sends exactly two images to GPT Image 2:
+Every new pet transformation sends exactly two ordered images to GPT Image 2:
 
-1. one finished design reference, used for pose, expression, crop, and style;
-2. the user pet, used only for identity.
+1. the user pet, used only for identity;
+2. one finished design reference, used for pose, expression, crop, and style.
 
 ## 1. Repository example inputs
 
@@ -303,11 +303,11 @@ together instead:
 pawmarvel_pipeline_debug --rerun-step art --rerun-step layout
 ```
 
-## 7. Generate the transformed pet from two images
+## 7. Generate the transformed pet from ordered images
 
 This is the required MVP pet-transformation contract. To match the shared
-prompt's `IMAGE A`/`IMAGE B` definitions, `pawmarvel-generate` sends the finished
-design first and the user pet second regardless of CLI flag order.
+prompt's definitions, `pawmarvel-generate` sends the user pet as `IMAGE A` and
+the finished design as `IMAGE B` regardless of CLI flag order.
 
 ```bash
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \

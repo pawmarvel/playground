@@ -69,7 +69,7 @@ class PocRunnerTests(unittest.TestCase):
         self.assertTrue(debug.is_file())
         self.assertEqual(
             [Path(file.name).name for file in client.images.kwargs["image"]],
-            ["reference.png", "pet.png"],
+            ["pet.png", "reference.png"],
         )
 
     def test_preflight_prevents_paid_call_when_output_exists(self) -> None:

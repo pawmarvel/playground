@@ -27,11 +27,11 @@ does not make a multimodal text-model call, derive prompts, or copy prompt
 variants into mutable working directories. Bundle publication copies the exact
 two reviewed sources into the immutable template contract.
 
-Every pet-transformation image request has exactly this input contract:
+Every pet-transformation image request has exactly this ordered input contract:
 
-1. `REFERENCE DESIGN` / `IMAGE A`: one finished design image providing pet
-   pose, expression, crop, composition, and rendering style.
-2. `USER PET` / `IMAGE B`: the second image and sole identity source.
+1. `USER PET` / `IMAGE A`: the first image and sole identity source.
+2. `REFERENCE DESIGN` / `IMAGE B`: the authoritative finished design
+   providing pet pose, expression, crop, composition, and rendering style.
 3. The design's `pet-transform.md` text prompt.
 
 The reference pet must never replace the user's pet identity. Additional style
@@ -159,17 +159,17 @@ pawmarvel-generate \
   --output-format png
 ```
 
-For the combined request, Tool 1 sends the finished reference first and user pet
-second regardless of CLI flag order, matching the design prompt's Image A/Image
-B contract. Its injected wrapper identifies the first as treatment-only and the
-second as identity-only. It prints resolved inputs
+For the combined request, Tool 1 sends the user pet first and the finished
+reference second regardless of CLI flag order, matching the design prompt's
+Image A/Image B contract. Its injected wrapper identifies the first as
+identity-only and the second as treatment-only. It prints resolved inputs
 and API parameters without logging prompt contents or credentials, emits a
 progress heartbeat, validates output dimensions/format/alpha, and refuses
 overwrite without `--force`.
 
-The general command may retain repeatable `--sample-design` for loose
-experiments, but the pipeline and POC runner enforce exactly one finished
-reference for customer-pet transformation.
+The general `pawmarvel-generate` command retains repeatable `--sample-design`
+for loose experiments. The pipeline and POC runner enforce exactly one finished
+reference for the MVP customer-pet transformation contract.
 
 ## 8. Tool 2 — `pawmarvel-layout-config`
 
@@ -455,7 +455,7 @@ There is no text-model prompt-authoring command or module.
 
 Unit and integration tests verify:
 
-- Tool 1 reference-first/pet-second request ordering;
+- Tool 1 pet-first/reference-second request ordering;
 - the pipeline makes only two image-generation calls and no Responses call;
 - the profile pipeline reaches print rendering and clean bundle publication;
 - design prompt paths and hashes appear in provenance and exact copies appear
@@ -475,7 +475,8 @@ All API clients are mocked in the default suite.
 - Each design's prompts work acceptably with its checked-in reference.
 - Art output contains only fixed template graphics.
 - Pet output preserves user identity and follows reference pose/style/crop.
-- Exactly one user pet and one finished reference are used for each pet call.
+- Exactly one user pet and one finished reference are used for each pet call;
+  the user pet is always the first API image.
 - Layout and deterministic preview match the intended composition.
 - Print layout is a uniform scale of preview layout.
 - Final output matches the product profile's exact print dimensions.

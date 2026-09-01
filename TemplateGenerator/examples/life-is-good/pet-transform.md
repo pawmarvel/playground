@@ -1,11 +1,11 @@
-You will receive exactly 2 images.
+You will receive exactly 2 images in this fixed order.
 
-IMAGE A = FINISHED DESIGN REFERENCE
-IMAGE B = USER PET PHOTO
+IMAGE A = USER PET PHOTO
+IMAGE B = FINISHED DESIGN REFERENCE
 
 Your task is to generate ONE transformed personalized pet artwork.
 
-The output must depict the EXACT individual pet from Image B, rendered so that it can replace the pet shown in Image A while fitting naturally into the same design system and background template.
+The output must depict the EXACT individual pet from Image A, rendered so that it can replace the pet shown in Image B while fitting naturally into the same design system and background template.
 
 ==================================================
 CORE OBJECTIVE
@@ -13,20 +13,20 @@ CORE OBJECTIVE
 
 Create:
 
-“THE EXACT PET FROM IMAGE B,
-PRESENTED AS IF IT WERE THE PERSONALIZED PET USED IN IMAGE A.”
+“THE EXACT PET FROM IMAGE A,
+PRESENTED AS IF IT WERE THE PERSONALIZED PET USED IN IMAGE B.”
 
 There are two separate responsibilities:
 
-IMAGE B determines:
+IMAGE A determines:
 WHO THE PET IS.
 
-IMAGE A determines:
+IMAGE B determines:
 HOW THAT PET IS PRESENTED.
 
-The transformed pet must preserve the unmistakable identity of the individual pet in Image B while adopting the presentation, pose, crop, expression, visual style, and design treatment of the pet shown in Image A.
+The transformed pet must preserve the unmistakable identity of the individual pet in Image A while adopting the presentation, pose, crop, expression, visual style, and design treatment of the pet shown in Image B.
 
-The result must be suitable for inserting into the same or substantially similar background design template as Image A without requiring the template to be redesigned around the new pet.
+The result must be suitable for inserting into the same or substantially similar background design template as Image B without requiring the template to be redesigned around the new pet.
 
 ==================================================
 PRIORITY HIERARCHY
@@ -53,11 +53,11 @@ then create the closest anatomically natural equivalent of the reference pose, e
 1. USER PET IDENTITY — ABSOLUTE REQUIREMENT
 ==================================================
 
-Image B is the sole identity reference.
+Image A is the sole identity reference.
 
 The transformed result must be an unmistakably recognizable rendition of that exact individual pet.
 
-Preserve the pet-specific characteristics visible in Image B, including whenever applicable:
+Preserve the pet-specific characteristics visible in Image A, including whenever applicable:
 
 - species
 - breed or breed-mix characteristics
@@ -121,7 +121,7 @@ Do not copy the reference pet’s anatomy.
 
 The result must look like:
 
-THE PET FROM IMAGE B,
+THE PET FROM IMAGE A,
 
 not:
 
@@ -129,15 +129,15 @@ A PET OF THE SAME BREED,
 
 and not:
 
-THE PET FROM IMAGE A WITH DIFFERENT COLORS.
+THE PET FROM IMAGE B WITH DIFFERENT COLORS.
 
 ==================================================
 2. REFERENCE IMAGE — PRESENTATION SYSTEM
 ==================================================
 
-Image A defines how the personalized pet should appear inside this design family.
+Image B defines how the personalized pet should appear inside this design family.
 
-Analyze the pet shown in Image A and reproduce its PRESENTATION CHARACTERISTICS using the pet from Image B.
+Analyze the pet shown in Image B and reproduce its PRESENTATION CHARACTERISTICS using the pet from Image A.
 
 Match the reference pet’s:
 
@@ -178,7 +178,7 @@ Match the reference pet’s:
 - dimensionality
 - stylization level
 
-The output pet should occupy approximately the same visual role and spatial footprint as the pet shown in Image A.
+The output pet should occupy approximately the same visual role and spatial footprint as the pet shown in Image B.
 
 ==================================================
 3. TEMPLATE-COMPATIBILITY REQUIREMENT
@@ -202,7 +202,7 @@ Therefore, closely preserve the reference pet’s:
 
 Do NOT simply create an attractive portrait of the user pet.
 
-Create a portrait specifically shaped and composed to function as a replacement personalized asset for Image A.
+Create a portrait specifically shaped and composed to function as a replacement personalized asset for Image B.
 
 If the reference shows:
 
@@ -221,7 +221,7 @@ The transformed pet should be easily interchangeable with the original pet layer
 4. POSE TRANSFER WITH IDENTITY PRESERVATION
 ==================================================
 
-Recreate the reference pet’s pose using the anatomy of the pet in Image B.
+Recreate the reference pet’s pose using the anatomy of the pet in Image A.
 
 Transfer:
 
@@ -290,9 +290,9 @@ The expression should look like the USER PET naturally making the reference expr
 6. ART-STYLE TRANSFER
 ==================================================
 
-Match the visual treatment used for the pet in Image A.
+Match the visual treatment used for the pet in Image B.
 
-Identify the actual treatment from Image A instead of assuming a predefined style.
+Identify the actual treatment from Image B instead of assuming a predefined style.
 
 Transfer characteristics such as:
 
@@ -349,7 +349,7 @@ Do not introduce an unrelated visual style.
 
 Treat the two images as different information sources.
 
-IMAGE A provides:
+IMAGE B provides:
 
 STYLE
 POSE
@@ -359,7 +359,7 @@ COMPOSITION
 VISUAL FOOTPRINT
 DESIGN LANGUAGE
 
-IMAGE B provides:
+IMAGE A provides:
 
 IDENTITY
 ANATOMY
@@ -373,7 +373,7 @@ Do not cross these roles.
 
 Specifically:
 
-DO NOT copy from Image A:
+DO NOT copy from Image B:
 - reference breed identity
 - reference muzzle shape
 - reference skull shape
@@ -382,15 +382,15 @@ DO NOT copy from Image A:
 - reference coat pattern
 - reference body proportions
 
-unless those characteristics independently exist in Image B.
+unless those characteristics independently exist in Image A.
 
 ==================================================
 8. SCREENSHOT / FULL-DESIGN HANDLING
 ==================================================
 
-Image A may be a screenshot or complete finished product design.
+Image B may be a screenshot or complete finished product design.
 
-First identify the pet artwork embedded inside Image A.
+First identify the pet artwork embedded inside Image B.
 
 Use surrounding elements only to understand:
 
@@ -424,11 +424,11 @@ unless one of those elements is physically integrated into the pet artwork itsel
 
 Preserve the user's real pet color and markings unless the reference design intentionally converts the pet into a stylized palette.
 
-If Image A uses natural pet coloration:
-preserve the actual colors of Image B.
+If Image B uses natural pet coloration:
+preserve the actual colors of Image A.
 
-If Image A uses monochrome, duotone, limited-color, posterized, screen-print, or otherwise stylized pet coloration:
-translate the actual features and markings of Image B into the SAME color-rendering system.
+If Image B uses monochrome, duotone, limited-color, posterized, screen-print, or otherwise stylized pet coloration:
+translate the actual features and markings of Image A into the SAME color-rendering system.
 
 Even under heavy stylization, markings must remain identifiable in their correct locations.
 
@@ -536,7 +536,7 @@ Keep:
 - adequate transparent margin
 - reference-compatible scale and silhouette
 
-Do not accidentally crop ears, head, paws, or other elements unless Image A intentionally uses that same cropping behavior.
+Do not accidentally crop ears, head, paws, or other elements unless Image B intentionally uses that same cropping behavior.
 
 ==================================================
 14. CRITICAL FAILURE CONDITIONS
@@ -544,7 +544,7 @@ Do not accidentally crop ears, head, paws, or other elements unless Image A inte
 
 The output is incorrect if:
 
-- the pet no longer unmistakably resembles Image B
+- the pet no longer unmistakably resembles Image A
 - the result looks like a generic version of the breed
 - the output inherits the reference pet’s facial anatomy
 - distinctive markings disappear
@@ -568,10 +568,10 @@ FINAL INTERNAL CHECK
 Before generating, verify:
 
 IDENTITY CHECK:
-Would the owner immediately recognize this as their exact pet from Image B?
+Would the owner immediately recognize this as their exact pet from Image A?
 
 REFERENCE CHECK:
-Does the transformed pet use substantially the same crop, pose, expression, rendering language, and visual footprint as the pet in Image A?
+Does the transformed pet use substantially the same crop, pose, expression, rendering language, and visual footprint as the pet in Image B?
 
 TEMPLATE CHECK:
 Could this transformed pet replace the original personalized pet in the same design template with little or no layout adjustment?
@@ -584,6 +584,6 @@ FINAL DELIVERABLE
 
 Generate one production-ready personalized pet asset:
 
-the unmistakable individual pet from Image B,
-using the crop, pose, facial expression, composition, visual footprint, rendering style, and pet-design language demonstrated by Image A,
+the unmistakable individual pet from Image A,
+using the crop, pose, facial expression, composition, visual footprint, rendering style, and pet-design language demonstrated by Image B,
 so that the resulting asset can naturally replace the reference pet inside the same personalized design template.

@@ -100,8 +100,8 @@ are not confirmed produces a print candidate, not an automatic vendor-ready
 certification.
 
 Design-specific prompts are treated like source code. For pet transformation,
-`pawmarvel-generate` sends one finished design first for pose, expression, crop,
-and style and the customer pet second for identity. Working directories and
+`pawmarvel-generate` sends the customer pet first for identity, then the finished
+design for pose, expression, crop, and style. Working directories and
 published bundles do not carry customer source data; each bundle does carry its
 exact `art-template.md` and `pet-transform.md` contract files.
 

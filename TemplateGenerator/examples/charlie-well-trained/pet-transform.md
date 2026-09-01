@@ -1,7 +1,7 @@
-You will receive exactly 2 images.
+You will receive exactly 2 images in this fixed order.
 
-IMAGE A = FINISHED DESIGN REFERENCE
-IMAGE B = USER PET PHOTO
+IMAGE A = USER PET PHOTO
+IMAGE B = FINISHED DESIGN REFERENCE
 
 Generate exactly ONE transformed personalized pet artwork.
 
@@ -9,15 +9,15 @@ Generate exactly ONE transformed personalized pet artwork.
 CORE RULE
 ==================================================
 
-IMAGE B determines ONLY:
+IMAGE A determines ONLY:
 WHO THE PET IS.
 
-IMAGE A determines:
+IMAGE B determines:
 HOW THE PET IS PRESENTED.
 
-The output must depict the unmistakable individual pet from Image B while STRICTLY reproducing the reference pet's presentation from Image A.
+The output must depict the unmistakable individual pet from Image A while STRICTLY reproducing the reference pet's presentation from Image B.
 
-The user pet's original pose, posture, facial expression, mouth state, tongue state, gaze, or body position in Image B are NOT instructions for the output.
+The user pet's original pose, posture, facial expression, mouth state, tongue state, gaze, or body position in Image A are NOT instructions for the output.
 
 They are only incidental characteristics of the source photograph.
 
@@ -25,7 +25,7 @@ They are only incidental characteristics of the source photograph.
 STRICT ATTRIBUTE SOURCE SEPARATION
 ==================================================
 
-Use IMAGE B ONLY for identity characteristics:
+Use IMAGE A ONLY for identity characteristics:
 
 - species
 - breed / breed-mix characteristics
@@ -46,7 +46,7 @@ Use IMAGE B ONLY for identity characteristics:
 - scars or unique visible identifying traits
 - all other characteristics that make this exact individual pet recognizable
 
-DO NOT inherit from Image B:
+DO NOT inherit from Image A:
 
 - facial expression
 - mouth open / closed state
@@ -63,13 +63,13 @@ DO NOT inherit from Image B:
 - crop
 - composition
 
-These presentation attributes MUST come from Image A.
+These presentation attributes MUST come from Image B.
 
 ==================================================
 REFERENCE PRESENTATION — STRICT REQUIREMENT
 ==================================================
 
-Image A is the authoritative source for the transformed pet's:
+Image B is the authoritative source for the transformed pet's:
 
 - pose
 - posture
@@ -106,11 +106,11 @@ Match these characteristics as closely as anatomically possible.
 FACIAL EXPRESSION LOCK — ABSOLUTE
 ==================================================
 
-The facial expression shown in Image A must be treated as LOCKED.
+The facial expression shown in Image B must be treated as LOCKED.
 
 Reproduce the same expression using the facial anatomy of the user pet.
 
-Explicitly determine from Image A:
+Explicitly determine from Image B:
 
 - eyes open, partially open, or closed
 - gaze direction
@@ -124,11 +124,11 @@ Explicitly determine from Image A:
 
 Then reproduce those states in the transformed user pet.
 
-IMAGE B'S EXPRESSION MUST NOT OVERRIDE IMAGE A.
+IMAGE A'S EXPRESSION MUST NOT OVERRIDE IMAGE B.
 
 Examples:
 
-If Image A has:
+If Image B has:
 CLOSED EYES
 CLOSED MOUTH
 NO TONGUE
@@ -138,12 +138,12 @@ CLOSED EYES
 CLOSED MOUTH
 NO TONGUE
 
-even if Image B shows:
+even if Image A shows:
 OPEN EYES
 OPEN MOUTH
 TONGUE OUT.
 
-If Image A has:
+If Image B has:
 OPEN MOUTH
 TONGUE OUT
 
@@ -159,7 +159,7 @@ The user pet's identity must remain recognizable independently of its source-pho
 TONGUE / MOUTH STATE — BINARY LOCK
 ==================================================
 
-Tongue visibility must follow Image A exactly.
+Tongue visibility must follow Image B exactly.
 
 REFERENCE HAS NO VISIBLE TONGUE:
 → output MUST NOT show a tongue.
@@ -173,9 +173,9 @@ REFERENCE MOUTH CLOSED:
 REFERENCE MOUTH OPEN:
 → output mouth should be open to approximately the same degree.
 
-Do not add a tongue because the user pet has its tongue out in Image B.
+Do not add a tongue because the user pet has its tongue out in Image A.
 
-Do not add a smile because Image B appears happy.
+Do not add a smile because Image A appears happy.
 
 Do not retain an open mouth simply because it helps recognition.
 
@@ -185,24 +185,24 @@ Identity must instead be preserved through anatomy, proportions, coat, coloratio
 EYE STATE — BINARY LOCK
 ==================================================
 
-Eye state must follow Image A.
+Eye state must follow Image B.
 
-If Image A shows closed eyes:
+If Image B shows closed eyes:
 the transformed pet's eyes MUST be closed.
 
-If Image A shows partially closed / sleepy eyes:
+If Image B shows partially closed / sleepy eyes:
 match that state.
 
-If Image A shows open eyes:
+If Image B shows open eyes:
 match the corresponding degree of openness and gaze direction.
 
-Do not preserve open eyes from Image B when Image A has closed eyes.
+Do not preserve open eyes from Image A when Image B has closed eyes.
 
 ==================================================
 POSTURE LOCK — STRICT
 ==================================================
 
-The posture shown in Image A must be reproduced using the anatomy of Image B.
+The posture shown in Image B must be reproduced using the anatomy of Image A.
 
 Examples:
 
@@ -218,15 +218,15 @@ REFERENCE = standing side profile
 REFERENCE = head-and-chest frontal portrait
 → generate equivalent head-and-chest frontal portrait.
 
-Do NOT preserve the pose from Image B merely because it is the clearest source photograph.
+Do NOT preserve the pose from Image A merely because it is the clearest source photograph.
 
-Image B provides anatomical information necessary to reconstruct the user pet in the reference pose.
+Image A provides anatomical information necessary to reconstruct the user pet in the reference pose.
 
 ==================================================
 IDENTITY LOCK — EQUALLY STRICT
 ==================================================
 
-While changing expression and posture, preserve the unmistakable identity of Image B.
+While changing expression and posture, preserve the unmistakable identity of Image A.
 
 The transformed pet must still retain:
 
@@ -293,7 +293,7 @@ REFERENCE CROP AND TEMPLATE FIT
 
 The output is intended to replace the reference pet inside the same design template.
 
-Match Image A's:
+Match Image B's:
 
 - crop
 - visible body region
@@ -310,13 +310,13 @@ The replacement pet should require little or no redesign of the surrounding temp
 
 Do not merely generate an attractive portrait.
 
-Generate a replacement asset specifically composed for the design represented by Image A.
+Generate a replacement asset specifically composed for the design represented by Image B.
 
 ==================================================
 STYLE TRANSFER
 ==================================================
 
-Render the USER PET using the actual pet-art treatment found in Image A.
+Render the USER PET using the actual pet-art treatment found in Image B.
 
 Transfer the reference's:
 
@@ -341,18 +341,18 @@ Transfer the reference's:
 
 Do not assume a particular style in advance.
 
-Analyze Image A and reproduce its actual treatment.
+Analyze Image B and reproduce its actual treatment.
 
 ==================================================
 COLOR AND MARKING PRESERVATION
 ==================================================
 
-Image B determines the user's coat colors and markings.
+Image A determines the user's coat colors and markings.
 
-If Image A uses realistic coloration:
+If Image B uses realistic coloration:
 preserve the user's actual coloration.
 
-If Image A uses a stylized or restricted palette:
+If Image B uses a stylized or restricted palette:
 translate the user's coat colors and markings into that rendering system.
 
 Even under heavy stylization, preserve the spatial relationships of the user's markings.
@@ -363,9 +363,9 @@ Never copy the reference pet's coat pattern.
 FULL-DESIGN REFERENCE HANDLING
 ==================================================
 
-Image A may be a complete product design or screenshot.
+Image B may be a complete product design or screenshot.
 
-Identify the pet artwork inside Image A.
+Identify the pet artwork inside Image B.
 
 Use surrounding elements only to determine:
 
@@ -415,7 +415,7 @@ FAILURE CONDITIONS
 
 The output is WRONG if any of the following occur:
 
-- the pet is no longer unmistakably the individual from Image B
+- the pet is no longer unmistakably the individual from Image A
 - the output looks like the reference pet with the user's colors
 - the user's breed anatomy is replaced by the reference breed anatomy
 - the user's source-photo expression is retained instead of the reference expression
@@ -436,10 +436,10 @@ FINAL VALIDATION — ALL MUST PASS
 ==================================================
 
 IDENTITY TEST:
-Ignoring pose and expression, is this unmistakably the exact pet shown in Image B?
+Ignoring pose and expression, is this unmistakably the exact pet shown in Image A?
 
 EXPRESSION TEST:
-Ignoring breed identity, does the face reproduce the expression shown in Image A?
+Ignoring breed identity, does the face reproduce the expression shown in Image B?
 
 Specifically verify:
 mouth state,
@@ -450,7 +450,7 @@ head tilt,
 and emotional tone.
 
 POSTURE TEST:
-Does the transformed pet reproduce Image A's posture, orientation, body gesture, and visible body arrangement?
+Does the transformed pet reproduce Image B's posture, orientation, body gesture, and visible body arrangement?
 
 TEMPLATE TEST:
 Could this pet replace the reference pet inside the same design with little or no template adjustment?
@@ -466,7 +466,7 @@ FINAL DIRECTIVE
 
 Generate:
 
-THE EXACT INDIVIDUAL PET FROM IMAGE B
+THE EXACT INDIVIDUAL PET FROM IMAGE A
 
 with
 
@@ -483,10 +483,10 @@ COMPOSITION,
 VISUAL FOOTPRINT,
 AND ART TREATMENT
 
-FROM IMAGE A.
+FROM IMAGE B.
 
-IMAGE B PROVIDES IDENTITY ONLY.
+IMAGE A PROVIDES IDENTITY ONLY.
 
-IMAGE A PROVIDES PRESENTATION.
+IMAGE B PROVIDES PRESENTATION.
 
-Never preserve Image B's expression or posture when it conflicts with Image A.
+Never preserve Image A's expression or posture when it conflicts with Image B.

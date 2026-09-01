@@ -154,7 +154,7 @@ class PipelineCliTests(unittest.TestCase):
         self.assertNotIn("sk-test", outputs["manifest"].read_text(encoding="utf-8"))
         self.assertEqual(
             [Path(file.name).name for file in client.images.calls[1]["image"]],
-            ["source-reference-design.png", "input-pet.png"],
+            ["input-pet.png", "source-reference-design.png"],
         )
 
     def test_preflight_stops_before_paid_calls(self) -> None:
@@ -243,7 +243,7 @@ class PipelineCliTests(unittest.TestCase):
         )
         self.assertEqual(
             [Path(file.name).name for file in client.images.calls[0]["image"]],
-            ["source-reference-design.png", "input-pet.png"],
+            ["input-pet.png", "source-reference-design.png"],
         )
 
     def test_rerun_layout_only_does_not_need_api_key(self) -> None:

@@ -269,17 +269,17 @@ def _api_prompt(user_prompt: str, samples: list[Path], pet: Path | None) -> str:
     roles: list[str] = []
     if pet is not None and samples:
         roles.append(
-            "- REFERENCE DESIGN: the first supplied image; use its pet depiction "
+            "- USER PET: the first supplied image; use it only for the customer's identity."
+        )
+        roles.append(
+            "- REFERENCE DESIGN: the second supplied image; use its pet depiction "
             "for style, pose, expression, crop, and treatment, never identity."
         )
         if len(samples) > 1:
             roles.append(
-                "- ADDITIONAL REFERENCE DESIGNS: the following reference images, in "
+                "- ADDITIONAL REFERENCE DESIGNS: all remaining images, in "
                 "supplied order; use them only as supporting treatment evidence."
             )
-        roles.append(
-            "- USER PET: the final supplied image; use it only for the customer's identity."
-        )
     elif samples:
         roles.append(
             "- SAMPLE DESIGNS: all supplied images, in supplied order; use them for "
@@ -348,9 +348,9 @@ def _print_request_details(summary: dict[str, Any]) -> None:
         "product_profile_id": summary["product_profile_id"],
         "profile_layer": summary["profile_layer"],
     }
-    images = list(summary["sample_designs"]) + (
+    images = (
         [summary["pet_image"]] if summary["pet_image"] is not None else []
-    )
+    ) + list(summary["sample_designs"])
     api_parameters = {
         "model": summary["model"],
         "image": images,
@@ -534,7 +534,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         client = OpenAI(api_key=api_key)
 
     with ExitStack() as stack:
-        image_paths = samples + ([pet] if pet is not None else [])
+        image_paths = ([pet] if pet is not None else []) + samples
         image_files = [stack.enter_context(path.open("rb")) for path in image_paths]
         request: dict[str, Any] = dict(
             model=args.model,
