@@ -1,3 +1,8 @@
+# CLI purpose:
+# Generate or edit personalized design assets with GPT Image using a sample
+# design, a pet image, or both; optionally derive layer size from a reusable
+# product profile, then validate and save the returned image.
+
 from __future__ import annotations
 
 import argparse
@@ -16,6 +21,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from PIL import Image, UnidentifiedImageError
+
+from .image_size import ImageSizeError, validate_generation_size
+from .product_profile import ProductProfileError, load_product_profile
 
 
 DEFAULT_OUTPUT_DIR = Path("output")
@@ -77,7 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sample-design",
         type=Path,
-        help="optional sample design/template image",
+        action="append",
+        help="optional sample design/style reference; repeat for ordered references",
     )
     parser.add_argument(
         "--pet-image",
@@ -119,6 +128,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--size",
         default="auto",
         help="output size accepted by the selected model (default: auto)",
+    )
+    parser.add_argument(
+        "--product-profile",
+        type=Path,
+        help="derive the generation size from a reusable product profile",
+    )
+    parser.add_argument(
+        "--profile-layer",
+        choices=("art", "transformed-pet"),
+        help="profile preview layer whose dimensions should be used",
     )
     parser.add_argument(
         "--quality", choices=("low", "medium", "high", "auto"), default="high"
@@ -246,14 +265,30 @@ def _output_path(
     return output_dir.expanduser().resolve() / filename
 
 
-def _api_prompt(user_prompt: str, sample: Path | None, pet: Path | None) -> str:
+def _api_prompt(user_prompt: str, samples: list[Path], pet: Path | None) -> str:
     roles: list[str] = []
-    index = 1
-    if sample is not None:
-        roles.append(f"- Input image {index} is the SAMPLE DESIGN reference.")
-        index += 1
-    if pet is not None:
-        roles.append(f"- Input image {index} is the USER PET reference.")
+    if pet is not None and samples:
+        roles.append(
+            "- REFERENCE DESIGN: the first supplied image; use its pet depiction "
+            "for style, pose, expression, crop, and treatment, never identity."
+        )
+        if len(samples) > 1:
+            roles.append(
+                "- ADDITIONAL REFERENCE DESIGNS: the following reference images, in "
+                "supplied order; use them only as supporting treatment evidence."
+            )
+        roles.append(
+            "- USER PET: the final supplied image; use it only for the customer's identity."
+        )
+    elif samples:
+        roles.append(
+            "- SAMPLE DESIGNS: all supplied images, in supplied order; use them for "
+            "style, pose, expression, and treatment."
+        )
+    elif pet is not None:
+        roles.append(
+            "- USER PET: the supplied image; use it only for the customer's identity."
+        )
     mapping = "\n".join(roles)
     return (
         "INPUT IMAGE MAPPING:\n"
@@ -265,7 +300,7 @@ def _api_prompt(user_prompt: str, sample: Path | None, pet: Path | None) -> str:
 
 def _request_summary(
     *,
-    sample: Path | None,
+    samples: list[Path],
     pet: Path | None,
     prompt_file: Path,
     api_key_file: Path | None,
@@ -275,6 +310,9 @@ def _request_summary(
     quality: str,
     background: str,
     output_format: str,
+    product_profile: Path | None,
+    product_profile_id: str | None,
+    profile_layer: str | None,
 ) -> dict[str, Any]:
     input_fidelity = (
         "model default (high fidelity)"
@@ -282,11 +320,14 @@ def _request_summary(
         else "high"
     )
     return {
-        "sample_design": str(sample) if sample else None,
+        "sample_designs": [str(sample) for sample in samples],
         "pet_image": str(pet) if pet else None,
         "prompt_file": str(prompt_file),
         "api_key_source": str(api_key_file) if api_key_file else "OPENAI_API_KEY",
         "output": str(output),
+        "product_profile": str(product_profile) if product_profile else None,
+        "product_profile_id": product_profile_id,
+        "profile_layer": profile_layer,
         "model": model,
         "size": size,
         "quality": quality,
@@ -298,17 +339,18 @@ def _request_summary(
 
 def _print_request_details(summary: dict[str, Any]) -> None:
     inputs = {
-        "sample_design": summary["sample_design"],
+        "sample_designs": summary["sample_designs"],
         "pet_image": summary["pet_image"],
         "prompt_file": summary["prompt_file"],
         "api_key_source": summary["api_key_source"],
         "output": summary["output"],
+        "product_profile": summary["product_profile"],
+        "product_profile_id": summary["product_profile_id"],
+        "profile_layer": summary["profile_layer"],
     }
-    images = [
-        path
-        for path in (summary["sample_design"], summary["pet_image"])
-        if path is not None
-    ]
+    images = list(summary["sample_designs"]) + (
+        [summary["pet_image"]] if summary["pet_image"] is not None else []
+    )
     api_parameters = {
         "model": summary["model"],
         "image": images,
@@ -385,23 +427,68 @@ def _atomic_write_bytes(output: Path, contents: bytes) -> None:
 
 
 def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
-    sample = (
-        _validate_image(args.sample_design, "sample design")
-        if args.sample_design is not None
-        else None
+    raw_samples = getattr(args, "sample_design", None)
+    sample_values = (
+        []
+        if raw_samples is None
+        else list(raw_samples)
+        if isinstance(raw_samples, (list, tuple))
+        else [raw_samples]
     )
+    samples = [
+        _validate_image(sample, f"sample design {index}")
+        for index, sample in enumerate(sample_values, start=1)
+    ]
     pet = (
         _validate_image(args.pet_image, "pet image")
         if args.pet_image is not None
         else None
     )
-    if sample is None and pet is None:
+    if not samples and pet is None:
         raise UserInputError("provide at least one of --sample-design or --pet-image")
 
     prompt_file, user_prompt = _read_prompt(args.prompt_file)
+    product_profile_arg = getattr(args, "product_profile", None)
+    profile_layer = getattr(args, "profile_layer", None)
+    if (product_profile_arg is None) != (profile_layer is None):
+        raise UserInputError(
+            "--product-profile and --profile-layer must be supplied together"
+        )
+    product_profile_path: Path | None = None
+    product_profile_id: str | None = None
+    requested_size = args.size
+    if product_profile_arg is not None:
+        if args.size != "auto":
+            raise UserInputError(
+                "--size cannot be combined with --product-profile; the profile owns "
+                "the selected layer dimensions"
+            )
+        try:
+            product_profile = load_product_profile(product_profile_arg)
+        except ProductProfileError as exc:
+            raise UserInputError(str(exc)) from exc
+        product_profile_path = product_profile.path
+        product_profile_id = product_profile.profile_id
+        requested_size = (
+            product_profile.preview_art_size.api_value()
+            if profile_layer == "art"
+            else product_profile.preview_pet_size.api_value()
+        )
+    try:
+        request_size = validate_generation_size(
+            requested_size,
+            model=args.model,
+            label=(
+                f"product profile preview.{profile_layer}"
+                if product_profile_path is not None
+                else "--size"
+            ),
+        )
+    except ImageSizeError as exc:
+        raise UserInputError(str(exc)) from exc
     api_key_file, api_key = _resolve_api_key(args.api_key_file)
     api_output_format = _api_output_format(args.output_format)
-    primary_input = sample or pet
+    primary_input = samples[0] if samples else pet
     assert primary_input is not None
     output = _output_path(
         args.output_dir,
@@ -417,16 +504,19 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         )
 
     summary = _request_summary(
-        sample=sample,
+        samples=samples,
         pet=pet,
         prompt_file=prompt_file,
         api_key_file=api_key_file,
         output=output,
         model=args.model,
-        size=args.size,
+        size=request_size,
         quality=args.quality,
         background=background,
         output_format=api_output_format,
+        product_profile=product_profile_path,
+        product_profile_id=product_profile_id,
+        profile_layer=profile_layer,
     )
     if args.dry_run:
         print(json.dumps(summary, indent=2))
@@ -444,14 +534,14 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         client = OpenAI(api_key=api_key)
 
     with ExitStack() as stack:
-        image_paths = [path for path in (sample, pet) if path is not None]
+        image_paths = samples + ([pet] if pet is not None else [])
         image_files = [stack.enter_context(path.open("rb")) for path in image_paths]
         request: dict[str, Any] = dict(
             model=args.model,
             image=image_files,
-            prompt=_api_prompt(user_prompt, sample=sample, pet=pet),
+            prompt=_api_prompt(user_prompt, samples=samples, pet=pet),
             quality=args.quality,
-            size=args.size,
+            size=request_size,
             background=background,
             output_format=api_output_format,
             n=1,
@@ -473,7 +563,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         encoded,
         output_format=args.output_format,
         background=background,
-        size=args.size,
+        size=request_size,
     )
     _atomic_write_bytes(output, image_bytes)
     print(f"Saved generated image: {output}", file=sys.stderr, flush=True)

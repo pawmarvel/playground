@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "profile_id": "blanket-twin-full-7875x9375",
+  "print": {
+    "canvas": {
+      "width": 7875,
+      "height": 9375
+    },
+    "dpi": 300,
+    "physical_size": {
+      "width": 26.25,
+      "height": 31.25,
+      "unit": "in"
+    },
+    "bleed_px": 0,
+    "safe_margin_px": 0,
+    "color_space": "sRGB",
+    "icc_profile": null,
+    "background": "transparent",
+    "output_format": "png",
+    "max_file_bytes": null,
+    "vendor_requirements_confirmed": false,
+    "delivery_status": "print-candidate"
+  },
+  "preview": {
+    "target_long_edge_px": 1024,
+    "reference_fit": "contain",
+    "art": {
+      "width": 1008,
+      "height": 1200
+    },
+    "transformed_pet": {
+      "width": 1008,
+      "height": 1008
+    },
+    "name_standard": {
+      "width": 1440,
+      "height": 480
+    },
+    "name_long": {
+      "width": 2016,
+      "height": 672
+    }
+  },
+  "geometry": {
+    "aspect_ratio": {
+      "width": 21,
+      "height": 25
+    },
+    "preview_to_print_scale": 7.8125,
+    "nominal_print_layer_dimensions": {
+      "art": {
+        "width": 7875,
+        "height": 9375
+      },
+      "transformed_pet": {
+        "width": 7875,
+        "height": 7875
+      },
+      "name_standard": {
+        "width": 11250,
+        "height": 3750
+      },
+      "name_long": {
+        "width": 15750,
+        "height": 5250
+      }
+    }
+  }
+}

@@ -62,12 +62,13 @@ class Layout:
     color: str
     horizontal_align: str
     vertical_align: str
+    runtime_model: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         rotation: int | float = self.pet_rotation_degrees
         if float(rotation).is_integer():
             rotation = int(rotation)
-        return {
+        result = {
             "schema_version": 1,
             "art": self.art_relative,
             "pet": {
@@ -84,6 +85,9 @@ class Layout:
                 "vertical_align": self.vertical_align,
             },
         }
+        if self.runtime_model is not None:
+            result["model"] = self.runtime_model
+        return result
 
 
 def _require_mapping(value: Any, label: str) -> Mapping[str, Any]:
@@ -164,9 +168,20 @@ def parse_layout(
 ) -> Layout:
     template_dir = template_dir.expanduser().resolve()
     data = _require_mapping(value, "layout")
-    _require_exact_keys(data, {"schema_version", "art", "pet", "name"}, "layout")
+    required_keys = {"schema_version", "art", "pet", "name"}
+    missing = required_keys - set(data)
+    unknown = set(data) - required_keys - {"model"}
+    if missing:
+        raise ConfigError(f"layout is missing: {', '.join(sorted(missing))}")
+    if unknown:
+        raise ConfigError(
+            f"layout has unsupported fields: {', '.join(sorted(unknown))}"
+        )
     if data["schema_version"] != 1:
         raise ConfigError("schema_version must be 1")
+    runtime_model = data.get("model")
+    if runtime_model is not None and runtime_model != "gpt-image-2":
+        raise ConfigError("model must be gpt-image-2 when present")
 
     art_relative, configured_art = _resolve_inside(template_dir, data["art"], "art")
     art_path = art_override.expanduser().resolve() if art_override else configured_art
@@ -180,6 +195,8 @@ def parse_layout(
         raise ConfigError("pet.rotation_degrees must be a number")
     if not math.isfinite(rotation):
         raise ConfigError("pet.rotation_degrees must be finite")
+    if not -360 <= rotation <= 360:
+        raise ConfigError("pet.rotation_degrees must be between -360 and 360")
 
     name = _require_mapping(data["name"], "name")
     _require_exact_keys(
@@ -240,6 +257,7 @@ def parse_layout(
         color=color.upper(),
         horizontal_align=horizontal,
         vertical_align=vertical,
+        runtime_model=runtime_model,
     )
 
 

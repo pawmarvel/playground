@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import io
 import json
 import tempfile
@@ -12,16 +13,11 @@ from types import SimpleNamespace
 from PIL import Image, ImageDraw
 
 from helpers import copy_font, layout_data, make_image
+from pawmarvel_generator.bundle import validate_bundle
 from pawmarvel_generator.cli import _atomic_write_bytes
 from pawmarvel_generator.pipeline_cli import PipelineError, build_parser, run_pipeline
-
-
-def runtime_prompt(marker: str) -> str:
-    return f"""Use the single uploaded pet photo as the identity reference for this {marker} result. Preserve the recognizable breed, facial proportions, muzzle length, nose shape, eye spacing, ear construction, coat length, primary markings, and distinctive asymmetry. Reconstruct a centered, eye-level, front-facing head-and-upper-chest portrait. Keep both ears complete, use a friendly alert expression with a relaxed open mouth, and preserve a clean compact silhouette with comfortable clearance around all fur edges.
-
-Render the pet as a coarse vintage apparel screen print using two flat ink separations: warm cream and deep navy. Translate markings into flat value shapes and negative space. Do not use natural brown, tan, orange, photographic colors, gradients, or smooth airbrushed transitions. Construct fur from grouped hand-drawn strokes, simplified high-contrast shadow masses, sparse hatching, and moderately weathered ink loss. Emphasize eyes, nose, muzzle, ears, and defining markings. Avoid photorealism, engraving density, watercolor, glossy 3D rendering, anime, or generic mascot styling.
-
-Output exactly one isolated pet on a fully transparent background with a genuine alpha channel. Do not include words, names, slogans, fixed decorative artwork, scenery, borders, frames, garments, product mockups, checkerboards, colored backdrops, rectangular planes, accessories, or additional animals. Keep the intended portrait unclipped and ready for local compositing."""
+from pawmarvel_generator.image_size import ImageSize
+from pawmarvel_generator.product_profile import create_product_profile, write_product_profile
 
 
 class CombinedImages:
@@ -47,22 +43,9 @@ class CombinedImages:
         return SimpleNamespace(data=[SimpleNamespace(b64_json=encoded)])
 
 
-class CombinedResponses:
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-
-    def create(self, **kwargs):
-        self.calls.append(kwargs)
-        index = len(self.calls)
-        return SimpleNamespace(
-            id=f"resp_pipeline_{index}", output_text=runtime_prompt(str(index))
-        )
-
-
 class CombinedClient:
     def __init__(self) -> None:
         self.images = CombinedImages()
-        self.responses = CombinedResponses()
 
 
 class PipelineCliTests(unittest.TestCase):
@@ -74,6 +57,12 @@ class PipelineCliTests(unittest.TestCase):
         self.art_prompt = self.root / "art-prompt.md"
         self.art_prompt.write_text(
             "Create fixed background artwork only on a transparent background.",
+            encoding="utf-8",
+        )
+        self.pet_prompt = self.root / "pet-transform.md"
+        self.pet_prompt.write_text(
+            "Use the user pet for identity and the finished reference design for "
+            "style, pose, expression, and crop. Return transparent pet artwork.",
             encoding="utf-8",
         )
         self.font = copy_font(self.root)
@@ -93,6 +82,8 @@ class PipelineCliTests(unittest.TestCase):
                 str(self.sample),
                 "--art-prompt",
                 str(self.art_prompt),
+                "--pet-prompt",
+                str(self.pet_prompt),
                 "--pet-image",
                 str(self.pet),
                 "--pet-name",
@@ -107,10 +98,10 @@ class PipelineCliTests(unittest.TestCase):
                 str(self.run),
                 "--api-key-file",
                 str(self.key),
-                "--art-size",
-                "200x300",
+                "--art-resolution",
+                "800x1200",
                 "--pet-size",
-                "64x64",
+                "816x816",
                 "--quality",
                 "low",
                 *extra,
@@ -123,6 +114,8 @@ class PipelineCliTests(unittest.TestCase):
         fonts.mkdir(parents=True, exist_ok=True)
         bundled = fonts / config.font.name
         _atomic_write_bytes(bundled, config.font.read_bytes())
+        assert config.font_license is not None
+        _atomic_write_bytes(fonts / "OFL.txt", config.font_license.read_bytes())
         config.output.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write_bytes(
             config.output,
@@ -141,10 +134,8 @@ class PipelineCliTests(unittest.TestCase):
         )
 
         self.assertEqual(client.images.call_count, 2)
-        self.assertEqual(len(client.responses.calls), 2)
         for key in (
             "art",
-            "pet_prompt",
             "layout",
             "transformed_pet",
             "preview",
@@ -156,7 +147,18 @@ class PipelineCliTests(unittest.TestCase):
         record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
         self.assertEqual(record["name_generation"]["method"], "font")
         self.assertEqual(record["pipeline"]["pet_name"], "SAUSAGE")
+        self.assertEqual(record["pipeline"]["runtime_model"], "gpt-image-2")
+        self.assertIsNotNone(record["artifact_sha256"]["font"])
+        self.assertIsNotNone(record["artifact_sha256"]["font_license"])
+        self.assertEqual(
+            record["sources"]["pet_prompt"]["sha256"],
+            hashlib.sha256(self.pet_prompt.read_bytes()).hexdigest(),
+        )
         self.assertNotIn("sk-test", outputs["manifest"].read_text(encoding="utf-8"))
+        self.assertEqual(
+            [Path(file.name).name for file in client.images.calls[1]["image"]],
+            ["source-reference-design.png", "input-pet.png"],
+        )
 
     def test_ai_name_pipeline_generates_name_asset(self) -> None:
         client = CombinedClient()
@@ -170,7 +172,12 @@ class PipelineCliTests(unittest.TestCase):
         record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
         self.assertEqual(record["name_generation"]["method"], "ai")
         self.assertTrue(Path(record["name_generation"]["prompt"]).is_file())
-        self.assertTrue((self.template / "name-generation.json").is_file())
+        name_config = json.loads(
+            (self.template / "name-generation.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(name_config["style_reference_mode"], "full")
+        with Image.open(self.template / "name-style-reference.png") as reference:
+            self.assertEqual(reference.size, (200, 300))
 
     def test_preflight_stops_before_paid_calls(self) -> None:
         self.run.mkdir()
@@ -181,7 +188,126 @@ class PipelineCliTests(unittest.TestCase):
             run_pipeline(self.args(), client=client, layout_runner=self.save_layout)
 
         self.assertEqual(client.images.call_count, 0)
-        self.assertEqual(len(client.responses.calls), 0)
+
+    def test_invalid_font_catalog_stops_before_paid_calls(self) -> None:
+        catalog = self.root / "font-catalog" / "unlicensed"
+        catalog.mkdir(parents=True)
+        (catalog / "Unlicensed.ttf").write_bytes(self.font.read_bytes())
+        client = CombinedClient()
+
+        with self.assertRaisesRegex(PipelineError, "OFL"):
+            run_pipeline(
+                self.args("font", "--font-catalog", str(catalog.parent)),
+                client=client,
+                layout_runner=self.save_layout,
+            )
+
+        self.assertEqual(client.images.call_count, 0)
+
+    def test_rerun_art_only_reuses_pet_and_layout(self) -> None:
+        run_pipeline(
+            self.args(), client=CombinedClient(), layout_runner=self.save_layout
+        )
+        previous_pet = hashlib.sha256(
+            (self.run / "transformed-pet.png").read_bytes()
+        ).hexdigest()
+        self.art_prompt.write_text(
+            "Create a revised fixed background on transparency.", encoding="utf-8"
+        )
+        client = CombinedClient()
+
+        def unexpected_layout(*args, **kwargs) -> None:
+            self.fail("art-only rerun must not open the layout editor")
+
+        outputs = run_pipeline(
+            self.args("font", "--rerun-step", "art"),
+            client=client,
+            layout_runner=unexpected_layout,
+        )
+
+        self.assertEqual(client.images.call_count, 1)
+        self.assertEqual(
+            previous_pet,
+            hashlib.sha256(outputs["transformed_pet"].read_bytes()).hexdigest(),
+        )
+        record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
+        self.assertEqual(record["pipeline"]["run_mode"], "selective-rerun")
+        self.assertEqual(record["pipeline"]["rerun_steps"], ["art"])
+
+        self.pet_prompt.write_text("Changed pet instructions.", encoding="utf-8")
+        rejected_client = CombinedClient()
+        with self.assertRaisesRegex(PipelineError, "include --rerun-step pet"):
+            run_pipeline(
+                self.args("font", "--rerun-step", "art"),
+                client=rejected_client,
+                layout_runner=unexpected_layout,
+            )
+        self.assertEqual(rejected_client.images.call_count, 0)
+
+    def test_rerun_pet_only_accepts_new_pet_source(self) -> None:
+        run_pipeline(
+            self.args(), client=CombinedClient(), layout_runner=self.save_layout
+        )
+        previous_art = hashlib.sha256(
+            (self.template / "art.png").read_bytes()
+        ).hexdigest()
+        replacement = make_image(self.root / "replacement-pet.png", size=(96, 72))
+        rerun = self.args("font", "--rerun-step", "pet")
+        rerun.pet_image = replacement
+        client = CombinedClient()
+
+        outputs = run_pipeline(rerun, client=client, layout_runner=self.save_layout)
+
+        self.assertEqual(client.images.call_count, 1)
+        self.assertEqual(
+            previous_art,
+            hashlib.sha256(outputs["art"].read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            [Path(file.name).name for file in client.images.calls[0]["image"]],
+            ["source-reference-design.png", "input-pet.png"],
+        )
+
+    def test_rerun_layout_only_does_not_need_api_key(self) -> None:
+        run_pipeline(
+            self.args(), client=CombinedClient(), layout_runner=self.save_layout
+        )
+        self.key.unlink()
+        client = CombinedClient()
+        layout_calls = 0
+
+        def save_again(config, **kwargs) -> None:
+            nonlocal layout_calls
+            layout_calls += 1
+            self.save_layout(config, **kwargs)
+
+        outputs = run_pipeline(
+            self.args("font", "--rerun-step", "layout"),
+            client=client,
+            layout_runner=save_again,
+        )
+
+        self.assertEqual(layout_calls, 1)
+        self.assertEqual(client.images.call_count, 0)
+        record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
+        self.assertIsNone(record["pipeline"]["api_key_source"])
+
+    def test_selective_rerun_requires_previous_run_and_rejects_force(self) -> None:
+        client = CombinedClient()
+        with self.assertRaisesRegex(PipelineError, "existing pipeline manifest"):
+            run_pipeline(
+                self.args("font", "--rerun-step", "art"),
+                client=client,
+                layout_runner=self.save_layout,
+            )
+        self.assertEqual(client.images.call_count, 0)
+
+        with self.assertRaisesRegex(PipelineError, "cannot be combined"):
+            run_pipeline(
+                self.args("font", "--rerun-step", "art", "--force"),
+                client=client,
+                layout_runner=self.save_layout,
+            )
 
     def test_dry_run_only_prints_plan(self) -> None:
         outputs = run_pipeline(
@@ -191,6 +317,235 @@ class PipelineCliTests(unittest.TestCase):
         )
         self.assertEqual(outputs["template_dir"], self.template.resolve())
         self.assertFalse(self.template.exists())
+
+    def test_art_resolution_controls_output_instead_of_sample_dimensions(self) -> None:
+        client = CombinedClient()
+        args = self.args()
+        args.art_size = "816x1216"
+        outputs = run_pipeline(args, client=client, layout_runner=self.save_layout)
+        with Image.open(outputs["art"]) as art:
+            self.assertEqual(art.size, (816, 1216))
+        self.assertEqual(client.images.calls[0]["size"], "816x1216")
+
+    def test_art_resolution_is_required(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.parser.parse_args(
+                [
+                    "--sample-design",
+                    str(self.sample),
+                    "--art-prompt",
+                    str(self.art_prompt),
+                    "--pet-prompt",
+                    str(self.pet_prompt),
+                    "--pet-image",
+                    str(self.pet),
+                    "--pet-name",
+                    "SAUSAGE",
+                    "--font",
+                    str(self.font),
+                    "--template-dir",
+                    str(self.template),
+                ]
+            )
+
+    def test_product_profile_preserves_reference_and_controls_layer_sizes(self) -> None:
+        profile_path = write_product_profile(
+            self.root / "product.json",
+            create_product_profile(
+                profile_id="blanket-king-9375x12375",
+                print_size=ImageSize(9375, 12375),
+            ),
+        )
+        values = [
+            "--sample-design", str(self.sample),
+            "--art-prompt", str(self.art_prompt),
+            "--pet-prompt", str(self.pet_prompt),
+            "--pet-image", str(self.pet),
+            "--pet-name", "SAUSAGE",
+            "--name-method", "font",
+            "--font", str(self.font),
+            "--template-dir", str(self.template),
+            "--run-dir", str(self.run),
+            "--api-key-file", str(self.key),
+            "--product-profile", str(profile_path),
+            "--quality", "low",
+        ]
+        client = CombinedClient()
+        editor_inputs: dict[str, Path] = {}
+
+        def save_profile_layout(config, **kwargs) -> None:
+            editor_inputs["reference"] = config.reference
+            self.save_layout(config, **kwargs)
+
+        outputs = run_pipeline(
+            self.parser.parse_args(values),
+            client=client,
+            layout_runner=save_profile_layout,
+        )
+        with Image.open(self.template / "source-reference-design.png") as source:
+            self.assertEqual(source.size, (200, 300))
+        self.assertFalse((self.template / "reference-aligned.png").exists())
+        self.assertEqual(
+            editor_inputs["reference"],
+            (self.template / "source-reference-design.png").resolve(),
+        )
+        self.assertEqual(client.images.calls[0]["size"], "800x1056")
+        self.assertEqual(
+            Path(client.images.calls[0]["image"][0].name),
+            (self.template / "source-reference-design.png").resolve(),
+        )
+        self.assertEqual(client.images.calls[1]["size"], "816x816")
+        record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
+        self.assertEqual(record["pipeline"]["print_size"], "9375x12375")
+        self.assertNotIn("approval", record)
+        self.assertNotIn("approval_artifacts", record)
+        self.assertIsNotNone(record["artifact_sha256"]["product_profile"])
+        self.assertEqual(
+            record["sources"]["staged_source_reference"]["path"],
+            str((self.template / "source-reference-design.png").resolve()),
+        )
+        self.assertEqual(
+            record["sources"]["staged_source_reference"]["role"],
+            "visual-context-only-not-layout-geometry",
+        )
+        self.assertNotIn("aligned_reference", record["sources"])
+        self.assertFalse((self.template / "pet-transform.md").exists())
+        self.assertFalse((self.template / "pet-transform.analysis.json").exists())
+
+    def test_product_profile_rejects_pet_size_override(self) -> None:
+        profile_path = write_product_profile(
+            self.root / "product.json",
+            create_product_profile(
+                profile_id="profile-pet-size",
+                print_size=ImageSize(9375, 12375),
+            ),
+        )
+        args = self.parser.parse_args(
+            [
+                "--sample-design", str(self.sample),
+                "--art-prompt", str(self.art_prompt),
+                "--pet-prompt", str(self.pet_prompt),
+                "--pet-image", str(self.pet),
+                "--pet-name", "SAUSAGE",
+                "--font", str(self.font),
+                "--template-dir", str(self.template),
+                "--api-key-file", str(self.key),
+                "--product-profile", str(profile_path),
+                "--pet-size", "1024x1024",
+            ]
+        )
+        with self.assertRaisesRegex(PipelineError, "cannot override"):
+            run_pipeline(args, client=CombinedClient(), layout_runner=self.save_layout)
+
+    def test_profile_pipeline_runs_through_print_and_bundle_publication(self) -> None:
+        profile_path = write_product_profile(
+            self.root / "product.json",
+            create_product_profile(
+                profile_id="test-blanket",
+                print_size=ImageSize(1600, 2400),
+                dpi=300,
+            ),
+        )
+        print_dir = self.root / "print"
+        bundles = self.root / "bundles"
+        args = self.parser.parse_args(
+            [
+                "--sample-design", str(self.sample),
+                "--art-prompt", str(self.art_prompt),
+                "--pet-prompt", str(self.pet_prompt),
+                "--pet-image", str(self.pet),
+                "--pet-name", "SAUSAGE",
+                "--name-method", "font",
+                "--font", str(self.font),
+                "--template-dir", str(self.template),
+                "--run-dir", str(self.run),
+                "--api-key-file", str(self.key),
+                "--product-profile", str(profile_path),
+                "--quality", "low",
+                "--print-dir", str(print_dir),
+                "--bundle-output-dir", str(bundles),
+                "--template-id", "life-is-good",
+            ]
+        )
+        client = CombinedClient()
+
+        outputs = run_pipeline(
+            args,
+            client=client,
+            layout_runner=self.save_layout,
+        )
+
+        self.assertEqual(client.images.call_count, 2)
+        for key in (
+            "print_art",
+            "print_transformed_pet",
+            "print_layout",
+            "print_manifest",
+            "final_print",
+            "final_print_debug",
+            "bundle",
+        ):
+            self.assertTrue(outputs[key].exists(), key)
+        with Image.open(outputs["final_print"]) as final:
+            self.assertEqual(final.size, (1600, 2400))
+            self.assertAlmostEqual(final.info["dpi"][0], 300, delta=1)
+        self.assertEqual(validate_bundle(outputs["bundle"]).canvas_width, 672)
+        self.assertEqual(
+            {path.name for path in outputs["bundle"].iterdir()},
+            {
+                "art.png",
+                "layout.json",
+                "layout-print.json",
+                "print",
+                "reference-design.png",
+                "art-template.md",
+                "pet-transform.md",
+                "qa",
+                "fonts",
+            },
+        )
+        record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
+        self.assertEqual(record["publication"]["status"], "published")
+        self.assertEqual(record["publication"]["template_id"], "life-is-good")
+        self.assertEqual(
+            record["publication"]["bundle"], str(outputs["bundle"])
+        )
+        self.assertIsNotNone(record["artifact_sha256"]["print_art"])
+        self.assertIsNotNone(record["artifact_sha256"]["final_print"])
+        self.assertEqual(
+            (outputs["bundle"] / "art-template.md").read_bytes(),
+            self.art_prompt.read_bytes(),
+        )
+        self.assertEqual(
+            (outputs["bundle"] / "pet-transform.md").read_bytes(),
+            self.pet_prompt.read_bytes(),
+        )
+
+        rerun_client = CombinedClient()
+        args.rerun_step = ["pet"]
+        rerun_outputs = run_pipeline(
+            args,
+            client=rerun_client,
+            layout_runner=lambda *args, **kwargs: self.fail(
+                "pet-only rerun must not open the layout editor"
+            ),
+        )
+        self.assertEqual(rerun_client.images.call_count, 1)
+        self.assertTrue(rerun_outputs["final_print"].is_file())
+        self.assertEqual(validate_bundle(rerun_outputs["bundle"]).canvas_width, 672)
+
+    def test_bundle_publication_requires_product_profile_before_paid_calls(self) -> None:
+        client = CombinedClient()
+        args = self.args(
+            "font",
+            "--template-id", "life-is-good",
+            "--bundle-output-dir", str(self.root / "bundles"),
+        )
+
+        with self.assertRaisesRegex(PipelineError, "requires --product-profile"):
+            run_pipeline(args, client=client, layout_runner=self.save_layout)
+
+        self.assertEqual(client.images.call_count, 0)
 
 
 if __name__ == "__main__":

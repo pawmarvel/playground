@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "art": "print/art.png",
+  "pet": {
+    "box": {
+      "x": 1875,
+      "y": 2227,
+      "width": 5625,
+      "height": 6925
+    },
+    "rotation_degrees": 0
+  },
+  "name": {
+    "box": {
+      "x": 1266,
+      "y": 9598,
+      "width": 7007,
+      "height": 925
+    },
+    "font": "fonts/AmaticSC-Bold.ttf",
+    "font_size_px": 984,
+    "min_font_size_px": 375,
+    "color": "#F7E7C6FF",
+    "horizontal_align": "center",
+    "vertical_align": "middle"
+  },
+  "model": "gpt-image-2"
+}

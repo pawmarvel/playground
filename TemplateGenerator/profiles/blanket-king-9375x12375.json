@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "profile_id": "blanket-king-9375x12375",
+  "print": {
+    "canvas": {
+      "width": 9375,
+      "height": 12375
+    },
+    "dpi": 300,
+    "physical_size": {
+      "width": 31.25,
+      "height": 41.25,
+      "unit": "in"
+    },
+    "bleed_px": 0,
+    "safe_margin_px": 0,
+    "color_space": "sRGB",
+    "icc_profile": null,
+    "background": "transparent",
+    "output_format": "png",
+    "max_file_bytes": null,
+    "vendor_requirements_confirmed": false,
+    "delivery_status": "print-candidate"
+  },
+  "preview": {
+    "target_long_edge_px": 1024,
+    "reference_fit": "contain",
+    "art": {
+      "width": 800,
+      "height": 1056
+    },
+    "transformed_pet": {
+      "width": 816,
+      "height": 816
+    },
+    "name_standard": {
+      "width": 1440,
+      "height": 480
+    },
+    "name_long": {
+      "width": 2016,
+      "height": 672
+    }
+  },
+  "geometry": {
+    "aspect_ratio": {
+      "width": 25,
+      "height": 33
+    },
+    "preview_to_print_scale": 11.71875,
+    "nominal_print_layer_dimensions": {
+      "art": {
+        "width": 9375,
+        "height": 12375
+      },
+      "transformed_pet": {
+        "width": 9562,
+        "height": 9562
+      },
+      "name_standard": {
+        "width": 16875,
+        "height": 5625
+      },
+      "name_long": {
+        "width": 23625,
+        "height": 7875
+      }
+    }
+  }
+}

@@ -15,6 +15,11 @@ from pawmarvel_generator.name_prompt_cli import (
     configure,
     create_prompt,
 )
+from pawmarvel_generator.image_size import ImageSize
+from pawmarvel_generator.product_profile import (
+    create_product_profile,
+    write_product_profile,
+)
 
 
 class NamePromptCliTests(unittest.TestCase):
@@ -78,6 +83,18 @@ class NamePromptCliTests(unittest.TestCase):
         with Image.open(outputs["style_reference"]) as image:
             self.assertEqual(image.size, (320, 100))
 
+    def test_full_style_reference_does_not_map_layout_onto_web_screenshot(self) -> None:
+        make_image(self.root / "sample.png", size=(500, 300))
+
+        outputs = configure(
+            self.configure_args("--style-reference-mode", "full")
+        )
+
+        config = json.loads(outputs["config"].read_text(encoding="utf-8"))
+        self.assertEqual(config["style_reference_mode"], "full")
+        with Image.open(outputs["style_reference"]) as image:
+            self.assertEqual(image.size, (500, 300))
+
     def test_create_normalizes_name_and_writes_request(self) -> None:
         configure(self.configure_args())
 
@@ -126,6 +143,37 @@ class NamePromptCliTests(unittest.TestCase):
 
         with self.assertRaisesRegex(NamePromptError, "--force"):
             configure(self.configure_args())
+
+    def test_product_profile_controls_name_generation_dimensions(self) -> None:
+        make_image(self.root / "art.png", size=(800, 1200))
+        make_image(self.root / "sample.png", size=(800, 1200))
+        scaled = layout_data()
+        for box_name in ("pet", "name"):
+            box = scaled[box_name]["box"]
+            for field in ("x", "y", "width", "height"):
+                box[field] *= 4
+        scaled["name"]["font_size_px"] *= 4
+        scaled["name"]["min_font_size_px"] *= 4
+        (self.root / "layout.json").write_text(json.dumps(scaled), encoding="utf-8")
+        profile = write_product_profile(
+            self.root / "profile.json",
+            create_product_profile(
+                profile_id="profile-name-test",
+                print_size=ImageSize(1600, 2400),
+            ),
+        )
+
+        configure(
+            self.configure_args(
+                "--product-profile",
+                str(profile),
+            )
+        )
+        result = create_prompt(self.create_args("SAUSAGE"))
+        self.assertIn(
+            result["api_parameters"]["size"],
+            {"1440x480", "2016x672"},
+        )
 
 
 if __name__ == "__main__":

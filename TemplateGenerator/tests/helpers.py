@@ -10,12 +10,10 @@ from types import SimpleNamespace
 from PIL import Image, ImageDraw
 
 
-FONT_CANDIDATES = (
-    Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
-    Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
-    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-    Path("C:/Windows/Fonts/arial.ttf"),
-)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+OFL_TEST_FONT = REPOSITORY_ROOT / "assets" / "fonts" / "anton" / "Anton-Regular.ttf"
+OFL_TEST_LICENSE = REPOSITORY_ROOT / "assets" / "fonts" / "anton" / "OFL.txt"
+FONT_CANDIDATES = (OFL_TEST_FONT,)
 
 
 def system_font() -> Path:
@@ -30,6 +28,7 @@ def system_font() -> Path:
 def copy_font(root: Path, name: str = "TestFont.ttf") -> Path:
     destination = root / name
     shutil.copyfile(system_font(), destination)
+    shutil.copyfile(OFL_TEST_LICENSE, root / "OFL.txt")
     return destination
 
 
@@ -64,6 +63,7 @@ def make_transparent_mark(
 def layout_data(font_name: str = "fonts/TestFont.ttf") -> dict:
     return {
         "schema_version": 1,
+        "model": "gpt-image-2",
         "art": "art.png",
         "pet": {
             "box": {"x": 50, "y": 50, "width": 100, "height": 120},

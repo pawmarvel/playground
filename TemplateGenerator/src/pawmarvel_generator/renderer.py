@@ -83,9 +83,7 @@ def _place_pet(canvas: Image.Image, pet: Image.Image, layout: Layout) -> tuple[i
         )
     x = layout.pet_box.x + (layout.pet_box.width - pet.width) // 2
     y = layout.pet_box.y + layout.pet_box.height - pet.height
-    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    layer.paste(pet, (x, y), pet)
-    canvas.alpha_composite(layer)
+    canvas.alpha_composite(pet, (x, y))
     return x, y, x + pet.width, y + pet.height
 
 
@@ -110,9 +108,7 @@ def _place_name_image(
     else:
         y = box.y + (box.height - name_image.height) // 2
 
-    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    layer.paste(name_image, (x, y), name_image)
-    canvas.alpha_composite(layer)
+    canvas.alpha_composite(name_image, (x, y))
     return x, y, x + name_image.width, y + name_image.height
 
 
@@ -123,14 +119,39 @@ def _text_bbox(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFon
 def _select_font(
     draw: ImageDraw.ImageDraw, text: str, layout: Layout
 ) -> tuple[ImageFont.FreeTypeFont, tuple[int, int, int, int]]:
-    for size in range(layout.font_size_px, layout.min_font_size_px - 1, -1):
+    # The production bundle consumer ignores the authoring font-size hints and
+    # renders the largest ink bounds that fit the name box. Mirror that contract
+    # here so an approved local preview does not change after import.
+    def measured(size: int) -> tuple[ImageFont.FreeTypeFont, tuple[int, int, int, int]]:
         font = ImageFont.truetype(str(layout.font_path), size=size)
         bounds = _text_bbox(draw, text, font)
-        if bounds[2] - bounds[0] <= layout.name_box.width and bounds[3] - bounds[1] <= layout.name_box.height:
-            return font, bounds
-    raise RenderError(
-        f"pet name does not fit the configured box at minimum font size {layout.min_font_size_px}"
-    )
+        return font, bounds
+
+    def fits(bounds: tuple[int, int, int, int]) -> bool:
+        return (
+            bounds[2] - bounds[0] <= layout.name_box.width
+            and bounds[3] - bounds[1] <= layout.name_box.height
+        )
+
+    low = 1
+    high = max(2, layout.font_size_px)
+    while fits(measured(high)[1]):
+        low = high
+        high *= 2
+        if high > max(layout.name_box.width, layout.name_box.height) * 16:
+            break
+    best: tuple[ImageFont.FreeTypeFont, tuple[int, int, int, int]] | None = None
+    while low <= high:
+        middle = (low + high) // 2
+        candidate = measured(middle)
+        if fits(candidate[1]):
+            best = candidate
+            low = middle + 1
+        else:
+            high = middle - 1
+    if best is None:
+        raise RenderError("pet name does not fit the configured name box")
+    return best
 
 
 def _aligned_text_origin(layout: Layout, bounds: tuple[int, int, int, int]) -> tuple[int, int]:
@@ -145,12 +166,9 @@ def _aligned_text_origin(layout: Layout, bounds: tuple[int, int, int, int]) -> t
     else:
         x = box.x + (box.width - width) // 2 - left
 
-    if layout.vertical_align == "top":
-        y = box.y - top
-    elif layout.vertical_align == "bottom":
-        y = box.bottom - height - top
-    else:
-        y = box.y + (box.height - height) // 2 - top
+    # Production vertically centers the visible ink regardless of the legacy
+    # vertical_align authoring hint.
+    y = box.y + (box.height - height) // 2 - top
     return x, y
 
 
@@ -208,9 +226,14 @@ def render_with_layout(
     return canvas
 
 
-def _png_bytes(image: Image.Image) -> bytes:
+def _png_bytes(
+    image: Image.Image, *, dpi: tuple[float, float] | None = None
+) -> bytes:
     buffer = BytesIO()
-    image.save(buffer, format="PNG")
+    options = {"format": "PNG"}
+    if dpi is not None:
+        options["dpi"] = dpi
+    image.save(buffer, **options)
     return buffer.getvalue()
 
 
@@ -220,8 +243,9 @@ def render_preview(
     pet_name: str,
     *,
     name_image: Path | BinaryIO | None = None,
+    layout_path: Path | None = None,
 ) -> bytes:
-    layout = load_layout(template_dir)
+    layout = load_layout(template_dir, layout_path=layout_path)
     return _png_bytes(
         render_with_layout(layout, pet_image, pet_name, name_image=name_image)
     )
@@ -235,6 +259,8 @@ def render_to_files(
     name_image: Path | None = None,
     output: Path,
     debug_output: Path | None = None,
+    layout_path: Path | None = None,
+    png_dpi: tuple[float, float] | None = None,
     force: bool = False,
 ) -> tuple[Path, Path | None]:
     output = output.expanduser().resolve()
@@ -248,18 +274,16 @@ def render_to_files(
             f"output already exists: {existing[0]} (pass --force to replace it)"
         )
 
-    layout = load_layout(template_dir)
+    layout = load_layout(template_dir, layout_path=layout_path)
     final_image = render_with_layout(
         layout, pet_image, pet_name, name_image=name_image
     )
-    debug_image = (
-        render_with_layout(
+    _atomic_write_bytes(output, _png_bytes(final_image, dpi=png_dpi))
+    final_image.close()
+    if debug_output:
+        debug_image = render_with_layout(
             layout, pet_image, pet_name, name_image=name_image, debug=True
         )
-        if debug_output
-        else None
-    )
-    _atomic_write_bytes(output, _png_bytes(final_image))
-    if debug_output and debug_image:
-        _atomic_write_bytes(debug_output, _png_bytes(debug_image))
+        _atomic_write_bytes(debug_output, _png_bytes(debug_image, dpi=png_dpi))
+        debug_image.close()
     return output, debug_output

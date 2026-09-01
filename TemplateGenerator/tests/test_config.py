@@ -28,6 +28,18 @@ class ConfigTests(unittest.TestCase):
         layout = load_layout(self.root)
         self.assertEqual((layout.canvas_width, layout.canvas_height), (200, 300))
         self.assertEqual(layout.art_relative, "art.png")
+        self.assertEqual(layout.runtime_model, "gpt-image-2")
+
+    def test_model_is_optional_for_default_gemini_route(self) -> None:
+        data = layout_data()
+        data.pop("model")
+        self.assertIsNone(parse_layout(data, self.root).runtime_model)
+
+    def test_rejects_unknown_runtime_model(self) -> None:
+        data = layout_data()
+        data["model"] = "other"
+        with self.assertRaisesRegex(ConfigError, "gpt-image-2"):
+            parse_layout(data, self.root)
 
     def test_rejects_unknown_fields(self) -> None:
         data = layout_data()
@@ -45,6 +57,12 @@ class ConfigTests(unittest.TestCase):
         data = layout_data()
         data["pet"]["box"]["x"] = 500
         with self.assertRaisesRegex(ConfigError, "does not intersect"):
+            parse_layout(data, self.root)
+
+    def test_rejects_rotation_outside_consumer_range(self) -> None:
+        data = layout_data()
+        data["pet"]["rotation_degrees"] = 361
+        with self.assertRaisesRegex(ConfigError, "between -360 and 360"):
             parse_layout(data, self.root)
 
 

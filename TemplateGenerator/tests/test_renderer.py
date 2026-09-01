@@ -87,6 +87,21 @@ class RendererTests(unittest.TestCase):
         with self.assertRaisesRegex(RenderError, "must not be empty"):
             render_preview(self.root, self.pet, "  ")
 
+    def test_font_size_hints_do_not_change_contract_rendering(self) -> None:
+        baseline = render_preview(self.root, self.pet, "BUDDY")
+        layout = layout_data()
+        layout["name"]["font_size_px"] = 2
+        layout["name"]["min_font_size_px"] = 1
+        (self.root / "layout.json").write_text(json.dumps(layout), encoding="utf-8")
+        self.assertEqual(render_preview(self.root, self.pet, "BUDDY"), baseline)
+
+    def test_vertical_alignment_hint_does_not_change_contract_rendering(self) -> None:
+        baseline = render_preview(self.root, self.pet, "BUDDY")
+        layout = layout_data()
+        layout["name"]["vertical_align"] = "bottom"
+        (self.root / "layout.json").write_text(json.dumps(layout), encoding="utf-8")
+        self.assertEqual(render_preview(self.root, self.pet, "BUDDY"), baseline)
+
     def test_fully_transparent_pet_fails(self) -> None:
         transparent = self.root / "transparent.png"
         make_image(transparent, color=(0, 0, 0, 0))

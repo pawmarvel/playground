@@ -34,11 +34,13 @@ class PocRunnerTests(unittest.TestCase):
         (self.template / "layout.json").write_text(
             json.dumps(layout_data()), encoding="utf-8"
         )
-        (self.template / "pet-transform.md").write_text(
+        self.prompt = self.root / "pet-transform.md"
+        self.prompt.write_text(
             "BACKGROUND = TRANSPARENT\nCreate an isolated pet portrait.",
             encoding="utf-8",
         )
         self.pet = make_image(self.root / "pet.png")
+        self.reference = make_image(self.root / "reference.png")
         self.name_image = make_transparent_mark(self.root / "name.png")
         self.key = self.root / "OPENAI_API_KEY.rtf"
         self.key.write_text("sk-test_1234567890abcdefghij", encoding="utf-8")
@@ -57,8 +59,10 @@ class PocRunnerTests(unittest.TestCase):
             api_key_file=self.key,
             output_dir=None,
             model="gpt-image-2",
-            size="64x64",
+            size="816x816",
             quality="low",
+            reference_design=self.reference,
+            prompt_file=self.prompt,
             force=force,
         )
 
@@ -69,6 +73,10 @@ class PocRunnerTests(unittest.TestCase):
         self.assertTrue(transformed.is_file())
         self.assertTrue(final.is_file())
         self.assertTrue(debug.is_file())
+        self.assertEqual(
+            [Path(file.name).name for file in client.images.kwargs["image"]],
+            ["reference.png", "pet.png"],
+        )
 
     def test_preflight_prevents_paid_call_when_output_exists(self) -> None:
         qa = self.template / "qa"
@@ -93,6 +101,27 @@ class PocRunnerTests(unittest.TestCase):
         missing = self.root / "missing-name.png"
         with self.assertRaisesRegex(UserInputError, "name image does not exist"):
             run_poc(self.args(name_image=missing), client=client)
+        self.assertEqual(client.images.call_count, 0)
+
+    def test_reuses_supplied_transformed_pet_without_paid_call(self) -> None:
+        transformed = make_transparent_mark(self.root / "approved-transformed.png")
+        args = self.args(name_image=self.name_image)
+        args.pet_image = None
+        args.transformed_pet = transformed
+        args.layout = self.template / "layout.json"
+        client = FakeClient()
+        returned, final, debug = run_poc(args, client=client)
+        self.assertEqual(returned, transformed.resolve())
+        self.assertEqual(client.images.call_count, 0)
+        self.assertTrue(final.is_file())
+        self.assertTrue(debug.is_file())
+
+    def test_missing_finished_reference_fails_before_paid_call(self) -> None:
+        args = self.args()
+        args.reference_design = self.root / "missing-reference.png"
+        client = FakeClient()
+        with self.assertRaisesRegex(UserInputError, "finished reference design"):
+            run_poc(args, client=client)
         self.assertEqual(client.images.call_count, 0)
 
 

@@ -10,13 +10,93 @@ const nameMode = document.querySelector("#name-mode");
 reference.src = boot.referenceDataUrl;
 nameMode.textContent = boot.nameMode === "image"
   ? "Preview source: generated name image. Font size and color controls are inactive."
-  : "Preview source: configured font.";
+  : "Preview source: configured font. Production chooses the largest fitting size and ink-centers vertically.";
 canvas.width = boot.canvas.width;
 canvas.height = boot.canvas.height;
 
 let previewImage = null;
 let previewTimer = null;
 let drag = null;
+let selectedFontId = boot.selectedFontId;
+
+function selectFont(candidateId) {
+  const candidate = boot.fontCandidates.find(value => value.id === candidateId);
+  if (!candidate) return;
+  selectedFontId = candidate.id;
+  state.name.font = candidate.relativeName;
+  for (const button of document.querySelectorAll(".font-candidate")) {
+    const selected = button.dataset.fontId === selectedFontId;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+  }
+  schedulePreview();
+}
+
+function buildFontCatalog() {
+  const host = document.querySelector("#font-catalog");
+  const description = document.createElement("p");
+  description.className = "font-help";
+  const recommended = boot.fontCandidates.find(value => value.recommended);
+  description.textContent = `Recommended from reference: ${recommended.label} (${Math.round(boot.fontRecommendation.confidence * 100)}% confidence). ${boot.fontCandidates.length} approved fonts are available.`;
+  host.append(description);
+  const style = document.createElement("style");
+  for (const candidate of boot.fontCandidates) {
+    style.textContent += `@font-face { font-family: "${candidate.id}"; src: url("/fonts/${candidate.id}") format("truetype"); }\n`;
+  }
+  document.head.append(style);
+
+  function candidateButton(candidate, showRank) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "font-candidate";
+    button.dataset.fontId = candidate.id;
+    button.setAttribute("aria-pressed", candidate.id === selectedFontId ? "true" : "false");
+    button.disabled = boot.nameMode === "image";
+    const label = document.createElement("strong");
+    label.textContent = showRank ? `#${candidate.rank} ${candidate.label}` : candidate.label;
+    if (candidate.recommended) label.textContent += " — recommended";
+    const specimen = document.createElement("span");
+    specimen.className = "font-specimen";
+    specimen.style.fontFamily = `"${candidate.id}"`;
+    specimen.textContent = boot.petName;
+    button.append(label, specimen);
+    button.addEventListener("click", () => selectFont(candidate.id));
+    return button;
+  }
+
+  const rankedHeading = document.createElement("h3");
+  rankedHeading.textContent = "Ranked recommendations";
+  const rankedGrid = document.createElement("div");
+  rankedGrid.className = "font-grid";
+  [...boot.fontCandidates]
+    .sort((left, right) => left.rank - right.rank)
+    .slice(0, 3)
+    .forEach(candidate => rankedGrid.append(candidateButton(candidate, true)));
+
+  const catalogHeading = document.createElement("h3");
+  catalogHeading.textContent = "All approved fonts";
+  const filter = document.createElement("input");
+  filter.type = "search";
+  filter.className = "font-filter";
+  filter.placeholder = "Filter fonts by name";
+  filter.setAttribute("aria-label", "Filter all approved fonts");
+  const catalogGrid = document.createElement("div");
+  catalogGrid.className = "font-grid";
+  const alphabetical = [...boot.fontCandidates].sort((left, right) => left.label.localeCompare(right.label));
+  function populateCatalog(query = "") {
+    catalogGrid.replaceChildren();
+    const normalized = query.trim().toLocaleLowerCase();
+    alphabetical
+      .filter(candidate => candidate.label.toLocaleLowerCase().includes(normalized))
+      .forEach(candidate => catalogGrid.append(candidateButton(candidate, false)));
+  }
+  filter.addEventListener("input", () => populateCatalog(filter.value));
+  populateCatalog();
+  host.append(rankedHeading, rankedGrid, catalogHeading, filter, catalogGrid);
+  selectFont(selectedFontId);
+}
+
+buildFontCatalog();
 
 const numericFields = [
   ["pet", "x", "Pet x"], ["pet", "y", "Pet y"],
@@ -47,11 +127,10 @@ function addNumberControl(section, key, labelText) {
   input.value = valueFor(section, key);
   input.dataset.section = section;
   input.dataset.key = key;
-  if (
-    boot.nameMode === "image" &&
-    section === "name" &&
-    ["font_size_px", "min_font_size_px"].includes(key)
-  ) input.disabled = true;
+  if (section === "name" && ["font_size_px", "min_font_size_px"].includes(key)) {
+    input.disabled = true;
+    input.title = "Legacy schema hint; ignored by the production renderer";
+  }
   input.addEventListener("input", () => {
     const number = Number(input.value);
     if (Number.isFinite(number)) {
@@ -66,7 +145,7 @@ function addNumberControl(section, key, labelText) {
 
 for (const field of numericFields) addNumberControl(...field);
 
-function addSelect(key, labelText, values) {
+function addSelect(key, labelText, values, disabled = false) {
   const host = document.querySelector("#name-controls");
   const label = document.createElement("label");
   label.textContent = labelText;
@@ -79,12 +158,14 @@ function addSelect(key, labelText, values) {
     select.append(option);
   }
   select.addEventListener("change", () => { state.name[key] = select.value; schedulePreview(); });
+  select.disabled = disabled;
+  if (disabled) select.title = "Legacy schema hint; production ink-centers vertically";
   label.append(select);
   host.append(label);
 }
 
 addSelect("horizontal_align", "Horizontal alignment", ["left", "center", "right"]);
-addSelect("vertical_align", "Vertical alignment", ["top", "middle", "bottom"]);
+addSelect("vertical_align", "Vertical alignment", ["top", "middle", "bottom"], true);
 
 const colorLabel = document.createElement("label");
 colorLabel.textContent = "Text color";
@@ -170,7 +251,7 @@ async function requestPreview() {
     const response = await fetch("/preview", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({layout: state}),
+      body: JSON.stringify({layout: state, font_id: selectedFontId}),
     });
     if (!response.ok) throw new Error((await response.json()).error || response.statusText);
     const image = new Image();
@@ -198,7 +279,7 @@ async function save(overwrite = false, closeAfter = false) {
   const response = await fetch("/save", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({layout: state, overwrite}),
+    body: JSON.stringify({layout: state, font_id: selectedFontId, overwrite}),
   });
   const result = await response.json();
   if (response.status === 409 && !overwrite && window.confirm(`${result.error}. Replace them?`)) return save(true, closeAfter);

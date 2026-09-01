@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "art": "art.png",
+  "pet": {
+    "box": {
+      "x": 158,
+      "y": 234,
+      "width": 473,
+      "height": 464
+    },
+    "rotation_degrees": 0
+  },
+  "name": {
+    "box": {
+      "x": 66,
+      "y": 717,
+      "width": 661,
+      "height": 197
+    },
+    "font": "fonts/Anton-Regular.ttf",
+    "font_size_px": 84,
+    "min_font_size_px": 32,
+    "color": "#F7E7C6FF",
+    "horizontal_align": "center",
+    "vertical_align": "middle"
+  },
+  "model": "gpt-image-2"
+}

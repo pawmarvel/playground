@@ -10,6 +10,6 @@ __pycache__/
 *.egg-info/
 output/
 /work/
+.pawmarvel-font-cache/
 /examples/life-is-good/work/
 *OPENAI_API_KEY*
-

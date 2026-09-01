@@ -11,6 +11,11 @@ from unittest.mock import patch
 
 from helpers import FakeClient, make_image
 from pawmarvel_generator.cli import UserInputError, _read_api_key, build_parser, generate
+from pawmarvel_generator.image_size import ImageSize
+from pawmarvel_generator.product_profile import (
+    create_product_profile,
+    write_product_profile,
+)
 
 
 class CliTests(unittest.TestCase):
@@ -47,7 +52,7 @@ class CliTests(unittest.TestCase):
             ]
         )
 
-    def test_generates_with_ordered_references_and_neutral_roles(self) -> None:
+    def test_transforms_pet_with_one_reference_design_and_prompt(self) -> None:
         client = FakeClient()
         output_dir = self.root / "output"
         output = generate(self.args("--output-dir", str(output_dir)), client=client)
@@ -57,8 +62,11 @@ class CliTests(unittest.TestCase):
             [Path(file.name).name for file in request["image"]],
             ["template.png", "pet.png"],
         )
-        self.assertIn("Input image 1 is the SAMPLE DESIGN reference", request["prompt"])
-        self.assertIn("Input image 2 is the USER PET reference", request["prompt"])
+        self.assertIn("USER PET", request["prompt"])
+        self.assertIn("REFERENCE DESIGN", request["prompt"])
+        self.assertIn("Create the requested asset", request["prompt"])
+        self.assertNotIn("ADDITIONAL REFERENCE DESIGNS", request["prompt"])
+        self.assertNotIn("Input image 1", request["prompt"])
         self.assertNotIn("Replace only", request["prompt"])
         self.assertNotIn("input_fidelity", request)
 
@@ -96,7 +104,25 @@ class CliTests(unittest.TestCase):
         )
         output = generate(args, client=client)
         self.assertEqual(output.name, "pet.png")
-        self.assertIn("Input image 1 is the USER PET reference", client.images.kwargs["prompt"])
+        self.assertIn("USER PET", client.images.kwargs["prompt"])
+
+    def test_accepts_ordered_repeated_references_before_pet(self) -> None:
+        second = make_image(self.root / "second.png")
+        client = FakeClient()
+        args = self.args(
+            "--sample-design",
+            str(second),
+            "--output-dir",
+            str(self.root / "output"),
+        )
+        generate(args, client=client)
+        self.assertEqual(
+            [Path(file.name).name for file in client.images.kwargs["image"]],
+            ["template.png", "second.png", "pet.png"],
+        )
+        self.assertIn(
+            "ADDITIONAL REFERENCE DESIGNS", client.images.kwargs["prompt"]
+        )
 
     def test_rejects_neither_image(self) -> None:
         args = build_parser().parse_args(
@@ -109,6 +135,64 @@ class CliTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(UserInputError, "at least one"):
             generate(args, client=FakeClient())
+
+    def test_rejects_invalid_gpt_image_2_dimensions_before_api_call(self) -> None:
+        client = FakeClient()
+        with self.assertRaisesRegex(UserInputError, "multiples of 16"):
+            generate(self.args("--size", "1000x1320"), client=client)
+        self.assertEqual(client.images.call_count, 0)
+
+    def test_product_profile_derives_art_generation_size(self) -> None:
+        profile = write_product_profile(
+            self.root / "product-profile.json",
+            create_product_profile(
+                profile_id="blanket-king-9375x12375",
+                print_size=ImageSize(9375, 12375),
+            ),
+        )
+        client = FakeClient()
+        args = self.args(
+            "--output-dir", str(self.root / "output"),
+            "--product-profile", str(profile),
+            "--profile-layer", "art",
+        )
+        generate(args, client=client)
+        self.assertEqual(client.images.kwargs["size"], "800x1056")
+
+    def test_product_profile_derives_transformed_pet_generation_size(self) -> None:
+        profile = write_product_profile(
+            self.root / "product-profile.json",
+            create_product_profile(
+                profile_id="blanket-king-9375x12375",
+                print_size=ImageSize(9375, 12375),
+            ),
+        )
+        client = FakeClient()
+        args = self.args(
+            "--output-dir", str(self.root / "output"),
+            "--product-profile", str(profile),
+            "--profile-layer", "transformed-pet",
+        )
+        generate(args, client=client)
+        self.assertEqual(client.images.kwargs["size"], "816x816")
+
+    def test_product_profile_rejects_explicit_size_override(self) -> None:
+        profile = write_product_profile(
+            self.root / "product-profile.json",
+            create_product_profile(
+                profile_id="blanket-king-9375x12375",
+                print_size=ImageSize(9375, 12375),
+            ),
+        )
+        client = FakeClient()
+        args = self.args(
+            "--size", "1024x1120",
+            "--product-profile", str(profile),
+            "--profile-layer", "art",
+        )
+        with self.assertRaisesRegex(UserInputError, "profile owns"):
+            generate(args, client=client)
+        self.assertEqual(client.images.call_count, 0)
 
     def test_refuses_to_overwrite_without_force(self) -> None:
         output_dir = self.root / "output"

@@ -8,32 +8,31 @@ from PIL import Image
 
 class RepositoryExampleTests(unittest.TestCase):
     def test_repository_fixtures_are_complete_and_decodable(self) -> None:
-        examples = Path(__file__).resolve().parents[1] / "examples"
-        fixtures = {
-            "life-is-good": (
-                ("reference-design.png", "pet-input.png"),
-                ("art-template.md", "pet-transform-baseline.md"),
-            ),
-            "charlie-well-trained": (
-                ("reference-design.png", "pet-input.png"),
-                ("art-template.md",),
-            ),
-        }
-
-        for fixture, (images, prompts) in fixtures.items():
+        project = Path(__file__).resolve().parents[1]
+        examples = project / "examples"
+        for fixture in ("life-is-good", "charlie-well-trained"):
             root = examples / fixture
-            for name in images:
-                path = root / name
-                with self.subTest(fixture=fixture, path=name), Image.open(path) as image:
-                    image.load()
-                    self.assertGreater(image.width, 0)
-                    self.assertGreater(image.height, 0)
-            for name in prompts:
-                path = root / name
-                with self.subTest(fixture=fixture, path=name):
-                    self.assertGreater(
-                        len(path.read_text(encoding="utf-8").strip()), 100
-                    )
+            self.assertEqual(
+                {path.name for path in root.iterdir()},
+                {"reference-design.png", "art-template.md", "pet-transform.md"},
+            )
+            with Image.open(root / "reference-design.png") as image:
+                image.load()
+                self.assertGreater(image.width, 0)
+                self.assertGreater(image.height, 0)
+            for prompt in ("art-template.md", "pet-transform.md"):
+                self.assertGreater(
+                    len((root / prompt).read_text(encoding="utf-8").strip()),
+                    100,
+                )
+
+        for name in ("sausage-dog-puppy.png", "white-fluffy-dog.png"):
+            with self.subTest(pet=name), Image.open(examples / "pet-inputs" / name) as image:
+                image.load()
+                self.assertGreater(image.width, 0)
+                self.assertGreater(image.height, 0)
+
+        self.assertFalse(project.joinpath("ai-prompts").exists())
 
 
 if __name__ == "__main__":

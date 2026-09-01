@@ -1,13 +1,13 @@
 # Personalized Product Toolset — Future Iterations
 
 Status: Deferred roadmap  
-Depends on: Successful low-resolution MVP validation  
-Last updated: 2026-08-26
+Depends on: Successful profile-driven preview-to-print POC validation
+Last updated: 2026-08-31
 
 ## 1. Purpose
 
 This document records capabilities intentionally excluded from the
-low-resolution proof of concept described in
+profile-driven proof of concept described in
 [`OFFLINE_PERSONALIZATION_TOOLSET_DESIGN.md`](OFFLINE_PERSONALIZATION_TOOLSET_DESIGN.md).
 
 These items should not be implemented merely because they appear here. Each
@@ -25,6 +25,10 @@ Consider the MVP validated when several representative runs show that:
 - Prompt or layout changes can be tested quickly.
 - The result is promising enough to justify print-quality and online-production
   investment.
+- Product-profile geometry and print-manifest integrity work across more than
+  one print canvas.
+- Upscaled candidates retain acceptable detail at the actual scale factors
+  required by representative products.
 
 Before starting the next iteration, record the actual MVP limitations. Do not
 design future schema fields from hypothetical requirements alone.
@@ -42,6 +46,11 @@ Potential capabilities:
 - Additional deterministic properties such as text stroke, tracking, shadows,
   opacity, rotation, and configurable layer order.
 - Curved or path-based text.
+- Evaluate AI-generated pet-name PNGs as an alternative to deterministic font
+  rendering, including spelling reliability, isolated lettering extraction,
+  transparent-background quality, long-name handling, and approval criteria.
+  The experimental commands already present in the repository are not part of
+  the current MVP acceptance flow.
 - Foreground masks and controlled occlusion.
 - Multiple representative-pet fixtures and name-length test cases.
 - A pet-prompt evaluation set spanning breeds, coat lengths, colors, markings,
@@ -79,35 +88,50 @@ example may omit or approximate the shadow; it must not be treated as evidence
 that automated shadow handling is supported. Revisit this issue in Iteration 2
 after the basic art-template, transformed-pet, and layout workflow is validated.
 
-### Iteration 3 — High-resolution and print-ready assets
+### Iteration 3 — Vendor-qualified print assets
 
-Goal: derive print assets from an approved low-resolution template without
-changing its composition.
+Goal: graduate exact-size print candidates into vendor-qualified deliverables
+without changing the approved composition.
 
-Potential package:
+Implemented POC baseline (2026-08-31): named profiles define preview and print
+canvases plus print-contract metadata; `pawmarvel-upscale` accepts explicit
+manual or pipeline artifact paths and performs exact-canvas layer scaling,
+`layout-print.json` derivation, source-alpha preservation, and bundle hashing;
+the renderer verifies the bundle/profile and creates an exact-size final-review
+manifest. Formal preview approval is deliberately deferred. This still produces
+print *candidates*, not vendor-qualified deliverables.
+
+Implemented two-resolution consumer package:
 
 ```text
-art-preview.png
-layout-preview.json
-art-print.png
-layout-print.json
-font files
-profile metadata
+art.png                  # low-resolution web asset
+layout.json              # low-resolution web geometry
+print/art.png            # high-resolution print asset
+layout-print.json        # high-resolution print geometry
+fonts/
 ```
 
-Required design work:
+The publisher validates that both art files share an exact aspect ratio and
+that print placement/text geometry is mechanically scaled from the preview
+layout. Profile metadata and vendor qualification remain outside the portable
+consumer bundle for this MVP.
 
-- Define preview and print canvas dimensions.
-- Require matching aspect ratios or define an explicit nonuniform mapping.
-- Prefer a uniform integer scale when possible.
+Implemented geometry rules:
+
+- Define preview and print canvas dimensions in one named profile.
+- Require exact matching aspect ratios and uniform scaling.
 - Derive print geometry mechanically from preview geometry.
-- Scale box edges to avoid accumulated rounding error.
-- Scale font sizes, strokes, tracking, padding, masks, and other pixel values.
-- Keep dimensionless values such as rotation, opacity, and relative scale
-  unchanged.
-- Store the materialized print layout if runtime derivation is undesirable.
-- Prevent independent manual tuning of preview and print layouts unless the
-  product explicitly supports separate compositions.
+- Scale rectangle edges to avoid accumulated rounding error.
+- Scale font sizes while keeping rotation, alignment, color, and other
+  dimensionless values unchanged.
+- Store `layout-print.json` and prevent independent print-layout tuning.
+
+Future graduation work:
+
+- Qualify one or more upscaling backends per style and scale-factor range.
+- Define measurable detail, edge, and alpha acceptance thresholds.
+- Confirm how strokes, tracking, masks, and future effect layers scale.
+- Confirm each product/vendor profile and lock its revision.
 
 Example uniform derivation:
 
@@ -136,8 +160,9 @@ Before calling an asset print-ready, define:
 
 #### Upscaling
 
-Start with a replaceable upscaler interface. Evaluate simple Lanczos before
-adding a heavyweight super-resolution model.
+The POC has replaceable deterministic Lanczos and Bria backends. Evaluate them
+against real printed samples before selecting a production default or adding a
+heavyweight local super-resolution model.
 
 An upscaler must preserve:
 
@@ -230,6 +255,12 @@ customer approved.
 ### Iteration 7 — Product and order lifecycle controls
 
 Goal: make approved artifacts traceable and resistant to accidental mutation.
+
+This iteration owns the deferred preview-approval feature. Reintroduce an
+approval command or authenticated action only with an explicit revision model;
+it may bind a pipeline `run.json` when available, but must also define how
+manually assembled artifacts are captured into an immutable revision before
+approval.
 
 Potential product states:
 
@@ -345,14 +376,15 @@ Address these before external production use:
 | Font rendering differs by environment | Bundle fonts and pin rendering dependencies |
 | Customer overrides break composition | Use product-defined bounds and server-side validation |
 | Reference shadows do not stay aligned with transformed pets | Add an explicit pet-relative shadow layer and validate its geometry and compositing order |
-| Approved files are changed accidentally | Add immutable revisions and content hashes |
+| Approved files are changed accidentally | POC hashes detect mutation; add immutable revision storage and signing for production |
 | Operational review does not scale | Add an approval portal and role-based workflow |
-| Vendor specifications differ by product | Add explicit product/vendor print profiles |
+| Vendor specifications differ by product | Confirm and revision-lock the existing explicit profiles per vendor/product |
 | Reference designs create copyright or trademark exposure | Require design-rights review before publication |
 
 ## 8. Decision rule
 
 Implement the smallest next iteration that addresses a limitation observed in
-real MVP runs. High-resolution, print, lifecycle, and infrastructure work should
-remain deferred until the low-resolution artifacts and personalization result
-have demonstrated sufficient product value.
+real POC runs. Vendor qualification, cross-resolution quality scoring,
+lifecycle, and infrastructure work should remain deferred until the reusable
+artifacts and personalized print candidates demonstrate sufficient product
+value.

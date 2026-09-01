@@ -8,6 +8,7 @@ import urllib.request
 from pathlib import Path
 
 from helpers import copy_font, layout_data, make_image, make_transparent_mark
+from pawmarvel_generator.font_catalog import discover_font_catalog
 from pawmarvel_generator.layout_server import EditorConfig, create_server
 
 
@@ -28,6 +29,10 @@ class LayoutServerTests(unittest.TestCase):
         external = self.root / "external"
         external.mkdir()
         self.font = copy_font(external)
+        self.font_catalog = Path(__file__).resolve().parents[1] / "assets" / "fonts"
+        self.font_candidates = discover_font_catalog(
+            self.font, catalog_roots=(self.font_catalog,)
+        )
         self.output = self.root / "layout.json"
         self.server = create_server(
             EditorConfig(
@@ -36,6 +41,7 @@ class LayoutServerTests(unittest.TestCase):
                 pet=self.pet,
                 pet_name="BUDDY",
                 font=self.font,
+                font_catalogs=(self.font_catalog,),
                 output=self.output,
                 name_image=self.name_image,
             )
@@ -65,10 +71,14 @@ class LayoutServerTests(unittest.TestCase):
             html = response.read()
             self.assertIn(b"PawMarvel Layout Configurator", html)
             self.assertIn(b'"nameMode": "image"', html)
+            self.assertIn(b'"fontCandidates"', html)
+            self.assertIn(b"Amatic SC Bold", html)
             self.assertIn(b"Save &amp; continue", html)
         with urllib.request.urlopen(self.base + "/assets/layout.js") as response:
             script = response.read()
             self.assertIn(b"requestPreview", script)
+            self.assertIn(b"All approved fonts", script)
+            self.assertIn(b"Filter fonts by name", script)
             self.assertIn(b"/heartbeat", script)
             self.assertIn(b"pagehide", script)
 
@@ -86,8 +96,41 @@ class LayoutServerTests(unittest.TestCase):
         self.assertEqual(Path(saved["layout"]), self.output.resolve())
         self.assertTrue(self.output.is_file())
         self.assertTrue((self.root / "fonts" / "TestFont.ttf").is_file())
+        self.assertTrue((self.root / "fonts" / "OFL.txt").is_file())
+        self.assertEqual(json.loads(self.output.read_text())["model"], "gpt-image-2")
         self.assertTrue((self.root / "qa" / "calibration-preview.png").is_file())
         self.assertEqual(saved["name_mode"], "image")
+
+    def test_selected_catalog_font_is_previewed_and_saved(self) -> None:
+        selected = next(
+            candidate
+            for candidate in self.font_candidates
+            if candidate.font.name == "AmaticSC-Bold.ttf"
+        )
+        payload = {
+            "layout": layout_data(),
+            "font_id": selected.candidate_id,
+        }
+
+        with urllib.request.urlopen(
+            f"{self.base}/fonts/{selected.candidate_id}"
+        ) as response:
+            self.assertEqual(response.headers.get_content_type(), "font/ttf")
+            self.assertEqual(response.read(), selected.font.read_bytes())
+        with self.post("/preview", payload) as response:
+            self.assertEqual(response.headers.get_content_type(), "image/png")
+        with self.post("/save", payload) as response:
+            saved = json.loads(response.read())
+
+        data = json.loads(self.output.read_text(encoding="utf-8"))
+        self.assertEqual(data["name"]["font"], "fonts/AmaticSC-Bold.ttf")
+        self.assertEqual(saved["font_label"], "Amatic SC Bold")
+        self.assertEqual(saved["font_id"], selected.candidate_id)
+        self.assertTrue((self.root / "fonts" / "AmaticSC-Bold.ttf").is_file())
+        self.assertEqual(
+            (self.root / "fonts" / "OFL.txt").read_bytes(),
+            selected.license.read_bytes(),
+        )
 
     def test_close_endpoint_returns_control_to_server_caller(self) -> None:
         with self.post("/save", {"layout": layout_data()}) as response:

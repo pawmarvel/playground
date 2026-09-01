@@ -1,3 +1,7 @@
+# CLI purpose:
+# Build reusable, layout-aware AI lettering configuration and create validated
+# per-name prompts while rejecting names that cannot fit the approved name box.
+
 from __future__ import annotations
 
 import argparse
@@ -12,6 +16,8 @@ from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 from .cli import _atomic_write_bytes
 from .config import ConfigError, Layout, load_layout
+from .image_size import ImageSizeError, validate_generation_size
+from .product_profile import ProductProfileError, load_product_profile
 
 
 CONFIG_NAME = "name-generation.json"
@@ -48,8 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pawmarvel-name-prompt",
         description=(
-            "Configure design-specific pet-name prompting and create a validated "
-            "prompt for an individual pet name."
+            "Experimental future-extension tool: configure design-specific "
+            "pet-name prompting and validate one pet name."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -68,6 +74,20 @@ def build_parser() -> argparse.ArgumentParser:
     configure_parser.add_argument("--min-font-scale-ratio", type=float, default=0.60)
     configure_parser.add_argument("--long-name-scale-threshold", type=float, default=0.80)
     configure_parser.add_argument("--crop-padding-ratio", type=float, default=0.0)
+    configure_parser.add_argument(
+        "--style-reference-mode",
+        choices=("mapped", "full"),
+        default="mapped",
+        help=(
+            "mapped crops by layout coordinates; full treats the sample as "
+            "non-geometric visual context"
+        ),
+    )
+    configure_parser.add_argument(
+        "--product-profile",
+        type=Path,
+        help="use profile-derived standard and long name generation canvases",
+    )
     configure_parser.add_argument("--force", action="store_true")
 
     create_parser = subparsers.add_parser(
@@ -202,22 +222,41 @@ def configure(args: argparse.Namespace) -> dict[str, Path]:
     art = _read_image(art_path, "art")
     if art.size != (layout.canvas_width, layout.canvas_height):
         raise NamePromptError("art dimensions changed while loading the layout")
-    sample_ratio = sample.width / sample.height
-    art_ratio = art.width / art.height
-    if abs(sample_ratio - art_ratio) / art_ratio > 0.02:
-        raise NamePromptError(
-            "sample design and art aspect ratios differ by more than 2%; "
-            "the layout cannot be mapped reliably"
+    style_reference_mode = getattr(args, "style_reference_mode", "mapped")
+    if style_reference_mode == "mapped":
+        sample_ratio = sample.width / sample.height
+        art_ratio = art.width / art.height
+        if abs(sample_ratio - art_ratio) / art_ratio > 0.02:
+            raise NamePromptError(
+                "sample design and art aspect ratios differ by more than 2%; "
+                "use --style-reference-mode full for a non-geometric web reference"
+            )
+        exact_box, crop_box = _mapped_name_boxes(
+            layout, sample.size, args.crop_padding_ratio
         )
-
-    exact_box, crop_box = _mapped_name_boxes(
-        layout, sample.size, args.crop_padding_ratio
+    else:
+        exact_box = None
+        crop_box = (0, 0, sample.width, sample.height)
+    profile_path = getattr(args, "product_profile", None)
+    product_profile = (
+        load_product_profile(profile_path) if profile_path is not None else None
+    )
+    standard_size = (
+        product_profile.preview_name_standard_size.api_value()
+        if product_profile is not None
+        else "1536x512"
+    )
+    long_name_size = (
+        product_profile.preview_name_long_size.api_value()
+        if product_profile is not None
+        else "2048x688"
     )
     style_reference = sample.crop(crop_box)
     debug = sample.copy()
     debug_draw = ImageDraw.Draw(debug)
     debug_draw.rectangle(crop_box, outline=(0, 220, 90, 255), width=3)
-    debug_draw.rectangle(exact_box, outline=(0, 130, 255, 255), width=3)
+    if exact_box is not None:
+        debug_draw.rectangle(exact_box, outline=(0, 130, 255, 255), width=3)
 
     targets = {
         "config": output_dir / CONFIG_NAME,
@@ -238,6 +277,7 @@ def configure(args: argparse.Namespace) -> dict[str, Path]:
         "layout": _relative_path(layout_path, output_dir, "layout"),
         "art": _relative_path(art_path, output_dir, "art"),
         "style_reference": STYLE_REFERENCE_NAME,
+        "style_reference_mode": style_reference_mode,
         "prompt_template": PROMPT_TEMPLATE_NAME,
         "layout_snapshot": _snapshot(layout),
         "normalization": {
@@ -254,8 +294,11 @@ def configure(args: argparse.Namespace) -> dict[str, Path]:
         },
         "generation": {
             "model": "gpt-image-2",
-            "standard_size": "1536x512",
-            "long_name_size": "2048x688",
+            "product_profile_id": (
+                product_profile.profile_id if product_profile is not None else None
+            ),
+            "standard_size": standard_size,
+            "long_name_size": long_name_size,
             "long_name_scale_threshold": args.long_name_scale_threshold,
             "quality": "high",
             "background": "transparent",
@@ -447,6 +490,15 @@ def create_prompt(args: argparse.Namespace) -> dict[str, Any]:
     size = generation.get(size_key)
     if not isinstance(size, str) or not re.fullmatch(r"\d+x\d+", size):
         raise NamePromptError(f"generation.{size_key} must use WIDTHxHEIGHT")
+    try:
+        size = validate_generation_size(
+            size,
+            model=str(generation.get("model")),
+            label=f"generation.{size_key}",
+            allow_auto=False,
+        )
+    except ImageSizeError as exc:
+        raise NamePromptError(str(exc)) from exc
 
     output = args.output.expanduser().resolve()
     request_output = (
@@ -527,7 +579,7 @@ def main(argv: list[str] | None = None) -> int:
             if warning:
                 print(f"  warning: {warning}", file=sys.stderr)
         return 0
-    except (ConfigError, NamePromptError, OSError) as exc:
+    except (ConfigError, NamePromptError, ProductProfileError, OSError) as exc:
         parser.error(str(exc))
         return 2
 

@@ -1,23 +1,35 @@
 # PawMarvel Template Generator MVP
 
-A lightweight Python toolset for testing low-resolution personalized pet design
-templates.
+A lightweight Python toolset for testing a profile-driven personalized pet
+design workflow from reusable preview artifacts through a high-resolution print
+candidate.
 
 The MVP provides:
 
 - `pawmarvel-generate`: prompt-driven GPT Image 2 generation/editing with a
-  sample image, a pet image, or both.
-- `pawmarvel-layout-config`: localhost visual editor for `layout.json`, with
-  font-name preview or optional generated-name PNG preview.
-- `pawmarvel-name-prompt`: offline, layout-aware name prompt configuration and
-  per-name fit validation.
-- `pawmarvel-pet-prompt`: one-time direct multimodal prompt authoring with an
-  optional visual critic and a legacy structured-analysis fallback.
-- `pawmarvel-render`: deterministic Pillow composition of art, pet, and either
-  a font-rendered or generated-image name.
+  sample image, a pet image, or both; manual profile mode derives the selected
+  preview-art or transformed-pet size from `product-profile.json`.
+- `pawmarvel-layout-config`: localhost visual editor for `layout.json`, using
+  deterministic font-name preview in the MVP.
+- `pawmarvel-name-prompt`: implemented experimental support for a future
+  AI-generated name-image extension; excluded from the MVP workflow.
+- `pawmarvel-render`: deterministic Pillow composition of art, pet, and a
+  font-rendered name in the MVP.
 - `pawmarvel-poc-run`: one-command pet transformation and final preview test.
-- `pawmarvel-pipeline`: one-command template authoring plus a tracked preview
-  run, with font or AI-generated name lettering.
+- `pawmarvel-pipeline`: one-command template authoring, tracked preview, print
+  preparation, and optional clean bundle publication using font-rendered name
+  lettering by default.
+- `pawmarvel-upscale`: prepare independently upscaled print layers, a derived
+  `layout-print.json`, and a checksum manifest using deterministic Lanczos or
+  Bria Increase Resolution.
+- `pawmarvel-product-profile`: derive reusable, exact-aspect preview art and pet
+  dimensions plus reserved future name-image dimensions from a product print
+  canvas; optional screenshot normalization is diagnostic only and is not used
+  by the pipeline.
+- `pawmarvel-bundle`: publish a clean, OFL-licensed template bundle containing
+  low-resolution web art/layout, high-resolution print art/layout, one finished
+  design reference, both design-specific prompts, and a representative
+  transformed-pet QA asset.
 
 ## Documentation
 
@@ -25,12 +37,11 @@ The MVP provides:
 - [MVP design](docs/OFFLINE_PERSONALIZATION_TOOLSET_DESIGN.md)
 - [Future iterations](docs/FUTURE_PERSONALIZATION_ITERATIONS.md)
 
-The complete non-secret LifeIsGood test fixture is in
-[`examples/life-is-good`](examples/life-is-good): reference design,
-representative pet, art prompt, and approved pet-transform baseline. The
-separate [`examples/charlie-well-trained`](examples/charlie-well-trained)
-fixture provides a different reference style and user pet for the one-command
-pipeline comparison. The operations guide refers only to repository assets.
+Design folders such as [`examples/life-is-good`](examples/life-is-good) and
+[`examples/charlie-well-trained`](examples/charlie-well-trained) contain their
+finished reference plus design-specific art and pet-transformation prompts.
+Reusable customer-pet fixtures live in
+[`examples/pet-inputs`](examples/pet-inputs).
 
 ## Install
 
@@ -46,38 +57,79 @@ python3 -m venv .venv
 .venv/bin/pawmarvel-generate --help
 .venv/bin/pawmarvel-layout-config --help
 .venv/bin/pawmarvel-name-prompt --help
-.venv/bin/pawmarvel-pet-prompt --help
 .venv/bin/pawmarvel-render --help
 .venv/bin/pawmarvel-poc-run --help
 .venv/bin/pawmarvel-pipeline --help
+.venv/bin/pawmarvel-upscale --help
+.venv/bin/pawmarvel-product-profile --help
+.venv/bin/pawmarvel-bundle --help
 ```
 
-Tool 1 and the pet-prompt generator read the API key from `--api-key-file` or
-`OPENAI_API_KEY`. The layout, name-prompt, and render tools work offline. The
-POC runner calls Tool 1 once and the renderer once.
+Tool 1 reads the API key from `--api-key-file` or `OPENAI_API_KEY`. The layout,
+name-prompt, and render tools work offline. The POC runner calls Tool 1 once and
+the renderer once.
+It can instead reuse `--transformed-pet` with an explicit `--layout`, which is
+the no-generation path used to inspect a prepared print bundle.
 
-Use `pawmarvel-pipeline` when starting from a new sample design. It generates
-the art and reusable pet prompt, transforms a representative pet, waits for the
-local layout editor to be saved and closed, then renders a preview/debug pair
-and writes an exact layout snapshot plus `run.json` provenance. Select
-`--name-method font` or `--name-method ai`.
+Use `pawmarvel-pipeline` when starting from a new finished design. It generates
+art with the design's art prompt, transforms a representative pet using the
+design's pet prompt plus exactly one finished reference, waits for the local
+layout editor to be saved and closed, then renders a preview/debug pair and
+can continue through print upscaling, print rendering, bundle publication, and
+`run.json` provenance. It makes image API calls only; it does not derive prompts
+through a text model. Use the default `--name-method font` for the MVP. Supply
+`--template-id` with `--bundle-output-dir` to enable the complete publication
+path; this mode requires a product profile. The command otherwise requires
+either `--product-profile` (recommended) or the legacy
+`--art-resolution WIDTHxHEIGHT`. A profile derives the preview art, transformed
+pet, reserved future name-image, and print dimensions rather than trusting
+screenshot pixels.
 
-`pawmarvel-pet-prompt` uses GPT-5.6 through the Responses API while authoring a
-template. Direct mode is the default: it writes the final prompt from the sample
-and optional background-only `art.png`, then runs a second visual critic call by
-default. It writes `pet-transform.md` and a schema-v2 provenance JSON file. Add
-`--no-critic-pass` for one-call authoring or `--strategy structured` to retain
-the original JSON-analysis compiler. The generated prompt later runs through
-`pawmarvel-generate` with only the user pet image.
+After a successful run, repeat the same command with `--rerun-step art`,
+`--rerun-step pet`, or `--rerun-step layout` to replace only that authoring
+stage. The option is repeatable, and the pipeline then refreshes preview,
+provenance, and any requested print/bundle outputs. Layout-only reruns are
+offline. Selective reruns require the existing `run.json` and cannot be combined
+with broad `--force`.
 
-Pass `--name-image generated-name.png` to the layout editor, renderer, or POC
-runner to use AI-generated lettering. Omit it to retain the original font-name
-behavior. Both modes reuse the same `layout.json` name box.
+After preview inspection, pass the template directory, transformed pet, and
+product profile directly to `pawmarvel-upscale`; it reads
+`TEMPLATE_DIR/layout.json` by default. No `layout.snapshot.json`, pipeline
+`run.json`, or approval artifact is required, so the manual command sequence can
+complete the same print test. The final `pawmarvel-render` invocation validates
+the prepared print bundle against the profile and writes a final-review
+manifest. A profile whose vendor requirements are not confirmed produces a
+print candidate, not an automatic vendor-ready certification.
 
-Run `pawmarvel-name-prompt configure` after the initial font-mode layout is
-saved. It derives a cropped lettering reference and immutable layout snapshot.
-Then run `pawmarvel-name-prompt create` for each name; the command rejects names
-that cannot meet the template's measured width and legibility constraints.
+Design-specific prompts are treated like source code. For pet transformation,
+`pawmarvel-generate` sends one finished design first for pose, expression, crop,
+and style and the customer pet second for identity. Working directories and
+published bundles do not carry customer source data; each bundle does carry its
+exact `art-template.md` and `pet-transform.md` contract files.
+
+The layout editor compares the checked-in OFL font catalog with the lettering
+region in the reference when given `--font-catalog assets/fonts`. It preselects
+and labels the best local match, reports a conservative confidence score, and
+saves the human-confirmed family in `layout.json`. Supplying `--font` bypasses
+automatic selection as an explicit override; production bundles ship only that
+TTF and its `OFL.txt`. macOS system fonts are not valid bundle inputs.
+The editor separates the three highest-ranked matches from a searchable list of
+every approved catalog font. Three is the recommendation count, not a catalog
+limit; adding a licensed TTF/OFL family under the catalog makes it available on
+the next run. `layout.json` includes `"model": "gpt-image-2"` for prompts whose pose and expression
+directives must run verbatim; omitting the field selects the consumer's Gemini
+route.
+
+Expanded font mode adds candidates from the pinned
+`assets/fonts/expanded-catalog.json`. It downloads them into a checksum-addressed
+cache, validates both the TTF and OFL 1.1 license, and ranks them with the local
+fallback catalog. Only the operator-confirmed font is copied into the template
+and bundle. `--font-offline` prohibits downloads and uses cached plus local
+candidates.
+
+AI-generated name images remain implemented only for future experimentation.
+They are documented in Appendix A of the operations guide and are not part of
+MVP template acceptance or print preparation.
 
 ## Tests
 

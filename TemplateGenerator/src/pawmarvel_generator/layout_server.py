@@ -20,6 +20,10 @@ from PIL import Image, ImageFont, UnidentifiedImageError
 
 from .cli import _atomic_write_bytes
 from .config import ConfigError, Layout, load_layout, parse_layout, write_layout
+from .font_catalog import FontCandidate, FontCatalogError, discover_font_catalog
+from .expanded_font_catalog import ExpandedFontCatalogError, materialize_expanded_fonts
+from .font_license import resolve_ofl_license
+from .font_match import rank_fonts
 from .renderer import RenderError, render_with_layout, validate_name_image
 
 
@@ -56,10 +60,19 @@ class EditorConfig:
     reference: Path
     pet: Path
     pet_name: str
-    font: Path
+    font: Path | None
     output: Path
+    font_license: Path | None = None
+    font_catalogs: tuple[Path, ...] = ()
+    runtime_model: str | None = "gpt-image-2"
     name_image: Path | None = None
     force: bool = False
+    auto_font: bool = False
+    font_catalog_mode: str = "local"
+    font_index: Path | None = None
+    font_cache: Path | None = None
+    font_shortlist_limit: int = 24
+    font_offline: bool = False
 
     @property
     def template_dir(self) -> Path:
@@ -69,29 +82,39 @@ class EditorConfig:
     def calibration_output(self) -> Path:
         return self.template_dir / "qa" / "calibration-preview.png"
 
-    @property
-    def bundled_font(self) -> Path:
-        return self.template_dir / "fonts" / self.font.name
-
-
-def _validate_editor_config(config: EditorConfig) -> EditorConfig:
+def _validate_editor_config(
+    config: EditorConfig,
+) -> tuple[EditorConfig, tuple[FontCandidate, ...]]:
+    auto_font = config.font is None
+    font = config.font.expanduser().resolve() if config.font else None
+    font_license = resolve_ofl_license(font, config.font_license) if font else None
     resolved = EditorConfig(
         art=config.art.expanduser().resolve(),
         reference=config.reference.expanduser().resolve(),
         pet=config.pet.expanduser().resolve(),
         pet_name=config.pet_name.strip(),
-        font=config.font.expanduser().resolve(),
+        font=font,
         output=config.output.expanduser().resolve(),
+        font_license=font_license,
+        font_catalogs=tuple(
+            path.expanduser().resolve() for path in config.font_catalogs
+        ),
+        runtime_model=config.runtime_model,
         name_image=(
             config.name_image.expanduser().resolve() if config.name_image else None
         ),
         force=config.force,
+        auto_font=auto_font,
+        font_catalog_mode=config.font_catalog_mode,
+        font_index=config.font_index.expanduser().resolve() if config.font_index else None,
+        font_cache=config.font_cache.expanduser().resolve() if config.font_cache else None,
+        font_shortlist_limit=config.font_shortlist_limit,
+        font_offline=config.font_offline,
     )
     for path, label in (
         (resolved.art, "art"),
         (resolved.reference, "reference"),
         (resolved.pet, "pet"),
-        (resolved.font, "font"),
     ):
         if not path.is_file():
             raise ConfigError(f"{label} does not exist: {path}")
@@ -115,10 +138,45 @@ def _validate_editor_config(config: EditorConfig) -> EditorConfig:
             image.load()
         with Image.open(resolved.pet) as image:
             image.load()
-        ImageFont.truetype(str(resolved.font), size=12)
     except (UnidentifiedImageError, OSError) as exc:
         raise ConfigError(f"editor input cannot be decoded: {exc}") from exc
-    return resolved
+    additional_fonts: list[Path] = []
+    if resolved.output.is_file():
+        try:
+            additional_fonts.append(
+                load_layout(resolved.template_dir, resolved.output).font_path
+            )
+        except ConfigError:
+            pass
+    expanded_fonts: tuple[Path, ...] = ()
+    if resolved.font_catalog_mode not in {"local", "expanded"}:
+        raise ConfigError("font catalog mode must be local or expanded")
+    if resolved.font_catalog_mode == "expanded":
+        if resolved.font_index is None or resolved.font_cache is None:
+            raise ConfigError("expanded font mode requires --font-index and --font-cache")
+        try:
+            expanded_fonts = materialize_expanded_fonts(
+                resolved.font_index,
+                resolved.font_cache,
+                limit=resolved.font_shortlist_limit,
+                offline=resolved.font_offline,
+            )
+        except ExpandedFontCatalogError as exc:
+            if not resolved.font_catalogs and resolved.font is None:
+                raise ConfigError(str(exc)) from exc
+            print(f"Font catalog warning: {exc}; using local OFL catalog.", file=sys.stderr)
+    try:
+        candidates = discover_font_catalog(
+            resolved.font,
+            resolved.font_license,
+            catalog_roots=resolved.font_catalogs,
+            additional_fonts=(*additional_fonts, *expanded_fonts),
+        )
+    except FontCatalogError as exc:
+        raise ConfigError(str(exc)) from exc
+    if resolved.font is None:
+        resolved = EditorConfig(**{**resolved.__dict__, "font": candidates[0].font, "font_license": candidates[0].license})
+    return resolved, candidates
 
 
 def _relative(path: Path, root: Path) -> str:
@@ -128,7 +186,7 @@ def _relative(path: Path, root: Path) -> str:
 def _default_layout(config: EditorConfig) -> dict[str, Any]:
     with Image.open(config.art) as art:
         width, height = art.size
-    return {
+    result = {
         "schema_version": 1,
         "art": _relative(config.art, config.template_dir),
         "pet": {
@@ -155,20 +213,28 @@ def _default_layout(config: EditorConfig) -> dict[str, Any]:
             "vertical_align": "middle",
         },
     }
+    if config.runtime_model is not None:
+        result["model"] = config.runtime_model
+    return result
 
 
 def _initial_layout(config: EditorConfig) -> dict[str, Any]:
     if config.output.is_file():
         try:
-            return load_layout(config.template_dir, config.output).to_dict()
+            data = load_layout(config.template_dir, config.output).to_dict()
         except ConfigError:
             data = json.loads(config.output.read_text(encoding="utf-8"))
-            return parse_layout(
+            data = parse_layout(
                 data,
                 config.template_dir,
                 art_override=config.art,
                 font_override=config.font,
             ).to_dict()
+        if config.runtime_model is None:
+            data.pop("model", None)
+        else:
+            data["model"] = config.runtime_model
+        return data
     return _default_layout(config)
 
 
@@ -183,21 +249,59 @@ def _png_bytes(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
-def _draft_layout(config: EditorConfig, payload: Mapping[str, Any]) -> Layout:
+def _candidate_for_layout(
+    candidates: tuple[FontCandidate, ...], raw_layout: Mapping[str, Any]
+) -> FontCandidate:
+    name = raw_layout.get("name")
+    configured = name.get("font") if isinstance(name, Mapping) else None
+    configured_name = Path(configured).name if isinstance(configured, str) else None
+    if configured_name is not None:
+        for candidate in candidates:
+            if candidate.font.name == configured_name:
+                return candidate
+    return candidates[0]
+
+
+def _draft_layout(
+    config: EditorConfig,
+    candidates: tuple[FontCandidate, ...],
+    payload: Mapping[str, Any],
+) -> tuple[Layout, FontCandidate]:
     raw = payload.get("layout")
     if not isinstance(raw, Mapping):
         raise ConfigError("request must contain a layout object")
     draft = deepcopy(dict(raw))
     draft["art"] = _relative(config.art, config.template_dir)
+    if config.runtime_model is None:
+        draft.pop("model", None)
+    else:
+        draft["model"] = config.runtime_model
     name = draft.get("name")
     if not isinstance(name, dict):
         raise ConfigError("layout.name must be an object")
-    name["font"] = f"fonts/{config.font.name}"
-    return parse_layout(
-        draft,
-        config.template_dir,
-        art_override=config.art,
-        font_override=config.font,
+    requested_font = payload.get("font_id")
+    if requested_font is None:
+        candidate = _candidate_for_layout(candidates, draft)
+    else:
+        candidate = next(
+            (
+                value
+                for value in candidates
+                if value.candidate_id == requested_font
+            ),
+            None,
+        )
+        if candidate is None:
+            raise ConfigError("selected font is not in the approved OFL catalog")
+    name["font"] = candidate.relative_name
+    return (
+        parse_layout(
+            draft,
+            config.template_dir,
+            art_override=config.art,
+            font_override=candidate.font,
+        ),
+        candidate,
     )
 
 
@@ -210,16 +314,52 @@ def _read_static(name: str) -> bytes:
 
 
 def _make_handler(
-    config: EditorConfig, lifecycle: _EditorLifecycle
+    config: EditorConfig,
+    candidates: tuple[FontCandidate, ...],
+    lifecycle: _EditorLifecycle,
 ) -> type[BaseHTTPRequestHandler]:
     with Image.open(config.art) as art_image:
         canvas = {"width": art_image.width, "height": art_image.height}
+    initial_layout = _initial_layout(config)
+    matches = rank_fonts(
+        config.reference,
+        initial_layout["name"]["box"],
+        (canvas["width"], canvas["height"]),
+        config.pet_name,
+        candidates,
+    )
+    # An explicit --font is an override. Without it, the best visual match is
+    # preselected even when an older layout contains a different font.
+    selected_candidate = matches[0].candidate if config.auto_font else _candidate_for_layout(candidates, initial_layout)
+    initial_layout["name"]["font"] = selected_candidate.relative_name
     bootstrap = {
-        "layout": _initial_layout(config),
+        "layout": initial_layout,
         "canvas": canvas,
         "petName": config.pet_name,
         "nameMode": "image" if config.name_image else "font",
         "referenceDataUrl": _data_url(config.reference),
+        "selectedFontId": selected_candidate.candidate_id,
+        "fontCandidates": [
+            {
+                "id": candidate.candidate_id,
+                "label": candidate.label,
+                "relativeName": candidate.relative_name,
+                "sha256": candidate.sha256,
+                "matchScore": next(match.score for match in matches if match.candidate == candidate),
+                "recommended": candidate == matches[0].candidate,
+                "rank": next(index for index, match in enumerate(matches, 1) if match.candidate == candidate),
+            }
+            for candidate in candidates
+        ],
+        "fontRecommendation": {
+            "method": "reference_visual_match_v1",
+            "confidence": matches[0].confidence,
+            "fontId": matches[0].candidate.candidate_id,
+            "rankedFontIds": [match.candidate.candidate_id for match in matches],
+        },
+    }
+    candidates_by_id = {
+        candidate.candidate_id: candidate for candidate in candidates
     }
 
     class Handler(BaseHTTPRequestHandler):
@@ -259,6 +399,14 @@ def _make_handler(
                 if content_type:
                     self._send(HTTPStatus.OK, content_type, _read_static(name))
                     return
+            font_prefix = "/fonts/"
+            if self.path.startswith(font_prefix):
+                lifecycle.touch()
+                candidate_id = self.path[len(font_prefix) :]
+                candidate = candidates_by_id.get(candidate_id)
+                if candidate is not None:
+                    self._send(HTTPStatus.OK, "font/ttf", candidate.font.read_bytes())
+                    return
             self._json_error(HTTPStatus.NOT_FOUND, "not found")
 
         def _read_payload(self) -> Mapping[str, Any]:
@@ -296,7 +444,7 @@ def _make_handler(
             try:
                 lifecycle.touch()
                 payload = self._read_payload()
-                layout = _draft_layout(config, payload)
+                layout, selected_font = _draft_layout(config, candidates, payload)
                 if self.path == "/preview":
                     preview = render_with_layout(
                         layout,
@@ -321,22 +469,49 @@ def _make_handler(
                     name_image=config.name_image,
                     debug=True,
                 )
-                config.bundled_font.parent.mkdir(parents=True, exist_ok=True)
-                if config.font != config.bundled_font:
-                    _atomic_write_bytes(config.bundled_font, config.font.read_bytes())
+                bundled_font = config.template_dir / selected_font.relative_name
+                bundled_license = config.template_dir / "fonts" / "OFL.txt"
+                bundled_font.parent.mkdir(parents=True, exist_ok=True)
+                if selected_font.font != bundled_font:
+                    _atomic_write_bytes(bundled_font, selected_font.font.read_bytes())
+                bundled_license.parent.mkdir(parents=True, exist_ok=True)
+                if selected_font.license != bundled_license:
+                    _atomic_write_bytes(
+                        bundled_license, selected_font.license.read_bytes()
+                    )
                 saved_layout = parse_layout(
                     layout.to_dict(),
                     config.template_dir,
                     art_override=config.art,
-                    font_override=config.bundled_font,
+                    font_override=bundled_font,
                 )
                 write_layout(config.output, saved_layout)
                 _atomic_write_bytes(config.calibration_output, _png_bytes(calibration))
+                recommendation_output = config.template_dir / "qa" / "font-recommendation.json"
+                recommendation = {
+                    "method": "reference_visual_match_v1",
+                    "recommended_font": matches[0].candidate.relative_name,
+                    "confidence": matches[0].confidence,
+                    "selected_font": selected_font.relative_name,
+                    "confirmed": True,
+                    "alternatives": [
+                        {"font": match.candidate.relative_name, "score": match.score}
+                        for match in matches[1:3]
+                    ],
+                }
+                _atomic_write_bytes(
+                    recommendation_output,
+                    (json.dumps(recommendation, indent=2) + "\n").encode("utf-8"),
+                )
                 lifecycle.saved.set()
                 response = {
                     "layout": str(config.output),
                     "calibration": str(config.calibration_output),
-                    "font": str(config.bundled_font),
+                    "font": str(bundled_font),
+                    "font_license": str(bundled_license),
+                    "font_id": selected_font.candidate_id,
+                    "font_label": selected_font.label,
+                    "font_recommendation": str(recommendation_output),
                     "name_mode": "image" if config.name_image else "font",
                 }
                 self._send(
@@ -353,9 +528,11 @@ def _make_handler(
 def create_server(
     config: EditorConfig, *, host: str = "127.0.0.1", port: int = 0
 ) -> ThreadingHTTPServer:
-    config = _validate_editor_config(config)
+    config, candidates = _validate_editor_config(config)
     lifecycle = _EditorLifecycle()
-    server = ThreadingHTTPServer((host, port), _make_handler(config, lifecycle))
+    server = ThreadingHTTPServer(
+        (host, port), _make_handler(config, candidates, lifecycle)
+    )
     setattr(server, "pawmarvel_lifecycle", lifecycle)
     return server
 
