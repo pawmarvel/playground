@@ -11,14 +11,175 @@ from PIL import Image, UnidentifiedImageError
 
 from .config import ConfigError, Layout, Rect, load_layout, parse_layout
 from .font_license import FontLicenseError, resolve_ofl_license
+from .product_profile import ProductProfile, ProductProfileError, load_product_profile
 
 
 TEMPLATE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 PROMPT_MAX_BYTES = 1024 * 1024
+CATALOG_FILENAME = "catalog.json"
 
 
 class BundleError(ValueError):
     """A template bundle violates the production consumer contract."""
+
+
+def catalog_template_id(design_id: str, product_profile_id: str) -> str:
+    if not TEMPLATE_ID_PATTERN.fullmatch(design_id):
+        raise BundleError(
+            "design id must be 3-64 lowercase letters, numbers, or internal hyphens"
+        )
+    value = f"{design_id}--{product_profile_id}"
+    if len(value) > 127 or not re.fullmatch(r"[a-z0-9][a-z0-9-]*[a-z0-9]", value):
+        raise BundleError("design and product profile IDs form an invalid template id")
+    return value
+
+
+def _catalog_entry(
+    *,
+    design_id: str,
+    profile: ProductProfile,
+    layout: Layout,
+    print_layout: Layout,
+    runtime_model: str | None,
+) -> dict[str, object]:
+    template_id = catalog_template_id(design_id, profile.profile_id)
+    return {
+        "template_id": template_id,
+        "design_id": design_id,
+        "product_profile_id": profile.profile_id,
+        "design": {"id": design_id},
+        "product_profile": profile.to_dict(),
+        "bundle": template_id,
+        "runtime_model": runtime_model or "gemini",
+        "preview": {
+            "canvas": {
+                "width": layout.canvas_width,
+                "height": layout.canvas_height,
+            },
+            "transformed_pet": profile.preview_pet_size.to_dict(),
+        },
+        "print": {
+            "canvas": {
+                "width": print_layout.canvas_width,
+                "height": print_layout.canvas_height,
+            },
+            "delivery_status": profile.print_spec["delivery_status"],
+        },
+    }
+
+
+def load_catalog(root: Path, *, validate_bundles: bool = True) -> dict[str, object]:
+    root = root.expanduser().resolve()
+    path = root / CATALOG_FILENAME
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BundleError(f"template catalog is not readable JSON: {path}") from exc
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise BundleError("template catalog schema_version must be 1")
+    entries = value.get("templates")
+    if not isinstance(entries, list):
+        raise BundleError("template catalog templates must be an array")
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise BundleError("template catalog entries must be objects")
+        template_id = entry.get("template_id")
+        design_id = entry.get("design_id")
+        profile_id = entry.get("product_profile_id")
+        identity = (template_id, design_id, profile_id)
+        if not all(isinstance(item, str) for item in identity):
+            raise BundleError("catalog identity fields must be strings")
+        assert isinstance(template_id, str)
+        assert isinstance(design_id, str)
+        assert isinstance(profile_id, str)
+        if template_id != catalog_template_id(design_id, profile_id):
+            raise BundleError(
+                "catalog template_id does not match its design/profile pair"
+            )
+        if entry.get("bundle") != template_id:
+            raise BundleError("catalog bundle must equal the relative template_id path")
+        if entry.get("design") != {"id": design_id}:
+            raise BundleError("catalog design metadata does not match design_id")
+        product_profile = entry.get("product_profile")
+        if (
+            not isinstance(product_profile, dict)
+            or product_profile.get("profile_id") != profile_id
+        ):
+            raise BundleError(
+                "catalog product_profile metadata does not match product_profile_id"
+            )
+        preview = entry.get("preview")
+        print_data = entry.get("print")
+        profile_preview = product_profile.get("preview")
+        profile_print = product_profile.get("print")
+        if not all(
+            isinstance(item, dict)
+            for item in (preview, print_data, profile_preview, profile_print)
+        ):
+            raise BundleError("catalog preview/print metadata must be objects")
+        assert isinstance(preview, dict)
+        assert isinstance(print_data, dict)
+        assert isinstance(profile_preview, dict)
+        assert isinstance(profile_print, dict)
+        if (
+            preview.get("canvas") != profile_preview.get("art")
+            or preview.get("transformed_pet")
+            != profile_preview.get("transformed_pet")
+            or print_data.get("canvas") != profile_print.get("canvas")
+            or print_data.get("delivery_status")
+            != profile_print.get("delivery_status")
+        ):
+            raise BundleError(
+                "catalog summary dimensions do not match product_profile metadata"
+            )
+        if not isinstance(entry.get("runtime_model"), str):
+            raise BundleError("catalog runtime_model must be a string")
+        if template_id in seen:
+            raise BundleError(f"catalog contains duplicate template id: {template_id}")
+        seen.add(template_id)
+        if validate_bundles:
+            validate_bundle(root / template_id)
+    return value
+
+
+def _write_catalog(root: Path, entry: dict[str, object]) -> None:
+    path = root / CATALOG_FILENAME
+    if path.exists():
+        catalog = load_catalog(root)
+        entries = catalog["templates"]
+        assert isinstance(entries, list)
+    else:
+        entries = []
+    template_id = entry["template_id"]
+    updated = [
+        item
+        for item in entries
+        if isinstance(item, dict) and item.get("template_id") != template_id
+    ]
+    updated.append(entry)
+    updated.sort(key=lambda item: str(item["template_id"]))
+    contents = (
+        json.dumps({"schema_version": 1, "templates": updated}, indent=2) + "\n"
+    ).encode()
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=".catalog-",
+            suffix=".tmp",
+            dir=root,
+            delete=False,
+        ) as output:
+            output.write(contents)
+            output.flush()
+            os.fsync(output.fileno())
+            temporary = output.name
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary:
+            Path(temporary).unlink(missing_ok=True)
 
 
 def _validate_png_alpha(path: Path, label: str) -> None:
@@ -122,7 +283,10 @@ def _validate_resolution_pair(preview: Layout, print_layout: Layout) -> None:
 
 def validate_bundle(root: Path, *, validate_template_id: bool = True) -> Layout:
     root = root.expanduser().resolve()
-    if validate_template_id and not TEMPLATE_ID_PATTERN.fullmatch(root.name):
+    if validate_template_id and (
+        len(root.name) > 127
+        or not re.fullmatch(r"[a-z0-9][a-z0-9-]*[a-z0-9]", root.name)
+    ):
         raise BundleError(f"bundle directory name is not a valid template id: {root.name}")
     if not root.is_dir():
         raise BundleError(f"bundle directory does not exist: {root}")
@@ -196,7 +360,8 @@ def publish_bundle(
     *,
     template_dir: Path,
     output_dir: Path,
-    template_id: str,
+    design_id: str,
+    product_profile: Path,
     exemplar: Path,
     reference_design: Path,
     art_prompt: Path,
@@ -207,12 +372,13 @@ def publish_bundle(
     runtime_model: str | None = "gpt-image-2",
     force: bool = False,
 ) -> Path:
-    if not TEMPLATE_ID_PATTERN.fullmatch(template_id):
-        raise BundleError(
-            "template id must be 3-64 lowercase letters, numbers, or internal hyphens"
-        )
     template_dir = template_dir.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
+    try:
+        profile = load_product_profile(product_profile)
+    except ProductProfileError as exc:
+        raise BundleError(str(exc)) from exc
+    template_id = catalog_template_id(design_id, profile.profile_id)
     destination = output_dir / template_id
     exemplar = exemplar.expanduser().resolve()
     reference_design = reference_design.expanduser().resolve()
@@ -243,6 +409,16 @@ def publish_bundle(
     _validate_png_alpha(preview_layout.art_path, "preview art")
     _validate_png_alpha(selected_print_art, "print art")
     _validate_resolution_pair(preview_layout, print_layout)
+    if (preview_layout.canvas_width, preview_layout.canvas_height) != (
+        profile.preview_art_size.width,
+        profile.preview_art_size.height,
+    ):
+        raise BundleError("preview layout canvas does not match the product profile")
+    if (print_layout.canvas_width, print_layout.canvas_height) != (
+        profile.print_size.width,
+        profile.print_size.height,
+    ):
+        raise BundleError("print layout canvas does not match the product profile")
     try:
         license_path = resolve_ofl_license(preview_layout.font_path, font_license)
     except FontLicenseError as exc:
@@ -253,6 +429,7 @@ def publish_bundle(
     output_dir.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=f".{template_id}-", dir=output_dir))
     backup: Path | None = None
+    installed = False
     try:
         (stage / "qa").mkdir()
         (stage / "fonts").mkdir()
@@ -302,7 +479,18 @@ def publish_bundle(
                 shutil.rmtree(backup)
             os.replace(destination, backup)
         os.replace(stage, destination)
+        installed = True
         validate_bundle(destination)
+        _write_catalog(
+            output_dir,
+            _catalog_entry(
+                design_id=design_id,
+                profile=profile,
+                layout=preview_layout,
+                print_layout=print_layout,
+                runtime_model=runtime_model,
+            ),
+        )
         if backup is not None:
             shutil.rmtree(backup)
         return destination
@@ -311,6 +499,8 @@ def publish_bundle(
             if destination.exists():
                 shutil.rmtree(destination)
             os.replace(backup, destination)
+        elif installed and destination.exists():
+            shutil.rmtree(destination)
         raise
     finally:
         if stage.exists():

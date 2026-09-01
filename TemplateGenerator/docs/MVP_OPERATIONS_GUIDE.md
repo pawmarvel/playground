@@ -115,8 +115,9 @@ the bundle flags below, it continues after preview generation through print
 upscaling, print rendering, and clean bundle publication.
 
 This section is the one-command alternative to the manual E2E in sections
-5–12. Both examples publish `bundles/life-is-good`; choose one, or use a
-different `--template-id` when retaining both results.
+5–12. Both examples publish the same catalog entry,
+`life-is-good--blanket-king-9375x12375`; choose either path. The identity is
+derived from the design ID plus the selected product profile ID.
 
 ```bash
 PAWMARVEL_PIPELINE_TEMPLATE="$PAWMARVEL_PROJECT/work/life-is-good"
@@ -139,7 +140,7 @@ pawmarvel_pipeline_debug() {
     --run-dir "$PAWMARVEL_PIPELINE_RUN" \
     --print-dir "$PAWMARVEL_PIPELINE_PRINT" \
     --bundle-output-dir "$PAWMARVEL_PIPELINE_BUNDLES" \
-    --template-id life-is-good \
+    --design-id life-is-good \
     --upscale-backend deterministic \
     --quality high \
     "$@"
@@ -186,7 +187,8 @@ work/life-is-good/
       final-print-debug.png
       fonts/Anton-Regular.ttf
       fonts/OFL.txt
-bundles/life-is-good/
+bundles/catalog.json
+bundles/life-is-good--blanket-king-9375x12375/
   art.png
   layout.json
   print/art.png
@@ -428,7 +430,7 @@ PAWMARVEL_CHARLIE_RUN="$PAWMARVEL_CHARLIE_TEMPLATE/runs/sausage-dog-puppy"
   --run-dir "$PAWMARVEL_CHARLIE_RUN" \
   --print-dir "$PAWMARVEL_CHARLIE_RUN/print" \
   --bundle-output-dir "$PAWMARVEL_PROJECT/bundles" \
-  --template-id charlie-well-trained \
+  --design-id charlie-well-trained \
   --upscale-backend deterministic \
   --quality high \
   --rerun-step layout
@@ -440,7 +442,8 @@ Confirm the recommendation, change the text color to near-black, reduce the name
 box to match the small reference label, and then save. No API call is made. The
 pipeline regenerates
 `layout.snapshot.json`, print layout, print candidate, and
-`bundles/charlie-well-trained` with the confirmed font.
+`bundles/charlie-well-trained--blanket-king-9375x12375` with the confirmed
+font.
 
 ## 9. Render the low-resolution preview
 
@@ -504,7 +507,7 @@ human inspection at 100% zoom.
 The section 4 debug function retains all print and publication flags, so every
 selective rerun automatically repeats both print-preparation stages. To debug
 only through low-resolution preview, invoke the pipeline without `--print-dir`,
-`--bundle-output-dir`, and `--template-id`.
+`--bundle-output-dir`, and `--design-id`.
 
 ## 11. Render the print candidate
 
@@ -531,7 +534,8 @@ PAWMARVEL_BUNDLES="$PAWMARVEL_PROJECT/bundles"
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-bundle" \
   --template-dir "$PAWMARVEL_TEMPLATE" \
-  --template-id life-is-good \
+  --design-id life-is-good \
+  --product-profile "$PAWMARVEL_TEMPLATE/product-profile.json" \
   --output-dir "$PAWMARVEL_BUNDLES" \
   --print-art "$PAWMARVEL_PRINT/art-print.png" \
   --print-layout "$PAWMARVEL_PRINT/layout-print.json" \
@@ -546,7 +550,8 @@ The clean consumer bundle contains one finished design reference and its exact
 two design-specific prompt sources:
 
 ```text
-bundles/life-is-good/
+bundles/catalog.json
+bundles/life-is-good--blanket-king-9375x12375/
   art.png
   layout.json
   print/art.png
@@ -558,6 +563,11 @@ bundles/life-is-good/
   fonts/Anton-Regular.ttf
   fonts/OFL.txt
 ```
+
+`catalog.json` records the composite template ID, design ID, complete product
+profile metadata, preview/print dimensions, runtime model, and relative bundle
+path. The frontend selects a template by both design and product variant; it
+must not key a catalog by design alone.
 
 The frontend or backend reads `pet-transform.md` from the same bundle as
 `reference-design.png` and combines both with the current user pet.
@@ -579,7 +589,7 @@ Set separate per-personalization paths for WhiteFuffyDog:
 
 ```bash
 PAWMARVEL_BUNDLES="$PAWMARVEL_PROJECT/bundles"
-PAWMARVEL_BUNDLE="$PAWMARVEL_BUNDLES/life-is-good"
+PAWMARVEL_BUNDLE="$PAWMARVEL_BUNDLES/life-is-good--blanket-king-9375x12375"
 PAWMARVEL_SECOND_PET="$PAWMARVEL_PROJECT/examples/pet-inputs/white-fluffy-dog.png"
 PAWMARVEL_SECOND_NAME="FLUFFY"
 PAWMARVEL_SECOND_RUN="$PAWMARVEL_PROJECT/work/bundle-runs/life-is-good-white-fluffy-dog"

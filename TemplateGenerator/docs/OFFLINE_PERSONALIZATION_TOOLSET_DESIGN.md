@@ -50,9 +50,11 @@ The POC succeeds when an operator can:
 5. render a repeatable low-resolution preview;
 6. independently upscale the art and transformed pet and mechanically derive
    `layout-print.json`;
-7. render an exact-size print candidate; and
+7. render an exact-size print candidate;
 8. publish a clean two-resolution template bundle containing one finished
-   design reference and both corresponding prompts.
+   design reference and both corresponding prompts; and
+9. register it in a catalog whose identity includes both the design and product
+   profile.
 
 ## 4. Scope
 
@@ -306,11 +308,12 @@ It performs:
 
 There is no prompt-authoring stage and no text-model API call. `run.json`
 records design prompt source paths and hashes without copying prompt files into
-the mutable work tree. Supplying `--template-id` and `--bundle-output-dir`
-together publishes exact prompt copies in the bundle and enables
+the mutable work tree. Supplying `--design-id` and `--bundle-output-dir`
+together publishes exact prompt copies in the bundle, creates the catalog ID
+`<design-id>--<product-profile-id>`, and enables
 the full print/publication path and requires `--product-profile`; legacy
-explicit art resolution remains preview-only. Font mode has nine visible
-stages for the complete path; experimental AI-name mode has ten.
+explicit art resolution remains preview-only. The complete profile-backed path
+has nine visible stages.
 
 The pipeline also supports repeatable `--rerun-step art`, `--rerun-step pet`,
 and `--rerun-step layout` selections after a successful full run. Only selected
@@ -355,10 +358,11 @@ dimensions. Neither backend removes the need for 100% visual inspection.
 
 ## 14. Clean bundle contract
 
-`pawmarvel-bundle` publishes only runtime/template assets:
+`pawmarvel-bundle` publishes runtime/template assets and updates their catalog:
 
 ```text
-bundles/<template-id>/
+bundles/catalog.json
+bundles/<design-id>--<product-profile-id>/
   art.png
   layout.json
   print/art.png
@@ -370,6 +374,14 @@ bundles/<template-id>/
   fonts/<font>.ttf
   fonts/OFL.txt
 ```
+
+`catalog.json` is schema-versioned and contains one entry per design/product
+pair. Each entry includes the composite `template_id`, separate `design_id` and
+`product_profile_id`, design metadata, the complete product-profile metadata,
+preview/print dimensions, runtime model, and relative bundle path. This avoids
+collisions when the same visual design is published for multiple products or
+variants. Catalog publication replaces only the matching pair and preserves
+other variants.
 
 The bundle contains exactly one finished reference and the corresponding
 `art-template.md` and `pet-transform.md`. It contains no prompt analysis,
@@ -465,7 +477,8 @@ Unit and integration tests verify:
 - design folders contain their reference and two corresponding prompt sources;
 - layout geometry, alpha trimming, font fitting, profile size derivation,
   preview/print scaling, manifests, and OFL licensing;
-- bundle publication includes one reference plus both required prompts; and
+- bundle publication includes one reference plus both required prompts;
+- the catalog distinguishes product variants that share a design ID; and
 - local editor save/close behavior.
 
 All API clients are mocked in the default suite.

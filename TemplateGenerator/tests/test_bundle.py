@@ -8,7 +8,17 @@ from pathlib import Path
 from PIL import Image
 
 from helpers import copy_font, layout_data, make_image, make_transparent_mark
-from pawmarvel_generator.bundle import BundleError, publish_bundle, validate_bundle
+from pawmarvel_generator.bundle import (
+    BundleError,
+    load_catalog,
+    publish_bundle,
+    validate_bundle,
+)
+from pawmarvel_generator.image_size import ImageSize
+from pawmarvel_generator.product_profile import (
+    create_product_profile,
+    write_product_profile,
+)
 
 
 class BundleTests(unittest.TestCase):
@@ -17,7 +27,7 @@ class BundleTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.template = self.root / "authoring"
         self.template.mkdir()
-        make_transparent_mark(self.template / "art.png", size=(200, 300))
+        make_transparent_mark(self.template / "art.png", size=(672, 1008))
         fonts = self.template / "fonts"
         fonts.mkdir()
         copy_font(fonts)
@@ -33,7 +43,14 @@ class BundleTests(unittest.TestCase):
         self.print_dir = self.root / "print"
         self.print_dir.mkdir()
         self.print_art = make_transparent_mark(
-            self.print_dir / "art-print.png", size=(400, 600)
+            self.print_dir / "art-print.png", size=(1344, 2016)
+        )
+        self.product_profile = write_product_profile(
+            self.root / "product-profile.json",
+            create_product_profile(
+                profile_id="test-blanket",
+                print_size=ImageSize(1344, 2016),
+            ),
         )
         print_layout = layout_data()
         print_layout["art"] = "art-print.png"
@@ -52,7 +69,8 @@ class BundleTests(unittest.TestCase):
         output = publish_bundle(
             template_dir=self.template,
             output_dir=self.root / "bundles",
-            template_id="life-is-good",
+            design_id="life-is-good",
+            product_profile=self.product_profile,
             exemplar=self.exemplar,
             reference_design=self.reference,
             art_prompt=self.art_prompt,
@@ -61,14 +79,26 @@ class BundleTests(unittest.TestCase):
             print_layout_path=self.print_layout,
         )
         layout = validate_bundle(output)
+        self.assertEqual(output.name, "life-is-good--test-blanket")
+        catalog = load_catalog(self.root / "bundles")
+        entry = catalog["templates"][0]
+        self.assertEqual(entry["design_id"], "life-is-good")
+        self.assertEqual(entry["product_profile_id"], "test-blanket")
+        self.assertEqual(entry["template_id"], "life-is-good--test-blanket")
+        self.assertEqual(entry["design"], {"id": "life-is-good"})
+        self.assertEqual(
+            entry["product_profile"]["profile_id"], "test-blanket"
+        )
+        self.assertEqual(entry["preview"]["canvas"], {"width": 672, "height": 1008})
+        self.assertEqual(entry["print"]["canvas"], {"width": 1344, "height": 2016})
         self.assertEqual(layout.runtime_model, "gpt-image-2")
         self.assertEqual(layout.art_relative, "art.png")
         print_layout = json.loads((output / "layout-print.json").read_text())
         self.assertEqual(print_layout["art"], "print/art.png")
         with Image.open(output / "art.png") as preview_art:
-            self.assertEqual(preview_art.size, (200, 300))
+            self.assertEqual(preview_art.size, (672, 1008))
         with Image.open(output / "print" / "art.png") as print_art:
-            self.assertEqual(print_art.size, (400, 600))
+            self.assertEqual(print_art.size, (1344, 2016))
         self.assertTrue((output / "fonts" / "OFL.txt").is_file())
         self.assertTrue((output / "qa" / "transformed-pet.png").is_file())
         self.assertTrue((output / "reference-design.png").is_file())
@@ -97,7 +127,8 @@ class BundleTests(unittest.TestCase):
         output = publish_bundle(
             template_dir=self.template,
             output_dir=self.root / "bundles",
-            template_id="gemini-template",
+            design_id="gemini-template",
+            product_profile=self.product_profile,
             exemplar=self.exemplar,
             reference_design=self.reference,
             art_prompt=self.art_prompt,
@@ -111,11 +142,45 @@ class BundleTests(unittest.TestCase):
             "model", json.loads((output / "layout-print.json").read_text())
         )
 
-    def test_publishes_preview_and_high_resolution_art_layout_pairs(self) -> None:
-        output = publish_bundle(
+    def test_catalog_distinguishes_product_variants_for_one_design(self) -> None:
+        alternate_profile = write_product_profile(
+            self.root / "alternate-profile.json",
+            create_product_profile(
+                profile_id="alternate-blanket",
+                print_size=ImageSize(1344, 2016),
+            ),
+        )
+        common = {
+            "template_dir": self.template,
+            "output_dir": self.root / "bundles",
+            "design_id": "life-is-good",
+            "exemplar": self.exemplar,
+            "reference_design": self.reference,
+            "art_prompt": self.art_prompt,
+            "pet_prompt": self.pet_prompt,
+            "print_art": self.print_art,
+            "print_layout_path": self.print_layout,
+        }
+
+        first = publish_bundle(product_profile=self.product_profile, **common)
+        second = publish_bundle(product_profile=alternate_profile, **common)
+
+        self.assertNotEqual(first, second)
+        catalog = load_catalog(self.root / "bundles")
+        self.assertEqual(
+            [entry["template_id"] for entry in catalog["templates"]],
+            [
+                "life-is-good--alternate-blanket",
+                "life-is-good--test-blanket",
+            ],
+        )
+
+    def test_catalog_rejects_product_metadata_that_disagrees_with_summary(self) -> None:
+        publish_bundle(
             template_dir=self.template,
             output_dir=self.root / "bundles",
-            template_id="high-resolution",
+            design_id="life-is-good",
+            product_profile=self.product_profile,
             exemplar=self.exemplar,
             reference_design=self.reference,
             art_prompt=self.art_prompt,
@@ -123,7 +188,28 @@ class BundleTests(unittest.TestCase):
             print_art=self.print_art,
             print_layout_path=self.print_layout,
         )
-        self.assertEqual(validate_bundle(output).canvas_width, 200)
+        catalog_path = self.root / "bundles" / "catalog.json"
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        catalog["templates"][0]["preview"]["canvas"]["width"] = 999
+        catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+
+        with self.assertRaisesRegex(BundleError, "summary dimensions"):
+            load_catalog(self.root / "bundles")
+
+    def test_publishes_preview_and_high_resolution_art_layout_pairs(self) -> None:
+        output = publish_bundle(
+            template_dir=self.template,
+            output_dir=self.root / "bundles",
+            design_id="high-resolution",
+            product_profile=self.product_profile,
+            exemplar=self.exemplar,
+            reference_design=self.reference,
+            art_prompt=self.art_prompt,
+            pet_prompt=self.pet_prompt,
+            print_art=self.print_art,
+            print_layout_path=self.print_layout,
+        )
+        self.assertEqual(validate_bundle(output).canvas_width, 672)
         print_layout = json.loads((output / "layout-print.json").read_text())
         self.assertEqual(print_layout["pet"]["box"]["width"], 200)
 
@@ -135,7 +221,8 @@ class BundleTests(unittest.TestCase):
             publish_bundle(
                 template_dir=self.template,
                 output_dir=self.root / "bundles",
-                template_id="bad-print-layout",
+                design_id="bad-print-layout",
+                product_profile=self.product_profile,
                 exemplar=self.exemplar,
                 reference_design=self.reference,
                 art_prompt=self.art_prompt,
@@ -150,7 +237,8 @@ class BundleTests(unittest.TestCase):
             publish_bundle(
                 template_dir=self.template,
                 output_dir=self.root / "bundles",
-                template_id="missing-license",
+                design_id="missing-license",
+                product_profile=self.product_profile,
                 exemplar=self.exemplar,
                 reference_design=self.reference,
                 art_prompt=self.art_prompt,
@@ -164,7 +252,8 @@ class BundleTests(unittest.TestCase):
             publish_bundle(
                 template_dir=self.template,
                 output_dir=self.root / "bundles",
-                template_id="missing-reference",
+                design_id="missing-reference",
+                product_profile=self.product_profile,
                 exemplar=self.exemplar,
                 reference_design=self.root / "missing.png",
                 art_prompt=self.art_prompt,
@@ -177,7 +266,8 @@ class BundleTests(unittest.TestCase):
         output = publish_bundle(
             template_dir=self.template,
             output_dir=self.root / "bundles",
-            template_id="test-template",
+            design_id="test-template",
+            product_profile=self.product_profile,
             exemplar=self.exemplar,
             reference_design=self.reference,
             art_prompt=self.art_prompt,
@@ -194,7 +284,8 @@ class BundleTests(unittest.TestCase):
             publish_bundle(
                 template_dir=self.template,
                 output_dir=self.root / "bundles",
-                template_id="missing-prompt",
+                design_id="missing-prompt",
+                product_profile=self.product_profile,
                 exemplar=self.exemplar,
                 reference_design=self.reference,
                 art_prompt=self.root / "missing.md",
@@ -207,7 +298,8 @@ class BundleTests(unittest.TestCase):
         output = publish_bundle(
             template_dir=self.template,
             output_dir=self.root / "bundles",
-            template_id="prompt-contract",
+            design_id="prompt-contract",
+            product_profile=self.product_profile,
             exemplar=self.exemplar,
             reference_design=self.reference,
             art_prompt=self.art_prompt,

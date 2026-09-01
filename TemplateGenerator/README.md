@@ -78,8 +78,12 @@ layout editor to be saved and closed, then renders a preview/debug pair and
 can continue through print upscaling, print rendering, bundle publication, and
 `run.json` provenance. It makes image API calls only; it does not derive prompts
 through a text model. Pet names are always rendered with the bundled font. Supply
-`--template-id` with `--bundle-output-dir` to enable the complete publication
-path; this mode requires a product profile. The command otherwise requires
+`--design-id` with `--bundle-output-dir` to enable the complete publication
+path; this mode requires a product profile. Publication derives the unique
+template identity as `<design-id>--<product-profile-id>` and updates the
+top-level `catalog.json`, so one design can safely target several product
+variants. The deprecated `--template-id` spelling remains an alias for
+`--design-id`. The command otherwise requires
 either `--product-profile` (recommended) or the legacy
 `--art-resolution WIDTHxHEIGHT`. A profile derives the preview art, transformed
 pet, and print dimensions rather than trusting screenshot pixels.

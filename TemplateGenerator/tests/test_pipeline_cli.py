@@ -13,11 +13,14 @@ from types import SimpleNamespace
 from PIL import Image, ImageDraw
 
 from helpers import copy_font, layout_data, make_image
-from pawmarvel_generator.bundle import validate_bundle
+from pawmarvel_generator.bundle import load_catalog, validate_bundle
 from pawmarvel_generator.cli import _atomic_write_bytes
 from pawmarvel_generator.pipeline_cli import PipelineError, build_parser, run_pipeline
 from pawmarvel_generator.image_size import ImageSize
-from pawmarvel_generator.product_profile import create_product_profile, write_product_profile
+from pawmarvel_generator.product_profile import (
+    create_product_profile,
+    write_product_profile,
+)
 
 
 class CombinedImages:
@@ -440,7 +443,7 @@ class PipelineCliTests(unittest.TestCase):
                 "--quality", "low",
                 "--print-dir", str(print_dir),
                 "--bundle-output-dir", str(bundles),
-                "--template-id", "life-is-good",
+                "--design-id", "life-is-good",
             ]
         )
         client = CombinedClient()
@@ -489,7 +492,23 @@ class PipelineCliTests(unittest.TestCase):
         )
         record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
         self.assertEqual(record["publication"]["status"], "published")
-        self.assertEqual(record["publication"]["template_id"], "life-is-good")
+        self.assertEqual(
+            record["publication"]["template_id"], "life-is-good--test-blanket"
+        )
+        self.assertEqual(record["publication"]["design_id"], "life-is-good")
+        self.assertEqual(
+            record["publication"]["product_profile_id"], "test-blanket"
+        )
+        catalog = load_catalog(bundles)
+        self.assertEqual(
+            catalog["templates"][0]["template_id"],
+            "life-is-good--test-blanket",
+        )
+        self.assertEqual(
+            record["publication"]["catalog"],
+            str((bundles / "catalog.json").resolve()),
+        )
+        self.assertEqual(outputs["catalog"], (bundles / "catalog.json").resolve())
         self.assertEqual(
             record["publication"]["bundle"], str(outputs["bundle"])
         )
@@ -520,7 +539,7 @@ class PipelineCliTests(unittest.TestCase):
     def test_bundle_publication_requires_product_profile_before_paid_calls(self) -> None:
         client = CombinedClient()
         args = self.args(
-            "--template-id", "life-is-good",
+            "--design-id", "life-is-good",
             "--bundle-output-dir", str(self.root / "bundles"),
         )
 

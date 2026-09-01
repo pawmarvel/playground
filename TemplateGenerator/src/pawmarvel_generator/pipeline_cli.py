@@ -14,7 +14,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from .bundle import BundleError, TEMPLATE_ID_PATTERN, publish_bundle
+from .bundle import (
+    CATALOG_FILENAME,
+    BundleError,
+    TEMPLATE_ID_PATTERN,
+    catalog_template_id,
+    publish_bundle,
+)
 from .cli import (
     UserInputError,
     _atomic_write_bytes,
@@ -149,8 +155,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--no-open", action="store_true")
     parser.add_argument(
+        "--design-id",
         "--template-id",
-        help="published bundle ID; requires --bundle-output-dir and a product profile",
+        dest="design_id",
+        help=(
+            "design identity used with the product profile to derive the catalog "
+            "template ID; --template-id is a deprecated alias"
+        ),
     )
     parser.add_argument(
         "--bundle-output-dir",
@@ -390,20 +401,18 @@ def run_pipeline(
         if args.run_dir is not None
         else template_dir / "runs" / _slug(f"{pet_source.stem}-{pet_name}")
     )
-    bundle_requested = (
-        args.template_id is not None or args.bundle_output_dir is not None
-    )
-    if (args.template_id is None) != (args.bundle_output_dir is None):
+    bundle_requested = args.design_id is not None or args.bundle_output_dir is not None
+    if (args.design_id is None) != (args.bundle_output_dir is None):
         raise PipelineError(
-            "--template-id and --bundle-output-dir must be supplied together"
+            "--design-id and --bundle-output-dir must be supplied together"
         )
     if bundle_requested and profile is None:
         raise PipelineError("bundle publication requires --product-profile")
-    if args.template_id is not None and not TEMPLATE_ID_PATTERN.fullmatch(
-        args.template_id
+    if args.design_id is not None and not TEMPLATE_ID_PATTERN.fullmatch(
+        args.design_id
     ):
         raise PipelineError(
-            "--template-id must contain 3-64 lowercase letters, numbers, or internal hyphens"
+            "--design-id must contain 3-64 lowercase letters, numbers, or internal hyphens"
         )
     if not bundle_requested and args.print_dir is not None:
         raise PipelineError("--print-dir requires bundle publication")
@@ -422,11 +431,17 @@ def run_pipeline(
         if args.bundle_output_dir is not None
         else None
     )
-    bundle_path = (
-        bundle_output_dir / args.template_id
-        if bundle_output_dir is not None and args.template_id is not None
+    catalog_id = (
+        catalog_template_id(args.design_id, profile.profile_id)
+        if args.design_id is not None and profile is not None
         else None
     )
+    bundle_path = (
+        bundle_output_dir / catalog_id
+        if bundle_output_dir and catalog_id
+        else None
+    )
+    catalog_path = bundle_output_dir / CATALOG_FILENAME if bundle_output_dir else None
     if bundle_requested:
         if print_dir.exists() and not print_dir.is_dir():
             raise PipelineError(f"--print-dir is not a directory: {print_dir}")
@@ -617,8 +632,10 @@ def run_pipeline(
         "print_dir": str(print_dir) if bundle_requested else None,
         "upscale_backend": args.upscale_backend if bundle_requested else None,
         "bundle_output_dir": str(bundle_output_dir) if bundle_output_dir else None,
-        "template_id": args.template_id,
+        "design_id": args.design_id,
+        "template_id": catalog_id,
         "bundle": str(bundle_path) if bundle_path else None,
+        "catalog": str(catalog_path) if catalog_path else None,
         "api_key_source": (
             (
                 str(args.api_key_file.expanduser().resolve())
@@ -634,7 +651,13 @@ def run_pipeline(
     if args.dry_run:
         outputs = {"template_dir": template_dir, "run_dir": run_dir}
         if bundle_path is not None:
-            outputs.update({"print_dir": print_dir, "bundle": bundle_path})
+            outputs.update(
+                {
+                    "print_dir": print_dir,
+                    "bundle": bundle_path,
+                    "catalog": catalog_path,
+                }
+            )
         return outputs
     if needs_image_client and client is None:
         _, api_key = _resolve_api_key(args.api_key_file)
@@ -824,11 +847,12 @@ def run_pipeline(
         validate_print_output(profile, final_print)
 
         announce("Publish clean two-resolution bundle")
-        assert bundle_output_dir is not None and args.template_id is not None
+        assert bundle_output_dir is not None and args.design_id is not None
         published_bundle = publish_bundle(
             template_dir=template_dir,
             output_dir=bundle_output_dir,
-            template_id=args.template_id,
+            design_id=args.design_id,
+            product_profile=staged_profile,
             exemplar=transformed_pet,
             reference_design=source_reference,
             art_prompt=art_prompt_source,
@@ -896,7 +920,10 @@ def run_pipeline(
         "publication": (
             {
                 "bundle": str(published_bundle),
-                "template_id": args.template_id,
+                "template_id": catalog_id,
+                "design_id": args.design_id,
+                "product_profile_id": profile.profile_id if profile else None,
+                "catalog": str(catalog_path),
                 "status": "published",
             }
             if published_bundle is not None
@@ -934,6 +961,7 @@ def run_pipeline(
                 "final_print": final_print,
                 "final_print_debug": final_print_debug,
                 "bundle": published_bundle,
+                "catalog": catalog_path,
             }
         )
     return outputs

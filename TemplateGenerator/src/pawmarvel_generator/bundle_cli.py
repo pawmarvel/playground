@@ -21,7 +21,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--template-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--template-id", required=True)
+    parser.add_argument(
+        "--design-id",
+        "--template-id",
+        dest="design_id",
+        required=True,
+        help="design identity; --template-id is a deprecated alias",
+    )
+    parser.add_argument(
+        "--product-profile",
+        type=Path,
+        required=True,
+        help="product variant used to derive the catalog template identity",
+    )
     parser.add_argument(
         "--exemplar",
         type=Path,
@@ -79,7 +91,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         output = publish_bundle(
             template_dir=args.template_dir,
             output_dir=args.output_dir,
-            template_id=args.template_id,
+            design_id=args.design_id,
+            product_profile=args.product_profile,
             exemplar=args.exemplar,
             reference_design=args.reference_design,
             art_prompt=args.art_prompt,
