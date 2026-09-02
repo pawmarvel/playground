@@ -42,17 +42,17 @@ runtime contract.
 
 The POC succeeds when an operator can:
 
-1. select a product profile and finished design reference;
+1. select a product profile and one or more ordered finished design references;
 2. generate reusable preview-size `art.png` using the design's art prompt;
-3. generate a transparent transformed pet using one user pet, the same finished
-   reference, and the design's pet prompt;
+3. generate a transparent transformed pet using one user pet, the same ordered
+   references, and the design's pet prompt;
 4. author `layout.json` for pet and font-rendered name placement;
 5. render a repeatable low-resolution preview;
 6. independently upscale the art and transformed pet and mechanically derive
    `layout-print.json`;
 7. render an exact-size print candidate;
-8. publish a clean two-resolution template bundle containing one finished
-   design reference and both corresponding prompts; and
+8. publish a clean two-resolution template bundle containing the ordered
+   finished-design references and both corresponding prompts; and
 9. register it in a catalog whose identity includes both the design and product
    profile.
 
@@ -61,7 +61,8 @@ The POC succeeds when an operator can:
 ### Included
 
 - GPT Image 2 art and pet generation.
-- One finished design reference per pet transformation.
+- One primary finished design reference and optional ordered supporting
+  references.
 - One reviewed art prompt and one reviewed pet prompt per design.
 - Named product profiles with exact preview and print dimensions.
 - Local browser layout authoring.
@@ -74,7 +75,7 @@ The POC succeeds when an operator can:
 ### Deferred
 
 - Per-template prompt generation or prompt analysis sidecars.
-- Multiple pet-style references or transformed-pet runtime exemplars.
+- Multiple transformed-pet runtime exemplars.
 - Automated visual approval.
 - Vendor-specific release automation.
 - Independent high-resolution layout editing.
@@ -103,9 +104,10 @@ examples/
     pet-transform.md
 ```
 
-Each design folder contains its finished reference and exactly two corresponding
-prompt sources. Customer-pet fixtures are reusable across designs; prompt files
-are not interchangeable between designs.
+Each design folder contains its primary finished reference and exactly two
+corresponding prompt sources. Optional supporting finished-design references
+may be stored in a `reference-designs/` subdirectory. Customer-pet fixtures are
+reusable across designs; prompt files are not interchangeable between designs.
 
 Generated `work/` directories remain mutable and ignored. They may contain
 staged source copies and run provenance, but never become the frontend contract.
@@ -161,17 +163,18 @@ pawmarvel-generate \
   --output-format png
 ```
 
-For the combined request, Tool 1 sends the user pet first and the finished
-reference second regardless of CLI flag order, matching the design prompt's
-Image A/Image B contract. Its injected wrapper identifies the first as
-identity-only and the second as treatment-only. It prints resolved inputs
+For the combined request, Tool 1 sends the user pet first, the primary finished
+reference second, and supporting references afterward regardless of CLI flag
+order. Its injected wrapper identifies the first as identity-only, the second
+as primary treatment evidence, and all remaining images as supporting treatment
+evidence. It prints resolved inputs
 and API parameters without logging prompt contents or credentials, emits a
 progress heartbeat, validates output dimensions/format/alpha, and refuses
 overwrite without `--force`.
 
-The general `pawmarvel-generate` command retains repeatable `--sample-design`
-for loose experiments. The pipeline and POC runner enforce exactly one finished
-reference for the MVP customer-pet transformation contract.
+`--sample-design` is repeatable across the general generator and pipeline.
+`--reference-design` is repeatable in the POC runner and bundle publisher. In
+each case, CLI occurrence order is contract order.
 
 ## 8. Tool 2 — `pawmarvel-layout-config`
 
@@ -284,7 +287,8 @@ no transformation occurs.
 `pawmarvel-pipeline` coordinates one template experiment. Its required
 generation inputs are:
 
-- `--sample-design`: one finished design reference;
+- `--sample-design`: one primary finished design reference, repeatable for
+  ordered supporting references;
 - `--art-prompt`: design-specific art prompt;
 - `--pet-prompt`: design-specific pet prompt;
 - `--pet-image`: representative user pet;
@@ -294,9 +298,9 @@ generation inputs are:
 It performs:
 
 1. complete preflight validation;
-2. staging of the finished reference, profile, and test pet;
-3. art generation from finished reference plus the design's art prompt;
-4. pet transformation from user pet plus the same finished reference plus
+2. staging of the finished references, profile, and test pet;
+3. art generation from the ordered references plus the design's art prompt;
+4. pet transformation from user pet plus the same ordered references plus
    design-specific pet prompt;
 5. local layout authoring or reuse of an existing layout;
 6. deterministic preview/debug rendering;
@@ -368,6 +372,9 @@ bundles/<design-id>--<product-profile-id>/
   print/art.png
   layout-print.json
   reference-design.png
+  reference-designs/                 # optional; supporting references only
+    reference-design-0002.png
+    reference-design-0003.png
   art-template.md
   pet-transform.md
   qa/transformed-pet.png
@@ -381,10 +388,13 @@ pair. Each entry includes the composite `template_id`, separate `design_id` and
 preview/print dimensions, runtime model, and relative bundle path. This avoids
 collisions when the same visual design is published for multiple products or
 variants. Catalog publication replaces only the matching pair and preserves
-other variants.
+other variants. Its ordered `reference_designs` array gives static consumers
+the primary and supporting bundle paths without requiring directory listing.
 
-The bundle contains exactly one finished reference and the corresponding
-`art-template.md` and `pet-transform.md`. It contains no prompt analysis,
+The bundle contains a primary `reference-design.png`, zero or more ordered
+supporting references under `reference-designs/`, and the corresponding
+`art-template.md` and `pet-transform.md`. Supporting filenames use consecutive,
+zero-padded sequence numbers beginning at `0002`. It contains no prompt analysis,
 customer source pet, product profile, run manifest, local paths, or API
 credentials. The application reads the pet prompt from the selected bundle when
 transforming a customer pet; the art prompt preserves reproducible authoring
@@ -394,7 +404,7 @@ The publisher validates:
 
 - true-alpha preview and print art;
 - exact preview/print aspect ratio and uniform geometry scaling;
-- one readable finished reference;
+- one readable primary finished reference and a valid ordered supporting set;
 - two nonempty UTF-8 prompt artifacts with exact contract filenames;
 - the representative transparent pet;
 - OFL font/license pairing; and
@@ -405,6 +415,8 @@ The publisher validates:
 ```text
 work/life-is-good/
   source-reference-design.png
+  source-reference-designs/          # optional; supporting references only
+    reference-design-0002.png
   product-profile.json
   art.png
   layout.json
@@ -444,7 +456,7 @@ prompt copies belong only in the source example and published bundle.
 src/pawmarvel_generator/
   cli.py                 # GPT Image 2 wrapper
   pipeline_cli.py        # art + pet + layout + preview + print + bundle coordinator
-  poc_runner.py          # one reference-guided personalization run
+  poc_runner.py          # one ordered-reference-guided personalization run
   layout_cli.py          # local layout command
   layout_server.py       # localhost editor
   renderer.py            # shared deterministic composition
@@ -472,12 +484,12 @@ Unit and integration tests verify:
 - the profile pipeline reaches print rendering and clean bundle publication;
 - design prompt paths and hashes appear in provenance and exact copies appear
   in the published bundle;
-- POC generation fails before payment without exactly one finished reference or
+- POC generation fails before payment without at least one finished reference or
   design-specific prompt;
 - design folders contain their reference and two corresponding prompt sources;
 - layout geometry, alpha trimming, font fitting, profile size derivation,
   preview/print scaling, manifests, and OFL licensing;
-- bundle publication includes one reference plus both required prompts;
+- bundle publication includes all ordered references plus both required prompts;
 - the catalog distinguishes product variants that share a design ID; and
 - local editor save/close behavior.
 
@@ -488,8 +500,8 @@ All API clients are mocked in the default suite.
 - Each design's prompts work acceptably with its checked-in reference.
 - Art output contains only fixed template graphics.
 - Pet output preserves user identity and follows reference pose/style/crop.
-- Exactly one user pet and one finished reference are used for each pet call;
-  the user pet is always the first API image.
+- Exactly one user pet and one or more ordered finished references are used for
+  each pet call; the user pet is always the first API image.
 - Layout and deterministic preview match the intended composition.
 - Print layout is a uniform scale of preview layout.
 - Final output matches the product profile's exact print dimensions.

@@ -160,6 +160,42 @@ class PipelineCliTests(unittest.TestCase):
             ["input-pet.png", "source-reference-design.png"],
         )
 
+    def test_pipeline_preserves_and_forwards_ordered_reference_designs(self) -> None:
+        supporting = make_image(self.root / "supporting.jpg")
+        client = CombinedClient()
+
+        outputs = run_pipeline(
+            self.args("--sample-design", str(supporting)),
+            client=client,
+            layout_runner=self.save_layout,
+        )
+
+        staged_supporting = (
+            self.template
+            / "source-reference-designs"
+            / "reference-design-0002.jpg"
+        )
+        self.assertTrue(staged_supporting.is_file())
+        self.assertEqual(
+            [Path(file.name).name for file in client.images.calls[0]["image"]],
+            ["source-reference-design.png", "reference-design-0002.jpg"],
+        )
+        self.assertEqual(
+            [Path(file.name).name for file in client.images.calls[1]["image"]],
+            [
+                "input-pet.png",
+                "source-reference-design.png",
+                "reference-design-0002.jpg",
+            ],
+        )
+        record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
+        self.assertEqual(len(record["sources"]["sample_designs"]), 2)
+        self.assertEqual(
+            [item["role"] for item in record["sources"]["sample_designs"]],
+            ["primary", "supporting"],
+        )
+        self.assertEqual(len(record["sources"]["staged_source_references"]), 2)
+
     def test_preflight_stops_before_paid_calls(self) -> None:
         self.run.mkdir()
         (self.run / "preview.png").write_bytes(b"existing")
@@ -290,6 +326,30 @@ class PipelineCliTests(unittest.TestCase):
                 layout_runner=self.save_layout,
             )
 
+    def test_selective_rerun_rejects_changed_supporting_reference(self) -> None:
+        supporting = make_image(self.root / "supporting.png")
+        run_pipeline(
+            self.args("--sample-design", str(supporting)),
+            client=CombinedClient(),
+            layout_runner=self.save_layout,
+        )
+        make_image(supporting, color=(10, 20, 30, 255))
+        client = CombinedClient()
+
+        with self.assertRaisesRegex(PipelineError, "sample_designs"):
+            run_pipeline(
+                self.args(
+                    "--sample-design",
+                    str(supporting),
+                    "--rerun-step",
+                    "pet",
+                ),
+                client=client,
+                layout_runner=self.save_layout,
+            )
+
+        self.assertEqual(client.images.call_count, 0)
+
     def test_dry_run_only_prints_plan(self) -> None:
         outputs = run_pipeline(
             self.args("--dry-run"),
@@ -418,6 +478,7 @@ class PipelineCliTests(unittest.TestCase):
             run_pipeline(args, client=CombinedClient(), layout_runner=self.save_layout)
 
     def test_profile_pipeline_runs_through_print_and_bundle_publication(self) -> None:
+        supporting = make_image(self.root / "supporting-reference.png")
         profile_path = write_product_profile(
             self.root / "product.json",
             create_product_profile(
@@ -431,6 +492,7 @@ class PipelineCliTests(unittest.TestCase):
         args = self.parser.parse_args(
             [
                 "--sample-design", str(self.sample),
+                "--sample-design", str(supporting),
                 "--art-prompt", str(self.art_prompt),
                 "--pet-prompt", str(self.pet_prompt),
                 "--pet-image", str(self.pet),
@@ -484,6 +546,7 @@ class PipelineCliTests(unittest.TestCase):
                 "layout-print.json",
                 "print",
                 "reference-design.png",
+                "reference-designs",
                 "art-template.md",
                 "pet-transform.md",
                 "qa",
@@ -503,6 +566,13 @@ class PipelineCliTests(unittest.TestCase):
         self.assertEqual(
             catalog["templates"][0]["template_id"],
             "life-is-good--test-blanket",
+        )
+        self.assertEqual(
+            catalog["templates"][0]["reference_designs"],
+            [
+                "reference-design.png",
+                "reference-designs/reference-design-0002.png",
+            ],
         )
         self.assertEqual(
             record["publication"]["catalog"],

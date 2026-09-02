@@ -86,6 +86,7 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(entry["product_profile_id"], "test-blanket")
         self.assertEqual(entry["template_id"], "life-is-good--test-blanket")
         self.assertEqual(entry["design"], {"id": "life-is-good"})
+        self.assertEqual(entry["reference_designs"], ["reference-design.png"])
         self.assertEqual(
             entry["product_profile"]["profile_id"], "test-blanket"
         )
@@ -122,6 +123,58 @@ class BundleTests(unittest.TestCase):
                 "fonts",
             },
         )
+
+    def test_publishes_ordered_supporting_reference_designs(self) -> None:
+        second = make_image(self.root / "second.jpg")
+        third = make_image(self.root / "third.png")
+
+        output = publish_bundle(
+            template_dir=self.template,
+            output_dir=self.root / "bundles",
+            design_id="multiple-references",
+            product_profile=self.product_profile,
+            exemplar=self.exemplar,
+            reference_design=[self.reference, second, third],
+            art_prompt=self.art_prompt,
+            pet_prompt=self.pet_prompt,
+            print_art=self.print_art,
+            print_layout_path=self.print_layout,
+        )
+
+        validate_bundle(output)
+        supporting = output / "reference-designs"
+        self.assertEqual(
+            [path.name for path in sorted(supporting.iterdir())],
+            ["reference-design-0002.png", "reference-design-0003.png"],
+        )
+        with Image.open(output / "reference-design.png") as primary:
+            self.assertEqual(primary.format, "PNG")
+        with Image.open(supporting / "reference-design-0002.png") as reference:
+            self.assertEqual(reference.format, "PNG")
+        catalog = load_catalog(self.root / "bundles")
+        self.assertEqual(
+            catalog["templates"][0]["reference_designs"],
+            [
+                "reference-design.png",
+                "reference-designs/reference-design-0002.png",
+                "reference-designs/reference-design-0003.png",
+            ],
+        )
+
+    def test_rejects_empty_reference_design_list(self) -> None:
+        with self.assertRaisesRegex(BundleError, "at least one"):
+            publish_bundle(
+                template_dir=self.template,
+                output_dir=self.root / "bundles",
+                design_id="missing-references",
+                product_profile=self.product_profile,
+                exemplar=self.exemplar,
+                reference_design=[],
+                art_prompt=self.art_prompt,
+                pet_prompt=self.pet_prompt,
+                print_art=self.print_art,
+                print_layout_path=self.print_layout,
+            )
 
     def test_can_publish_default_gemini_route_by_omitting_model(self) -> None:
         output = publish_bundle(

@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
@@ -17,6 +18,7 @@ from .product_profile import ProductProfile, ProductProfileError, load_product_p
 TEMPLATE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 PROMPT_MAX_BYTES = 1024 * 1024
 CATALOG_FILENAME = "catalog.json"
+SUPPORTING_REFERENCES_DIR = "reference-designs"
 
 
 class BundleError(ValueError):
@@ -41,6 +43,7 @@ def _catalog_entry(
     layout: Layout,
     print_layout: Layout,
     runtime_model: str | None,
+    reference_count: int,
 ) -> dict[str, object]:
     template_id = catalog_template_id(design_id, profile.profile_id)
     return {
@@ -51,6 +54,11 @@ def _catalog_entry(
         "product_profile": profile.to_dict(),
         "bundle": template_id,
         "runtime_model": runtime_model or "gemini",
+        "reference_designs": ["reference-design.png"]
+        + [
+            f"{SUPPORTING_REFERENCES_DIR}/reference-design-{index:04d}.png"
+            for index in range(2, reference_count + 1)
+        ],
         "preview": {
             "canvas": {
                 "width": layout.canvas_width,
@@ -135,11 +143,40 @@ def load_catalog(root: Path, *, validate_bundles: bool = True) -> dict[str, obje
             )
         if not isinstance(entry.get("runtime_model"), str):
             raise BundleError("catalog runtime_model must be a string")
+        reference_designs = entry.get(
+            "reference_designs", ["reference-design.png"]
+        )
+        if (
+            not isinstance(reference_designs, list)
+            or not reference_designs
+            or not all(isinstance(path, str) for path in reference_designs)
+            or reference_designs[0] != "reference-design.png"
+        ):
+            raise BundleError(
+                "catalog reference_designs must begin with reference-design.png"
+            )
+        expected_references = ["reference-design.png"] + [
+            f"{SUPPORTING_REFERENCES_DIR}/reference-design-{index:04d}.png"
+            for index in range(2, len(reference_designs) + 1)
+        ]
+        if reference_designs != expected_references:
+            raise BundleError(
+                "catalog reference_designs must use consecutive ordered bundle paths"
+            )
         if template_id in seen:
             raise BundleError(f"catalog contains duplicate template id: {template_id}")
         seen.add(template_id)
         if validate_bundles:
-            validate_bundle(root / template_id)
+            bundle_root = root / template_id
+            validate_bundle(bundle_root)
+            actual_references = ["reference-design.png"] + [
+                path.relative_to(bundle_root).as_posix()
+                for path in _validate_supporting_references(bundle_root)
+            ]
+            if actual_references != reference_designs:
+                raise BundleError(
+                    "catalog reference_designs do not match the published bundle"
+                )
     return value
 
 
@@ -220,6 +257,43 @@ def _validate_reference(path: Path, label: str) -> None:
         raise BundleError(f"{label} is not a readable image: {path}") from exc
 
 
+def _ordered_reference_designs(
+    value: Path | Sequence[Path],
+) -> tuple[Path, ...]:
+    candidates = [value] if isinstance(value, Path) else list(value)
+    if not candidates:
+        raise BundleError("at least one finished reference design is required")
+    references = tuple(path.expanduser().resolve() for path in candidates)
+    for index, reference in enumerate(references, 1):
+        _validate_reference(reference, f"finished reference design {index}")
+    return references
+
+
+def _validate_supporting_references(root: Path) -> tuple[Path, ...]:
+    directory = root / SUPPORTING_REFERENCES_DIR
+    if not directory.exists():
+        return ()
+    if not directory.is_dir():
+        raise BundleError(f"{SUPPORTING_REFERENCES_DIR} must be a directory")
+    entries = sorted(directory.iterdir(), key=lambda path: path.name)
+    if not entries:
+        raise BundleError(f"{SUPPORTING_REFERENCES_DIR} must not be empty")
+    expected = [
+        f"reference-design-{index:04d}.png"
+        for index in range(2, len(entries) + 2)
+    ]
+    if [path.name for path in entries] != expected:
+        raise BundleError(
+            f"{SUPPORTING_REFERENCES_DIR} must contain consecutively ordered "
+            "reference-design-NNNN.png files beginning at 0002"
+        )
+    for index, reference in enumerate(entries, 2):
+        if not reference.is_file():
+            raise BundleError(f"supporting reference {index} must be a file")
+        _validate_reference(reference, f"supporting reference design {index}")
+    return tuple(entries)
+
+
 def _validate_prompt(path: Path, label: str) -> Path:
     resolved = path.expanduser().resolve()
     if not resolved.is_file():
@@ -297,6 +371,7 @@ def validate_bundle(root: Path, *, validate_template_id: bool = True) -> Layout:
         "print",
         "qa",
         "reference-design.png",
+        SUPPORTING_REFERENCES_DIR,
         "art-template.md",
         "pet-transform.md",
         "fonts",
@@ -323,6 +398,7 @@ def validate_bundle(root: Path, *, validate_template_id: bool = True) -> Layout:
     _validate_resolution_pair(layout, print_layout)
     _validate_png_alpha(root / "qa" / "transformed-pet.png", "qa/transformed-pet.png")
     _validate_reference(root / "reference-design.png", "reference-design.png")
+    _validate_supporting_references(root)
     _validate_prompt(root / "art-template.md", "art-template.md")
     _validate_prompt(root / "pet-transform.md", "pet-transform.md")
     try:
@@ -363,7 +439,7 @@ def publish_bundle(
     design_id: str,
     product_profile: Path,
     exemplar: Path,
-    reference_design: Path,
+    reference_design: Path | Sequence[Path],
     art_prompt: Path,
     pet_prompt: Path,
     print_art: Path,
@@ -381,11 +457,10 @@ def publish_bundle(
     template_id = catalog_template_id(design_id, profile.profile_id)
     destination = output_dir / template_id
     exemplar = exemplar.expanduser().resolve()
-    reference_design = reference_design.expanduser().resolve()
+    reference_designs = _ordered_reference_designs(reference_design)
     art_prompt = _validate_prompt(art_prompt, "art template prompt")
     pet_prompt = _validate_prompt(pet_prompt, "pet transformation prompt")
     _validate_png_alpha(exemplar, "approved exemplar")
-    _validate_reference(reference_design, "finished reference design")
 
     selected_print_art = print_art.expanduser().resolve()
     selected_print_layout_path = print_layout_path.expanduser().resolve()
@@ -439,8 +514,17 @@ def publish_bundle(
         shutil.copyfile(exemplar, stage / "qa" / "transformed-pet.png")
         shutil.copyfile(art_prompt, stage / "art-template.md")
         shutil.copyfile(pet_prompt, stage / "pet-transform.md")
-        with Image.open(reference_design) as source_reference:
+        with Image.open(reference_designs[0]) as source_reference:
             source_reference.convert("RGB").save(stage / "reference-design.png", "PNG")
+        if len(reference_designs) > 1:
+            supporting_dir = stage / SUPPORTING_REFERENCES_DIR
+            supporting_dir.mkdir()
+            for index, supporting_reference in enumerate(reference_designs[1:], 2):
+                with Image.open(supporting_reference) as source_reference:
+                    source_reference.convert("RGB").save(
+                        supporting_dir / f"reference-design-{index:04d}.png",
+                        "PNG",
+                    )
         shutil.copyfile(
             preview_layout.font_path,
             stage / "fonts" / preview_layout.font_path.name,
@@ -489,6 +573,7 @@ def publish_bundle(
                 layout=preview_layout,
                 print_layout=print_layout,
                 runtime_model=runtime_model,
+                reference_count=len(reference_designs),
             ),
         )
         if backup is not None:

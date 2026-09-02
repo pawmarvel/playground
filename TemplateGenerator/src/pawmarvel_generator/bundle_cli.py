@@ -43,8 +43,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reference-design",
         type=Path,
+        action="append",
         required=True,
-        help="single finished design reference used by pet transformation",
+        help=(
+            "finished design reference used by pet transformation; repeat in "
+            "priority order to include supporting references"
+        ),
     )
     parser.add_argument(
         "--art-prompt",

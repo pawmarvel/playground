@@ -26,8 +26,8 @@ The MVP provides:
   dimensions from a product print canvas; optional screenshot normalization is
   diagnostic only and is not used by the pipeline.
 - `pawmarvel-bundle`: publish a clean, OFL-licensed template bundle containing
-  low-resolution web art/layout, high-resolution print art/layout, one finished
-  design reference, both design-specific prompts, and a representative
+  low-resolution web art/layout, high-resolution print art/layout, ordered
+  finished-design references, both design-specific prompts, and a representative
   transformed-pet QA asset.
 
 ## Documentation
@@ -73,8 +73,8 @@ the no-generation path used to inspect a prepared print bundle.
 
 Use `pawmarvel-pipeline` when starting from a new finished design. It generates
 art with the design's art prompt, transforms a representative pet using the
-design's pet prompt plus exactly one finished reference, waits for the local
-layout editor to be saved and closed, then renders a preview/debug pair and
+design's pet prompt plus one or more ordered finished references, waits for the
+local layout editor to be saved and closed, then renders a preview/debug pair and
 can continue through print upscaling, print rendering, bundle publication, and
 `run.json` provenance. It makes image API calls only; it does not derive prompts
 through a text model. Pet names are always rendered with the bundled font. Supply
@@ -87,6 +87,10 @@ variants. The deprecated `--template-id` spelling remains an alias for
 either `--product-profile` (recommended) or the legacy
 `--art-resolution WIDTHxHEIGHT`. A profile derives the preview art, transformed
 pet, and print dimensions rather than trusting screenshot pixels.
+
+Repeat `--sample-design` to add supporting references. The first reference is
+the primary design and the only one used by the layout editor; later references
+are ordered supporting visual evidence for art and pet generation.
 
 After a successful run, repeat the same command with `--rerun-step art`,
 `--rerun-step pet`, or `--rerun-step layout` to replace only that authoring

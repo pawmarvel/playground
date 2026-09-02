@@ -72,6 +72,19 @@ class PocRunnerTests(unittest.TestCase):
             ["pet.png", "reference.png"],
         )
 
+    def test_forwards_multiple_reference_designs_in_order(self) -> None:
+        supporting = make_image(self.root / "supporting.png")
+        args = self.args()
+        args.reference_design = [self.reference, supporting]
+        client = FakeClient()
+
+        run_poc(args, client=client)
+
+        self.assertEqual(
+            [Path(file.name).name for file in client.images.kwargs["image"]],
+            ["pet.png", "reference.png", "supporting.png"],
+        )
+
     def test_preflight_prevents_paid_call_when_output_exists(self) -> None:
         qa = self.template / "qa"
         qa.mkdir()

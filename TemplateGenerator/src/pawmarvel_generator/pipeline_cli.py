@@ -70,7 +70,16 @@ def build_parser() -> argparse.ArgumentParser:
             "optional profile-driven print and bundle publication run."
         ),
     )
-    parser.add_argument("--sample-design", type=Path, required=True)
+    parser.add_argument(
+        "--sample-design",
+        type=Path,
+        action="append",
+        required=True,
+        help=(
+            "finished design reference; repeat in priority order to add supporting "
+            "references (the first remains the primary layout reference)"
+        ),
+    )
     parser.add_argument(
         "--art-prompt", type=Path, required=True, help="prompt used to create art.png"
     )
@@ -239,7 +248,7 @@ def _json_bytes(value: Any) -> bytes:
 
 def _generation_args(
     *,
-    sample_design: Path | None,
+    sample_design: Sequence[Path] | Path | None,
     pet_image: Path | None,
     prompt_file: Path,
     api_key_file: Path | None,
@@ -265,6 +274,26 @@ def _generation_args(
         background=background,
         force=force,
         dry_run=False,
+    )
+
+
+def _ordered_paths(value: Sequence[Path] | Path | None) -> list[Path]:
+    if value is None:
+        return []
+    if isinstance(value, Path):
+        return [value]
+    return list(value)
+
+
+def _staged_reference_path(
+    template_dir: Path, source: Path, index: int
+) -> Path:
+    if index == 1:
+        return template_dir / f"source-reference-design{source.suffix.lower()}"
+    return (
+        template_dir
+        / "source-reference-designs"
+        / f"reference-design-{index:04d}{source.suffix.lower()}"
     )
 
 
@@ -304,13 +333,39 @@ def _require_matching_source(
         )
 
 
+def _require_matching_references(
+    previous: dict[str, Any], current: Sequence[Path]
+) -> None:
+    stored = previous["sources"].get("sample_designs")
+    if isinstance(stored, list):
+        expected = [
+            item.get("sha256") if isinstance(item, dict) else None for item in stored
+        ]
+    else:
+        primary = previous["sources"].get("sample_design")
+        expected = [primary.get("sha256") if isinstance(primary, dict) else None]
+    actual = [_sha256(path) for path in current]
+    if expected != actual:
+        raise PipelineError(
+            "selective rerun source changed since run.json: sample_designs; "
+            "start a full pipeline run in a new or cleared working directory"
+        )
+
+
 def run_pipeline(
     args: argparse.Namespace,
     *,
     client: Any | None = None,
     layout_runner: LayoutRunner = serve_layout_editor,
 ) -> dict[str, Path]:
-    sample = _validate_image(args.sample_design, "sample design")
+    sample_values = _ordered_paths(args.sample_design)
+    samples = [
+        _validate_image(sample, f"sample design {index}")
+        for index, sample in enumerate(sample_values, 1)
+    ]
+    if not samples:
+        raise PipelineError("at least one --sample-design is required")
+    sample = samples[0]
     art_prompt_source = _validate_regular_file(args.art_prompt, "art prompt")
     pet_prompt_source = _validate_regular_file(args.pet_prompt, "pet prompt")
     pet_source = _validate_image(args.pet_image, "pet image")
@@ -473,9 +528,11 @@ def run_pipeline(
         if args.upscale_backend == "bria" and not args.dry_run:
             _resolve_bria_token(args.bria_api_key_file)
 
-    source_reference = (
-        template_dir / f"source-reference-design{sample.suffix.lower()}"
-    )
+    source_references = [
+        _staged_reference_path(template_dir, source, index)
+        for index, source in enumerate(samples, 1)
+    ]
+    source_reference = source_references[0]
     staged_profile = template_dir / "product-profile.json"
     art = template_dir / "art.png"
     layout_path = template_dir / "layout.json"
@@ -491,7 +548,7 @@ def run_pipeline(
     final_print_debug = print_dir / "final-print-debug.png"
 
     planned = [
-        source_reference,
+        *source_references,
         art,
         staged_pet,
         transformed_pet,
@@ -519,9 +576,7 @@ def run_pipeline(
     previous_run: dict[str, Any] | None = None
     if selective_rerun:
         previous_run = _load_previous_run(manifest)
-        _require_matching_source(
-            previous_run, "sample_design", sample, selected_step=None
-        )
+        _require_matching_references(previous_run, samples)
         if profile is not None:
             assert profile.path is not None
             _require_matching_source(
@@ -563,12 +618,15 @@ def run_pipeline(
                 raise PipelineError(
                     f"selective rerun cannot change {key}; start a full pipeline run"
                 )
-        _validate_image(source_reference, "staged source reference")
-        if _sha256(source_reference) != _sha256(sample):
-            raise PipelineError(
-                "staged source reference differs from --sample-design; "
-                "start a full pipeline run"
-            )
+        for index, (source, staged) in enumerate(
+            zip(samples, source_references, strict=True), 1
+        ):
+            _validate_image(staged, f"staged source reference {index}")
+            if _sha256(staged) != _sha256(source):
+                raise PipelineError(
+                    f"staged source reference {index} differs from --sample-design; "
+                    "start a full pipeline run"
+                )
         if profile is not None:
             assert profile.path is not None
             _validate_regular_file(staged_profile, "staged product profile")
@@ -615,6 +673,7 @@ def run_pipeline(
         "run_mode": "selective-rerun" if selective_rerun else "full",
         "rerun_steps": list(rerun_steps),
         "sample_design": str(sample),
+        "sample_designs": [str(path) for path in samples],
         "product_profile": str(staged_profile) if profile is not None else None,
         "product_profile_id": profile.profile_id if profile is not None else None,
         "print_size": profile.print_size.api_value() if profile is not None else None,
@@ -708,7 +767,8 @@ def run_pipeline(
 
     if full_run:
         announce("Stage immutable source copies")
-        _copy_file(sample, source_reference)
+        for source, staged in zip(samples, source_references, strict=True):
+            _copy_file(source, staged)
         if profile is not None:
             assert profile.path is not None
             _copy_file(profile.path, staged_profile)
@@ -718,7 +778,7 @@ def run_pipeline(
         announce("Generate background art template")
         generate(
             _generation_args(
-                sample_design=source_reference,
+                sample_design=source_references,
                 pet_image=None,
                 prompt_file=art_prompt_source,
                 api_key_file=args.api_key_file,
@@ -739,7 +799,7 @@ def run_pipeline(
             _copy_file(pet_source, staged_pet)
         generate(
             _generation_args(
-                sample_design=source_reference,
+                sample_design=source_references,
                 pet_image=staged_pet,
                 prompt_file=pet_prompt_source,
                 api_key_file=args.api_key_file,
@@ -864,7 +924,7 @@ def run_pipeline(
             design_id=args.design_id,
             product_profile=staged_profile,
             exemplar=transformed_pet,
-            reference_design=source_reference,
+            reference_design=source_references,
             art_prompt=art_prompt_source,
             pet_prompt=pet_prompt_source,
             print_art=print_outputs.art,
@@ -907,6 +967,14 @@ def run_pipeline(
         "pipeline": plan,
         "sources": {
             "sample_design": {"path": str(sample), "sha256": _sha256(sample)},
+            "sample_designs": [
+                {
+                    "path": str(path),
+                    "sha256": _sha256(path),
+                    "role": "primary" if index == 1 else "supporting",
+                }
+                for index, path in enumerate(samples, 1)
+            ],
             "art_prompt": {
                 "path": str(art_prompt_source),
                 "sha256": _sha256(art_prompt_source),
@@ -926,6 +994,14 @@ def run_pipeline(
                 "sha256": _sha256(source_reference),
                 "role": "visual-context-only-not-layout-geometry",
             },
+            "staged_source_references": [
+                {
+                    "path": str(path),
+                    "sha256": _sha256(path),
+                    "role": "primary" if index == 1 else "supporting",
+                }
+                for index, path in enumerate(source_references, 1)
+            ],
         },
         "publication": (
             {

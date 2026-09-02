@@ -40,7 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reference-design",
         type=Path,
-        help="finished design reference required when --pet-image is used",
+        action="append",
+        help=(
+            "finished design reference required with --pet-image; repeat in "
+            "priority order to add supporting references"
+        ),
     )
     parser.add_argument(
         "--prompt-file",
@@ -73,9 +77,14 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
         else template_dir / "qa"
     )
     reference_arg = getattr(args, "reference_design", None)
-    reference_design = (
-        reference_arg.expanduser().resolve() if reference_arg is not None else None
+    reference_values = (
+        []
+        if reference_arg is None
+        else list(reference_arg)
+        if isinstance(reference_arg, (list, tuple))
+        else [reference_arg]
     )
+    reference_designs = [path.expanduser().resolve() for path in reference_values]
     prompt_arg = getattr(args, "prompt_file", None)
     prompt_file = prompt_arg.expanduser().resolve() if prompt_arg is not None else None
     transformed = supplied_transformed or output_dir / "transformed-pet.png"
@@ -91,10 +100,14 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
     else:
         if pet_image is None or not pet_image.is_file():
             raise UserInputError(f"pet image does not exist: {pet_image}")
-        if reference_design is None or not reference_design.is_file():
-            raise UserInputError(
-                f"finished reference design does not exist: {reference_design}"
-            )
+        if not reference_designs:
+            raise UserInputError("at least one --reference-design is required")
+        for index, reference_design in enumerate(reference_designs, 1):
+            if not reference_design.is_file():
+                raise UserInputError(
+                    "finished reference design "
+                    f"{index} does not exist: {reference_design}"
+                )
         if prompt_file is None or not prompt_file.is_file():
             raise UserInputError(
                 f"pet transformation prompt does not exist: {prompt_file}"
@@ -122,8 +135,10 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
         "pet_source_mode": "reuse" if supplied_transformed else "generate",
         "pet_name": args.pet_name,
         "prompt_file": str(prompt_file) if supplied_transformed is None else None,
-        "reference_design": (
-            str(reference_design) if supplied_transformed is None else None
+        "reference_designs": (
+            [str(path) for path in reference_designs]
+            if supplied_transformed is None
+            else None
         ),
         "transformed_pet": str(transformed),
         "final_preview": str(final),
@@ -138,7 +153,7 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
 
     if supplied_transformed is None:
         generation_args = argparse.Namespace(
-            sample_design=reference_design,
+            sample_design=reference_designs,
             pet_image=pet_image,
             prompt_file=prompt_file,
             api_key_file=args.api_key_file,

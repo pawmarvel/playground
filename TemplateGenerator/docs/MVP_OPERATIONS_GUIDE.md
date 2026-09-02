@@ -14,10 +14,16 @@ examples/<design>/art-template.md
 examples/<design>/pet-transform.md
 ```
 
-Every new pet transformation sends exactly two ordered images to GPT Image 2:
+Every new pet transformation sends ordered images to GPT Image 2:
 
 1. the user pet, used only for identity;
-2. one finished design reference, used for pose, expression, crop, and style.
+2. the primary finished design reference, used for pose, expression, crop, and style;
+3. any supporting finished-design references, used only as additional treatment evidence.
+
+Repeat `--sample-design` in pipeline/generator commands or
+`--reference-design` in POC/bundle commands to add supporting references. Flag
+occurrence order is preserved. The first reference remains the layout editor's
+visual comparison source.
 
 ## 1. Repository example inputs
 
@@ -159,6 +165,8 @@ generated artifacts are:
 ```text
 work/life-is-good/
   source-reference-design.png
+  source-reference-designs/          # only when supporting references are supplied
+    reference-design-0002.png
   product-profile.json
   art.png
   layout.json
@@ -190,6 +198,8 @@ bundles/life-is-good--blanket-king-9375x12375/
   print/art.png
   layout-print.json
   reference-design.png
+  reference-designs/                 # optional supporting references
+    reference-design-0002.png
   art-template.md
   pet-transform.md
   qa/transformed-pet.png
@@ -522,8 +532,9 @@ PAWMARVEL_BUNDLES="$PAWMARVEL_PROJECT/bundles"
   --runtime-model gpt-image-2
 ```
 
-The clean consumer bundle contains one finished design reference and its exact
-two design-specific prompt sources:
+The clean consumer bundle contains the primary finished design reference,
+optional ordered supporting references, and its exact two design-specific
+prompt sources:
 
 ```text
 bundles/catalog.json
@@ -533,6 +544,8 @@ bundles/life-is-good--blanket-king-9375x12375/
   print/art.png
   layout-print.json
   reference-design.png
+  reference-designs/                 # optional
+    reference-design-0002.png
   art-template.md
   pet-transform.md
   qa/transformed-pet.png
@@ -543,10 +556,12 @@ bundles/life-is-good--blanket-king-9375x12375/
 `catalog.json` records the composite template ID, design ID, complete product
 profile metadata, preview/print dimensions, runtime model, and relative bundle
 path. The frontend selects a template by both design and product variant; it
-must not key a catalog by design alone.
+must not key a catalog by design alone. The `reference_designs` array lists the
+primary and supporting reference paths in API input order.
 
-The frontend or backend reads `pet-transform.md` from the same bundle as
-`reference-design.png` and combines both with the current user pet.
+The frontend or backend reads `pet-transform.md` from the same bundle as the
+primary `reference-design.png` and appends any files under `reference-designs/`
+in lexical order before combining them with the current user pet.
 `art-template.md` preserves template-generation provenance for later controlled
 regeneration. Do not publish the mutable authoring `work/` directory.
 
@@ -607,6 +622,14 @@ work/bundle-runs/life-is-good-white-fluffy-dog/
     transformed-pet.png
     final-preview.png
     final-preview-debug.png
+```
+
+For a multi-reference bundle, add each supporting file after the primary using
+another flag, preserving lexical order:
+
+```bash
+--reference-design "$PAWMARVEL_BUNDLE/reference-design.png" \
+--reference-design "$PAWMARVEL_BUNDLE/reference-designs/reference-design-0002.png"
 ```
 
 The rendered pet name can differ from the first example because the bundled
@@ -678,7 +701,7 @@ Tests mock OpenAI calls and consume no API credits.
 | Problem | Action |
 | --- | --- |
 | Fixed art contains a pet or name | Refine that design's `art-template.md`, then run `pawmarvel_pipeline_debug --rerun-step art` |
-| Pet identity, pose, crop, or style is weak | Refine that design's `pet-transform.md`, keep exactly one user pet and one finished reference, then run `pawmarvel_pipeline_debug --rerun-step pet` |
+| Pet identity, pose, crop, or style is weak | Refine that design's `pet-transform.md`, keep exactly one user pet, and add only relevant ordered finished-design references before running `pawmarvel_pipeline_debug --rerun-step pet` |
 | Pet or name position is wrong | Run `pawmarvel_pipeline_debug --rerun-step layout` |
 | Upscale reports an aspect-ratio mismatch | Regenerate preview art from the same product profile; do not use screenshot-sized art |
 | A standalone manual command reports an existing output | Review it first, then pass `--force` only to that standalone command; pipeline debug reruns do not use `--force` |
