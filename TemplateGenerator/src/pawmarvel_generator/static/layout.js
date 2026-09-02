@@ -22,11 +22,6 @@ function selectFont(candidateId) {
   if (!candidate) return;
   selectedFontId = candidate.id;
   state.name.font = candidate.relativeName;
-  for (const button of document.querySelectorAll(".font-candidate")) {
-    const selected = button.dataset.fontId === selectedFontId;
-    button.classList.toggle("selected", selected);
-    button.setAttribute("aria-pressed", selected ? "true" : "false");
-  }
   schedulePreview();
 }
 
@@ -35,7 +30,7 @@ function buildFontCatalog() {
   const description = document.createElement("p");
   description.className = "font-help";
   const recommended = boot.fontCandidates.find(value => value.recommended);
-  description.textContent = `Recommended from reference: ${recommended.label} (${Math.round(boot.fontRecommendation.confidence * 100)}% confidence). ${boot.fontCandidates.length} approved fonts are available.`;
+  description.textContent = `Recommended from reference: ${recommended.label} (${Math.round(recommended.confidence * 100)}% visual confidence). Choose one of the five highest-ranked eligible OFL fonts.`;
   host.append(description);
   const style = document.createElement("style");
   for (const candidate of boot.fontCandidates) {
@@ -43,54 +38,36 @@ function buildFontCatalog() {
   }
   document.head.append(style);
 
-  function candidateButton(candidate, showRank) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "font-candidate";
-    button.dataset.fontId = candidate.id;
-    button.setAttribute("aria-pressed", candidate.id === selectedFontId ? "true" : "false");
-    const label = document.createElement("strong");
-    label.textContent = showRank ? `#${candidate.rank} ${candidate.label}` : candidate.label;
-    if (candidate.recommended) label.textContent += " — recommended";
-    const specimen = document.createElement("span");
-    specimen.className = "font-specimen";
-    specimen.style.fontFamily = `"${candidate.id}"`;
-    specimen.textContent = boot.petName;
-    button.append(label, specimen);
-    button.addEventListener("click", () => selectFont(candidate.id));
-    return button;
-  }
-
-  const rankedHeading = document.createElement("h3");
-  rankedHeading.textContent = "Ranked recommendations";
-  const rankedGrid = document.createElement("div");
-  rankedGrid.className = "font-grid";
-  [...boot.fontCandidates]
+  const ranked = [...boot.fontCandidates]
     .sort((left, right) => left.rank - right.rank)
-    .slice(0, 3)
-    .forEach(candidate => rankedGrid.append(candidateButton(candidate, true)));
-
-  const catalogHeading = document.createElement("h3");
-  catalogHeading.textContent = "All approved fonts";
-  const filter = document.createElement("input");
-  filter.type = "search";
-  filter.className = "font-filter";
-  filter.placeholder = "Filter fonts by name";
-  filter.setAttribute("aria-label", "Filter all approved fonts");
-  const catalogGrid = document.createElement("div");
-  catalogGrid.className = "font-grid";
-  const alphabetical = [...boot.fontCandidates].sort((left, right) => left.label.localeCompare(right.label));
-  function populateCatalog(query = "") {
-    catalogGrid.replaceChildren();
-    const normalized = query.trim().toLocaleLowerCase();
-    alphabetical
-      .filter(candidate => candidate.label.toLocaleLowerCase().includes(normalized))
-      .forEach(candidate => catalogGrid.append(candidateButton(candidate, false)));
+    .filter(candidate => candidate.rank <= 5 || candidate.id === selectedFontId);
+  const label = document.createElement("label");
+  label.className = "font-select-label";
+  label.textContent = "Top font recommendations";
+  const select = document.createElement("select");
+  select.id = "font-recommendations";
+  select.setAttribute("aria-label", "Top five font recommendations");
+  for (const candidate of ranked) {
+    const option = document.createElement("option");
+    option.value = candidate.id;
+    const suffix = candidate.recommended ? " — recommended" : "";
+    option.textContent = `#${candidate.rank} ${candidate.label} — ${Math.round(candidate.confidence * 100)}% confidence${suffix}`;
+    option.selected = candidate.id === selectedFontId;
+    select.append(option);
   }
-  filter.addEventListener("input", () => populateCatalog(filter.value));
-  populateCatalog();
-  host.append(rankedHeading, rankedGrid, catalogHeading, filter, catalogGrid);
-  selectFont(selectedFontId);
+  const specimen = document.createElement("div");
+  specimen.className = "font-specimen";
+  specimen.textContent = boot.petName;
+  function updateSelection() {
+    const candidate = ranked.find(value => value.id === select.value);
+    if (!candidate) return;
+    specimen.style.fontFamily = `"${candidate.id}"`;
+    selectFont(candidate.id);
+  }
+  select.addEventListener("change", updateSelection);
+  label.append(select);
+  host.append(label, specimen);
+  updateSelection();
 }
 
 buildFontCatalog();

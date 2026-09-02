@@ -109,25 +109,22 @@ design for pose, expression, crop, and style. Working directories and
 published bundles do not carry customer source data; each bundle does carry its
 exact `art-template.md` and `pet-transform.md` contract files.
 
-The layout editor compares the checked-in OFL font catalog with the lettering
-region in the reference when given `--font-catalog assets/fonts`. It preselects
-and labels the best local match, reports a conservative confidence score, and
-saves the human-confirmed family in `layout.json`. Supplying `--font` bypasses
-automatic selection as an explicit override; production bundles ship only that
-TTF and its `OFL.txt`. macOS system fonts are not valid bundle inputs.
-The editor separates the three highest-ranked matches from a searchable list of
-every approved catalog font. Three is the recommendation count, not a catalog
-limit; adding a licensed TTF/OFL family under the catalog makes it available on
-the next run. `layout.json` includes `"model": "gpt-image-2"` for prompts whose pose and expression
-directives must run verbatim; omitting the field selects the consumer's Gemini
-route.
+The layout editor compares the checked-in 40-face OFL catalog with lettering in
+the reference. The catalog is the default when neither `--font` nor
+`--font-catalog` is supplied. The matcher normalizes glyph silhouettes,
+preselects the highest-scoring local font, and displays a drop-down containing
+the five best matches and their visual-confidence scores. The operator's final
+selection is saved in `layout.json` and only that TTF and its `OFL.txt` are
+published. Supplying `--font` remains an explicit override; macOS system fonts
+are not valid bundle inputs. `layout.json` includes `"model": "gpt-image-2"`
+for prompts whose pose and expression directives must run verbatim; omitting
+the field selects the consumer's Gemini route.
 
-Expanded font mode adds candidates from the pinned
+Legacy expanded font mode can add candidates from the pinned
 `assets/fonts/expanded-catalog.json`. It downloads them into a checksum-addressed
 cache, validates both the TTF and OFL 1.1 license, and ranks them with the local
-fallback catalog. Only the operator-confirmed font is copied into the template
-and bundle. `--font-offline` prohibits downloads and uses cached plus local
-candidates.
+catalog. It remains for compatibility with earlier experiments and is not part
+of the current local-catalog MVP. Broader discovery is deferred.
 
 ## Tests
 

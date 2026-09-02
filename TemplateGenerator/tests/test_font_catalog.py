@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
+from PIL import ImageFont
+
 from helpers import copy_font
-from pawmarvel_generator.font_catalog import FontCatalogError, discover_font_catalog
+from pawmarvel_generator.font_catalog import (
+    FontCatalogError,
+    default_local_font_catalog,
+    discover_font_catalog,
+)
 
 
 class FontCatalogTests(unittest.TestCase):
@@ -45,7 +53,7 @@ class FontCatalogTests(unittest.TestCase):
                 primary, catalog_roots=(self.root / "catalog",)
             )
 
-    def test_repository_catalog_has_distinct_approved_candidates(self) -> None:
+    def test_repository_catalog_has_40_distinct_eligible_candidates(self) -> None:
         repository = Path(__file__).resolve().parents[1]
         catalog = repository / "assets" / "fonts"
         candidates = discover_font_catalog(
@@ -53,7 +61,45 @@ class FontCatalogTests(unittest.TestCase):
             catalog_roots=(catalog,),
         )
 
+        self.assertEqual(len(candidates), 40)
+        self.assertEqual(len({candidate.sha256 for candidate in candidates}), 40)
+        self.assertTrue(
+            {
+                "Anton",
+                "Amatic SC Bold",
+                "Bebas Neue",
+                "Great Vibes",
+                "Rye",
+                "Bungee",
+            }.issubset({candidate.label for candidate in candidates})
+        )
+
+        manifest = json.loads((catalog / "catalog.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["selection"]["face_count"], 40)
+        self.assertEqual(len(manifest["fonts"]), 40)
+        for entry in manifest["fonts"]:
+            font = catalog / entry["font"]
+            license_path = catalog / entry["license"]
+            self.assertEqual(
+                hashlib.sha256(font.read_bytes()).hexdigest(),
+                entry["font_sha256"],
+            )
+            self.assertEqual(
+                hashlib.sha256(license_path.read_bytes()).hexdigest(),
+                entry["license_sha256"],
+            )
+            rendered = ImageFont.truetype(str(font), 32)
+            required = (
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                "abcdefghijklmnopqrstuvwxyz"
+                "0123456789-.'"
+            )
+            for character in required:
+                self.assertIsNotNone(rendered.getmask(character).getbbox())
+
+    def test_default_catalog_resolves_to_repository_assets(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
         self.assertEqual(
-            {candidate.label for candidate in candidates},
-            {"Anton", "Amatic SC Bold", "Bebas Neue"},
+            default_local_font_catalog(),
+            repository / "assets" / "fonts",
         )

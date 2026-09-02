@@ -82,8 +82,6 @@ PAWMARVEL_SAMPLE="$PAWMARVEL_PROJECT/examples/life-is-good/reference-design.png"
 PAWMARVEL_PET="$PAWMARVEL_PROJECT/examples/pet-inputs/sausage-dog-puppy.png"
 PAWMARVEL_ART_PROMPT="$PAWMARVEL_PROJECT/examples/life-is-good/art-template.md"
 PAWMARVEL_PET_PROMPT="$PAWMARVEL_PROJECT/examples/life-is-good/pet-transform.md"
-PAWMARVEL_FONT="$PAWMARVEL_PROJECT/assets/fonts/anton/Anton-Regular.ttf"
-PAWMARVEL_FONT_LICENSE="$PAWMARVEL_PROJECT/assets/fonts/anton/OFL.txt"
 PAWMARVEL_FONT_CATALOG="$PAWMARVEL_PROJECT/assets/fonts"
 PAWMARVEL_PROFILE="$PAWMARVEL_PROJECT/profiles/blanket-king-9375x12375.json"
 
@@ -133,8 +131,6 @@ pawmarvel_pipeline_debug() {
     --pet-image "$PAWMARVEL_PET" \
     --pet-name "SAUSAGE" \
     --product-profile "$PAWMARVEL_PROFILE" \
-    --font "$PAWMARVEL_FONT" \
-    --font-license "$PAWMARVEL_FONT_LICENSE" \
     --font-catalog "$PAWMARVEL_FONT_CATALOG" \
     --template-dir "$PAWMARVEL_PIPELINE_TEMPLATE" \
     --run-dir "$PAWMARVEL_PIPELINE_RUN" \
@@ -166,7 +162,7 @@ work/life-is-good/
   product-profile.json
   art.png
   layout.json
-  fonts/Anton-Regular.ttf
+  fonts/<selected-font>.ttf
   fonts/OFL.txt
   qa/calibration-preview.png
   runs/sausage-dog-puppy/
@@ -185,7 +181,7 @@ work/life-is-good/
       pet-print-manifest.json
       final-print.png
       final-print-debug.png
-      fonts/Anton-Regular.ttf
+      fonts/<selected-font>.ttf
       fonts/OFL.txt
 bundles/catalog.json
 bundles/life-is-good--blanket-king-9375x12375/
@@ -197,7 +193,7 @@ bundles/life-is-good--blanket-king-9375x12375/
   art-template.md
   pet-transform.md
   qa/transformed-pet.png
-  fonts/Anton-Regular.ttf
+  fonts/<selected-font>.ttf
   fonts/OFL.txt
 ```
 
@@ -258,8 +254,6 @@ test -f "$PAWMARVEL_SAMPLE"
 test -f "$PAWMARVEL_PET"
 test -f "$PAWMARVEL_ART_PROMPT"
 test -f "$PAWMARVEL_PET_PROMPT"
-test -f "$PAWMARVEL_FONT"
-test -f "$PAWMARVEL_FONT_LICENSE"
 test -d "$PAWMARVEL_FONT_CATALOG"
 test -f "$PAWMARVEL_PROFILE"
 test -n "${OPENAI_API_KEY:-}"
@@ -362,41 +356,23 @@ Adjust pet and name boxes, save, and close the browser. The tool stores the OFL
 font and license with the template. The reference screenshot guides appearance
 only; all coordinates are authored on `art.png`.
 
-The font comparison cards contain only locally checked-in TTF files whose
-sibling `OFL.txt` passed validation. The tool maps the current name box onto the
-reference screenshot, ranks locally rendered specimens, and preselects the best
-match. Review the recommendation when confidence is low. The confirmed font is
-written into `layout.json`; diagnostics and alternatives are recorded in
-`qa/font-recommendation.json`. Only the selected font and OFL license are later
+The local catalog contains 40 static TTF faces whose sibling `OFL.txt` files
+pass validation. The tool maps the current name box onto the reference,
+normalizes the lettering silhouettes, and selects the highest-scoring match by
+default. The **Top font recommendations** drop-down presents the five best
+matches with visual-confidence percentages. Selecting another entry refreshes
+the authoritative Pillow preview before saving.
+
+The confirmed font is written into `layout.json`; all five ranked options,
+scores, and confidence values are recorded in
+`qa/font-recommendation.json`. Only the selected font and OFL license are
 published. Pass `--font` and optionally `--font-license` only to force a known
-font and bypass automatic selection.
+font and bypass automatic default selection. `--font-catalog` may also be
+omitted because the checked-in local catalog is now the tool default.
 
-The first panel contains the three highest-ranked matches. The **All approved
-fonts** panel contains every valid family discovered recursively under
-`--font-catalog` and can be filtered by name. The repository currently ships
-three families; this is starter catalog content rather than a tool limit.
-
-### 8.1 Expanded OFL recommendations
-
-To rank the pinned expanded Google Fonts candidates together with the local
-fallback catalog, add these options to either `pawmarvel-layout-config` or
-`pawmarvel-pipeline`:
-
-```bash
---font-catalog "$PAWMARVEL_PROJECT/assets/fonts" \
---font-catalog-mode expanded \
---font-index "$PAWMARVEL_PROJECT/assets/fonts/expanded-catalog.json" \
---font-cache "$PAWMARVEL_PROJECT/.pawmarvel-font-cache" \
---font-shortlist-limit 24
-```
-
-The first run requires network access; later runs reuse the validated cache.
-Use `--font-offline` to prohibit network access. If expanded retrieval is
-unavailable, the editor prints a warning and continues with the local catalog.
-If neither a valid cache nor local fallback exists, it fails before any paid
-image-generation request. URLs are pinned to a Google Fonts repository commit,
-and every TTF and `OFL.txt` must match the index checksum. Only the font selected
-when the layout is saved is copied into the template and published bundle.
+The older expanded-cache flags remain available for compatibility but are not
+part of this MVP flow. Broader OFL discovery is documented in the future
+iteration roadmap.
 
 Pipeline-managed debug equivalent:
 
@@ -560,7 +536,7 @@ bundles/life-is-good--blanket-king-9375x12375/
   art-template.md
   pet-transform.md
   qa/transformed-pet.png
-  fonts/Anton-Regular.ttf
+  fonts/<selected-font>.ttf
   fonts/OFL.txt
 ```
 

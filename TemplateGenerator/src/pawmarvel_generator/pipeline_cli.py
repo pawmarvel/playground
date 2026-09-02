@@ -30,7 +30,11 @@ from .cli import (
     generate,
 )
 from .config import ConfigError, load_layout
-from .font_catalog import FontCatalogError, discover_font_catalog
+from .font_catalog import (
+    FontCatalogError,
+    default_local_font_catalog,
+    discover_font_catalog,
+)
 from .expanded_font_catalog import ExpandedFontCatalogError, materialize_expanded_fonts
 from .font_license import FontLicenseError, resolve_ofl_license
 from .image_size import ImageSizeError, validate_generation_size
@@ -93,8 +97,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help=(
-            "directory recursively containing approved TTF/OFL font families; "
-            "repeat to combine catalogs"
+            "directory recursively containing eligible TTF/OFL font families; "
+            "repeat to combine catalogs; omit with --font unset to use the "
+            "curated local catalog"
         ),
     )
     parser.add_argument(
@@ -332,6 +337,11 @@ def run_pipeline(
     font_catalogs = tuple(
         path.expanduser().resolve() for path in getattr(args, "font_catalog", [])
     )
+    if not font_catalogs and not explicit_font:
+        try:
+            font_catalogs = (default_local_font_catalog(),)
+        except FontCatalogError as exc:
+            raise PipelineError(str(exc)) from exc
     font_index = args.font_index.expanduser().resolve() if args.font_index else None
     font_cache = args.font_cache.expanduser().resolve()
     expanded_fonts: tuple[Path, ...] = ()

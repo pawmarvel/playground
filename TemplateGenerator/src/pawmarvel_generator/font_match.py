@@ -1,4 +1,4 @@
-"""Rank approved fonts against lettering visible in a reference screenshot."""
+"""Rank eligible OFL fonts against lettering visible in a reference screenshot."""
 
 from __future__ import annotations
 
@@ -27,6 +27,26 @@ def _ink_mask(image: Image.Image) -> Image.Image:
     return dark if ImageStat.Stat(dark).mean[0] < ImageStat.Stat(light).mean[0] else light
 
 
+def _normalized_mask(mask: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Trim and consistently fit ink so crop offsets do not dominate matching."""
+    output = Image.new("L", size, 0)
+    bounds = mask.getbbox()
+    if bounds is None:
+        return output
+    ink = mask.crop(bounds)
+    scale = min((size[0] - 12) / ink.width, (size[1] - 10) / ink.height)
+    fitted_size = (
+        max(1, round(ink.width * scale)),
+        max(1, round(ink.height * scale)),
+    )
+    ink = ink.resize(fitted_size, Image.Resampling.LANCZOS)
+    output.paste(
+        ink,
+        ((size[0] - fitted_size[0]) // 2, (size[1] - fitted_size[1]) // 2),
+    )
+    return output
+
+
 def _render_mask(text: str, font: Path, size: tuple[int, int]) -> Image.Image:
     width, height = size
     probe = ImageFont.truetype(str(font), max(12, height * 2))
@@ -34,13 +54,11 @@ def _render_mask(text: str, font: Path, size: tuple[int, int]) -> Image.Image:
     ink_width, ink_height = max(1, box[2] - box[0]), max(1, box[3] - box[1])
     scale = min(width * 0.92 / ink_width, height * 0.82 / ink_height)
     fitted = ImageFont.truetype(str(font), max(8, round(probe.size * scale)))
-    mask = Image.new("L", size, 0)
+    mask = Image.new("L", (width * 2, height * 2), 0)
     draw = ImageDraw.Draw(mask)
     final = draw.textbbox((0, 0), text, font=fitted)
-    x = (width - (final[2] - final[0])) // 2 - final[0]
-    y = (height - (final[3] - final[1])) // 2 - final[1]
-    draw.text((x, y), text, font=fitted, fill=255)
-    return mask
+    draw.text((4 - final[0], 4 - final[1]), text, font=fitted, fill=255)
+    return _normalized_mask(mask, size)
 
 
 def rank_fonts(
@@ -53,8 +71,8 @@ def rank_fonts(
     """Return best-first visual matches using the normalized layout name region.
 
     This lightweight MVP matcher deliberately uses no network model. It compares
-    normalized silhouettes, density, and edge structure and reports conservative
-    confidence so the editor can keep a human override available.
+    normalized silhouettes, density, and edge structure. Confidence is the
+    bounded visual-similarity score, so the editor keeps a human override.
     """
     with Image.open(reference) as source:
         ref = source.convert("RGB")
@@ -75,7 +93,12 @@ def rank_fonts(
         if bottom <= top:
             continue
         crop = ref.crop((max(0, x0), top, min(ref.width, x1), bottom))
-        target = _ink_mask(crop.resize(target_size, Image.Resampling.LANCZOS))
+        target = _normalized_mask(
+            _ink_mask(crop.resize(target_size, Image.Resampling.LANCZOS)),
+            target_size,
+        )
+        if target.getbbox() is None:
+            continue
         targets.append(
             (
                 target,
@@ -83,6 +106,8 @@ def rank_fonts(
                 ImageStat.Stat(target).mean[0] / 255,
             )
         )
+    if not targets:
+        return tuple(FontMatch(candidate, 0.0, 0.0) for candidate in candidates)
     scored: list[tuple[FontCandidate, float]] = []
     for candidate in candidates:
         rendered = _render_mask(pet_name, candidate.font, target_size)
@@ -96,6 +121,11 @@ def rank_fonts(
             candidate_scores.append(1.0 - (0.55 * pixel_error + 0.3 * edge_error + 0.15 * density_error))
         scored.append((candidate, max(candidate_scores)))
     scored.sort(key=lambda item: (-item[1], item[0].label.lower()))
-    margin = scored[0][1] - scored[1][1] if len(scored) > 1 else scored[0][1]
-    confidence = max(0.0, min(0.99, 0.45 + margin * 4))
-    return tuple(FontMatch(candidate, round(score, 4), round(confidence if index == 0 else 0.0, 4)) for index, (candidate, score) in enumerate(scored))
+    return tuple(
+        FontMatch(
+            candidate,
+            round(score, 4),
+            round(max(0.0, min(0.99, score)), 4),
+        )
+        for candidate, score in scored
+    )

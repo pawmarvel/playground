@@ -1,18 +1,26 @@
-# Approved authoring font catalog
+# Curated local OFL authoring catalog
 
-Each immediate child directory is one redistributable font family and must
-contain one or more `.ttf` files plus its unmodified SIL Open Font License as
-`OFL.txt`. `pawmarvel-layout-config --font-catalog assets/fonts` validates the
-entire catalog before opening the editor and presents every approved font for
-human comparison.
+This directory contains the MVP's 40 locally available, print-oriented font
+faces. The set covers bold/condensed, rounded/playful, handwritten, script,
+slab/western, and retro/decorative pet-name treatments. Each family directory
+contains one static `.ttf` face and its unmodified SIL Open Font License as
+`OFL.txt`.
 
-`expanded-catalog.json` is a lightweight, versioned remote index. In
-`--font-catalog-mode expanded`, the tool downloads only its bounded candidate
-set into `.pawmarvel-font-cache`, verifies pinned SHA-256 hashes and OFL 1.1
-text, and ranks those candidates together with this local fallback catalog.
-The index pins an immutable Google Fonts commit; do not replace its URLs with
-mutable branch URLs.
+[`catalog.json`](catalog.json) records the selection role, source revision,
+artifact paths, byte sizes, and SHA-256 hashes. All artifacts come from the
+official Google Fonts repository at the immutable revision recorded there.
 
-The selected family is copied into the template and is the only font published
-in the runtime bundle. Do not place system, proprietary, or license-ambiguous
-fonts in this directory.
+When neither `--font` nor `--font-catalog` is supplied,
+`pawmarvel-layout-config` and `pawmarvel-pipeline` use this catalog by default.
+The editor compares normalized lettering silhouettes against the reference,
+preselects the highest-scoring font, and provides the five best candidates with
+visual-confidence scores for manual override.
+
+The selected family is copied into the template and remains the only font
+published in the current runtime bundle. The larger catalog is an authoring
+asset, not a frontend payload. Do not place system, proprietary, variable-only,
+or license-ambiguous fonts in this directory.
+
+`expanded-catalog.json` and its cache loader remain for compatibility with
+earlier experiments. They are not part of the current local-catalog MVP.
+Open-world OFL discovery is deferred to the future scaling roadmap.

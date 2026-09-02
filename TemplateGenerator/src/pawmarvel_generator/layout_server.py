@@ -281,7 +281,7 @@ def _draft_layout(
             None,
         )
         if candidate is None:
-            raise ConfigError("selected font is not in the approved OFL catalog")
+            raise ConfigError("selected font is not in the eligible OFL catalog")
     name["font"] = candidate.relative_name
     return (
         parse_layout(
@@ -321,6 +321,12 @@ def _make_handler(
     # preselected even when an older layout contains a different font.
     selected_candidate = matches[0].candidate if config.auto_font else _candidate_for_layout(candidates, initial_layout)
     initial_layout["name"]["font"] = selected_candidate.relative_name
+    top_matches = matches[:5]
+    visible_matches = list(top_matches)
+    if selected_candidate not in {match.candidate for match in top_matches}:
+        visible_matches.append(
+            next(match for match in matches if match.candidate == selected_candidate)
+        )
     bootstrap = {
         "layout": initial_layout,
         "canvas": canvas,
@@ -333,14 +339,25 @@ def _make_handler(
                 "label": candidate.label,
                 "relativeName": candidate.relative_name,
                 "sha256": candidate.sha256,
-                "matchScore": next(match.score for match in matches if match.candidate == candidate),
+                "matchScore": next(
+                    match.score for match in matches if match.candidate == candidate
+                ),
+                "confidence": next(
+                    match.confidence
+                    for match in matches
+                    if match.candidate == candidate
+                ),
                 "recommended": candidate == matches[0].candidate,
-                "rank": next(index for index, match in enumerate(matches, 1) if match.candidate == candidate),
+                "rank": next(
+                    index
+                    for index, match in enumerate(matches, 1)
+                    if match.candidate == candidate
+                ),
             }
-            for candidate in candidates
+            for candidate in (match.candidate for match in visible_matches)
         ],
         "fontRecommendation": {
-            "method": "reference_visual_match_v1",
+            "method": "normalized_reference_visual_match_v2",
             "confidence": matches[0].confidence,
             "fontId": matches[0].candidate.candidate_id,
             "rankedFontIds": [match.candidate.candidate_id for match in matches],
@@ -475,14 +492,21 @@ def _make_handler(
                 _atomic_write_bytes(config.calibration_output, _png_bytes(calibration))
                 recommendation_output = config.template_dir / "qa" / "font-recommendation.json"
                 recommendation = {
-                    "method": "reference_visual_match_v1",
+                    "method": "normalized_reference_visual_match_v2",
                     "recommended_font": matches[0].candidate.relative_name,
                     "confidence": matches[0].confidence,
                     "selected_font": selected_font.relative_name,
                     "confirmed": True,
-                    "alternatives": [
-                        {"font": match.candidate.relative_name, "score": match.score}
-                        for match in matches[1:3]
+                    "ranked_options": [
+                        {
+                            "rank": rank,
+                            "font_id": match.candidate.candidate_id,
+                            "label": match.candidate.label,
+                            "font": match.candidate.relative_name,
+                            "score": match.score,
+                            "confidence": match.confidence,
+                        }
+                        for rank, match in enumerate(matches[:5], 1)
                     ],
                 }
                 _atomic_write_bytes(

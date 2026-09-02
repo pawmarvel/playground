@@ -181,7 +181,7 @@ The local editor receives:
 - the unchanged finished reference for visual comparison;
 - one representative transformed pet;
 - a sample pet name;
-- an initial OFL font/license plus zero or more approved local font catalogs;
+- the curated 40-face local OFL catalog or an explicit OFL font override;
   and
 - output `layout.json`.
 
@@ -190,26 +190,26 @@ shared deterministic renderer. Saving writes `layout.json`, bundles the font and
 `OFL.txt`, and creates a calibration preview. The command returns after the
 saved browser window closes, allowing the pipeline to continue.
 
-Font catalogs are recursive directories of TTF families with sibling OFL
-licenses. The editor validates every candidate before opening, maps the authored
-name box onto the reference, compares normalized lettering silhouettes, and
-preselects the highest-ranked local font. It exposes side-by-side specimens,
-confidence, and alternatives and uses the shared Pillow renderer for the
-authoritative full preview. The operator confirms the preselection; matching is
-advisory and never selects an arbitrary system or downloaded font. `--font`
-remains an explicit override. Saving records the selected font in `layout.json`
-and recommendation diagnostics in `qa/font-recommendation.json`. Print preparation and
-bundle publication propagate only that font and its license, so production
-remains deterministic even though authoring can compare multiple candidates.
+The local catalog contains 40 static TTF faces with sibling OFL licenses and a
+hash-pinned manifest. It is used automatically when no explicit font or catalog
+is supplied. The editor validates every candidate before opening, maps the
+authored name box onto the reference, and compares normalized lettering
+silhouettes. It preselects the highest-ranked font and exposes the five best
+matches and their visual-confidence scores in a drop-down. The operator can
+override the recommendation before saving. Matching is advisory and never
+selects an arbitrary system font. Saving records the selected font in
+`layout.json` and all five ranked options in
+`qa/font-recommendation.json`. Print preparation and bundle publication
+propagate only the selected font and its license.
 
-Optional expanded mode uses a checked-in, versioned OFL index whose artifact
+Legacy expanded mode uses a checked-in, versioned OFL index whose artifact
 URLs are pinned to an immutable upstream revision. A bounded candidate set is
 downloaded into a checksum-addressed local cache before paid pipeline work.
 TTF hashes, license hashes, OFL 1.1 text, and Pillow renderability are validated.
-Cached candidates enter the same reference-image ranking path as local fonts;
-the local catalog remains the offline fallback. Cache contents are never bundle
-inputs directly: saving copies only the confirmed TTF and its license into the
-template, after which print and production consumers remain network-independent.
+It remains for compatibility with earlier experiments and is outside the local
+catalog MVP. Open-world discovery is deferred to the future roadmap. Cache
+contents never become bundle inputs directly: saving copies only the confirmed
+TTF and its license into the template.
 
 The reference screenshot never supplies coordinates. Placement is authored
 against `art.png`.
@@ -409,7 +409,7 @@ work/life-is-good/
   art.png
   layout.json
   fonts/
-    Anton-Regular.ttf
+    <selected-font>.ttf
     OFL.txt
   qa/
     transformed-pet.png

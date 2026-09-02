@@ -33,6 +33,29 @@ class FontMatchTests(unittest.TestCase):
             )
         self.assertEqual(matches[0].candidate.font.name, "AmaticSC-Bold.ttf")
         self.assertGreater(matches[0].confidence, 0)
+        self.assertEqual(matches[0].confidence, matches[0].score)
+        self.assertEqual(len(matches), 40)
+        self.assertEqual(
+            [match.score for match in matches],
+            sorted((match.score for match in matches), reverse=True),
+        )
+
+    def test_reports_zero_confidence_when_reference_has_no_visible_ink(self) -> None:
+        catalog = Path(__file__).resolve().parents[1] / "assets" / "fonts"
+        candidates = discover_font_catalog(None, catalog_roots=(catalog,))
+        with tempfile.TemporaryDirectory() as directory:
+            reference = Path(directory) / "reference.png"
+            Image.new("RGB", (400, 200), "white").save(reference)
+            matches = rank_fonts(
+                reference,
+                {"x": 50, "y": 50, "width": 300, "height": 70},
+                (400, 200),
+                "CHARLIE",
+                candidates,
+            )
+
+        self.assertEqual(len(matches), 40)
+        self.assertTrue(all(match.confidence == 0 for match in matches))
 
 
 if __name__ == "__main__":

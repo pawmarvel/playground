@@ -2,7 +2,7 @@
 
 Status: Deferred roadmap  
 Depends on: Successful profile-driven preview-to-print POC validation
-Last updated: 2026-08-31
+Last updated: 2026-09-02
 
 ## 1. Purpose
 
@@ -65,6 +65,55 @@ Potential capabilities:
 
 Keep automatic detection advisory. Operators should remain able to override all
 suggested geometry.
+
+#### Deferred capability — open-world OFL font discovery
+
+The MVP font boundary is the versioned local catalog of 40 print-oriented OFL
+faces. Layout authoring ranks only those locally available
+artifacts. Expanding beyond that catalog during a layout session is explicitly
+deferred until the template workflow is validated at larger scale.
+
+Future font discovery should use a two-tier model:
+
+1. Rank the local core catalog first.
+2. Enter discovery only when the operator rejects the results or calibrated
+   score and confidence thresholds indicate that no candidate is adequate.
+3. Extract structural lettering traits from the reference, including serif
+   class, width, weight, contrast, terminals, case, and decorative style.
+4. Search a pinned metadata snapshot of a broader OFL universe, rather than
+   making an unbounded live-web search part of the template contract.
+5. Materialize a bounded candidate set, validate it, render comparison
+   specimens, and optionally apply multimodal reranking restricted to known
+   candidate IDs.
+6. Present the resulting top candidates for operator confirmation.
+7. Pin the selected artifacts, original licenses, source revisions, and hashes,
+   then promote useful selections into a later version of the local catalog.
+
+Candidate discovery may use Google Fonts metadata and repository artifacts,
+Fontsource metadata/WOFF2 packaging, and other reputable OFL foundries. Font
+identification services may provide classification clues, but their results
+must never bypass license, glyph, renderability, source-integrity, and
+FontBakery-style quality checks. Temporary discovery downloads must not become
+bundle inputs until promoted and pinned.
+
+The future design must also distinguish a missing typeface from effects that
+make an existing typeface look different. Tracking, outlines, shadows, width
+adjustments, curved baselines, distressing, and custom lettering may require
+layout/effect support rather than a larger font search. If no suitable OFL font
+exists, record that outcome and require an explicit design decision; do not
+silently introduce a proprietary font or generated lettering asset.
+
+Acceptance criteria for this capability should include:
+
+- bounded discovery latency and download volume;
+- deterministic reruns from a pinned discovery-index revision;
+- no invented or unlicensed font identifiers from multimodal ranking;
+- complete required glyph coverage for configured customer-name languages;
+- identical selected-font identity across preview and print rendering;
+- promotion of a discovered font without mutating previously published
+  templates; and
+- evidence that discovery materially improves matches missed by the local
+  30–50-font catalog.
 
 #### Deferred issue — Charlie Well Trained pet shadow
 

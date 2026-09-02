@@ -74,8 +74,8 @@ class LayoutServerTests(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/assets/layout.js") as response:
             script = response.read()
             self.assertIn(b"requestPreview", script)
-            self.assertIn(b"All approved fonts", script)
-            self.assertIn(b"Filter fonts by name", script)
+            self.assertIn(b"Top five font recommendations", script)
+            self.assertIn(b"candidate.confidence", script)
             self.assertIn(b"/heartbeat", script)
             self.assertIn(b"pagehide", script)
 
@@ -127,6 +127,61 @@ class LayoutServerTests(unittest.TestCase):
             (self.root / "fonts" / "OFL.txt").read_bytes(),
             selected.license.read_bytes(),
         )
+        recommendation = json.loads(
+            (self.root / "qa" / "font-recommendation.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            recommendation["method"], "normalized_reference_visual_match_v2"
+        )
+        self.assertEqual(len(recommendation["ranked_options"]), 5)
+        self.assertTrue(
+            all(
+                0 <= option["confidence"] <= 0.99
+                for option in recommendation["ranked_options"]
+            )
+        )
+
+    def test_auto_font_defaults_to_best_of_five_scored_recommendations(self) -> None:
+        auto_dir = self.root / "auto"
+        auto_dir.mkdir()
+        auto_art = make_image(
+            auto_dir / "art.png", size=(200, 300), color=(20, 30, 40, 255)
+        )
+        auto_server = create_server(
+            EditorConfig(
+                art=auto_art,
+                reference=self.reference,
+                pet=self.pet,
+                pet_name="BUDDY",
+                font=None,
+                font_catalogs=(self.font_catalog,),
+                output=auto_dir / "layout.json",
+            )
+        )
+        thread = threading.Thread(target=auto_server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f"http://127.0.0.1:{auto_server.server_port}"
+            with urllib.request.urlopen(base + "/") as response:
+                html = response.read().decode("utf-8")
+            prefix = "window.PAWMARVEL_BOOTSTRAP = "
+            encoded = html.split(prefix, 1)[1].split(";</script>", 1)[0]
+            bootstrap = json.loads(encoded)
+            candidates = bootstrap["fontCandidates"]
+            self.assertEqual(len(candidates), 5)
+            self.assertEqual(
+                bootstrap["selectedFontId"],
+                bootstrap["fontRecommendation"]["fontId"],
+            )
+            self.assertTrue(candidates[0]["recommended"])
+            self.assertEqual(candidates[0]["rank"], 1)
+            self.assertTrue(all("confidence" in value for value in candidates))
+        finally:
+            auto_server.shutdown()
+            auto_server.server_close()
+            thread.join(timeout=2)
 
     def test_close_endpoint_returns_control_to_server_caller(self) -> None:
         with self.post("/save", {"layout": layout_data()}) as response:

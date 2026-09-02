@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .config import ConfigError
+from .font_catalog import FontCatalogError, default_local_font_catalog
 from .font_license import FontLicenseError
 from .layout_server import EditorConfig, serve_layout_editor
 
@@ -37,8 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help=(
-            "directory recursively containing approved TTF/OFL font families; "
-            "repeat to combine catalogs"
+            "directory recursively containing eligible TTF/OFL font families; "
+            "repeat to combine catalogs; omit with --font unset to use the "
+            "curated local catalog"
         ),
     )
     parser.add_argument(
@@ -72,6 +74,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
     try:
+        font_catalogs = tuple(args.font_catalog)
+        if not font_catalogs and args.font is None:
+            font_catalogs = (default_local_font_catalog(),)
         serve_layout_editor(
             EditorConfig(
                 art=args.art,
@@ -80,7 +85,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 pet_name=args.pet_name,
                 font=args.font,
                 font_license=args.font_license,
-                font_catalogs=tuple(args.font_catalog),
+                font_catalogs=font_catalogs,
                 font_catalog_mode=args.font_catalog_mode,
                 font_index=args.font_index,
                 font_cache=args.font_cache,
@@ -95,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             port=args.port,
             open_browser=not args.no_open,
         )
-    except (ConfigError, FontLicenseError) as exc:
+    except (ConfigError, FontCatalogError, FontLicenseError) as exc:
         parser.error(str(exc))
     return 0
 

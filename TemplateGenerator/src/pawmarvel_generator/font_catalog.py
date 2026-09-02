@@ -16,6 +16,16 @@ class FontCatalogError(ValueError):
     """A configured catalog is unsafe, ambiguous, or cannot be rendered."""
 
 
+def default_local_font_catalog() -> Path:
+    """Return the repository's curated OFL catalog used by the MVP tools."""
+    catalog = Path(__file__).resolve().parents[2] / "assets" / "fonts"
+    if not catalog.is_dir():
+        raise FontCatalogError(
+            "default local font catalog is unavailable; pass --font-catalog"
+        )
+    return catalog
+
+
 @dataclass(frozen=True)
 class FontCandidate:
     candidate_id: str

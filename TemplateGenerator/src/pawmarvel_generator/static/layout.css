@@ -20,12 +20,8 @@ input, select, button { font: inherit; padding: .5rem; border-radius: 5px; borde
 input:disabled { opacity: .5; cursor: not-allowed; }
 button { cursor: pointer; background: #f0cf71; color: #17191d; font-weight: 700; }
 .font-help { margin: 0 0 .75rem; color: #b9c8db; }
-.font-filter { box-sizing: border-box; width: 100%; margin: 0 0 .65rem; background: #17191d; color: #f4f2eb; }
-#font-catalog h3 { margin: .8rem 0 .5rem; font-size: .9rem; }
-.font-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .65rem; margin-bottom: 1rem; }
-.font-candidate { display: grid; gap: .35rem; text-align: left; background: #30343c; color: #f4f2eb; border: 2px solid transparent; }
-.font-candidate.selected { border-color: #f0cf71; background: #414650; }
-.font-candidate:disabled { opacity: .5; cursor: not-allowed; }
-.font-specimen { overflow: hidden; font-size: 2rem; font-weight: 400; line-height: 1.15; white-space: nowrap; }
+.font-select-label { display: grid; gap: .4rem; }
+#font-recommendations { width: 100%; background: #17191d; color: #f4f2eb; }
+.font-specimen { overflow: hidden; margin-top: .75rem; padding: .75rem; font-size: 2rem; font-weight: 400; line-height: 1.15; white-space: nowrap; background: #17191d; border: 1px solid #414650; border-radius: 5px; }
 .actions { display: flex; gap: .75rem; }
 #status { min-height: 1.5em; color: #b9c8db; }
