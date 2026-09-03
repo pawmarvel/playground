@@ -213,8 +213,10 @@ authoring/
     sources/
       reference-design.png
       reference-designs/reference-design-0002.png
-      art-template.md
-      pet-transform.md
+      art-template-gpt.md
+      art-template-gemini.md
+      pet-transform-gpt.md
+      pet-transform-gemini.md
     <product-profile-id>/
       candidates/<candidate-id>/
         template/             mutable pipeline output
@@ -246,8 +248,8 @@ exchange/
         reference-designs/reference-design-0002.png
         runtime-references/01-exemplar.png
         runtime-references/02-finished-design.png
-        pet-transform.md
-        art-template.md
+        pet-transform-{gpt|gemini}.md
+        art-template-{gpt|gemini}.md
         fonts/<font>.ttf
         fonts/OFL.txt
         qa/transformed-pet.png
@@ -351,8 +353,9 @@ not a viable fallback.
   "bundle_revision": 2,
   "created_at": "2026-09-02T21:30:00Z",
   "runtime": {
+    "provider": "openai",
     "model": "gpt-image-2",
-    "prompt": "pet-transform.md",
+    "prompt": "pet-transform-gpt.md",
     "reference_assets": [
       "runtime-references/01-exemplar.png",
       "runtime-references/02-finished-design.png"
@@ -434,25 +437,34 @@ space, apostrophe, and hyphen. Digits are intentionally allowed for names such
 as `R2`; control characters, emoji, and other punctuation are rejected. FE does
 not implement a general character-class expression language.
 
-### 8.3 Runtime model scope
+### 8.3 Runtime provider and model scope
 
-The MVP production contract supports `gpt-image-2` only. `pet-transform.md` is
-executed verbatim with native transparent output. The current layout parser's
-omitted-`model` Gemini compatibility remains for old experiments but is invalid
-for a production bundle. Production `layout.json.model`,
-`layout-print.json.model`, and `bundle.json.runtime.model` are all required to
-equal `gpt-image-2`.
+The offline generator now supports both OpenAI and Gemini. The recommended MVP
+split is `gpt-image-2` for infrequent offline art-template authoring and
+`gemini-3.1-flash-image` for latency-sensitive customer pet transformation,
+subject to the same visual acceptance set. This CLI capability does not make
+the old omitted-`layout.model` convention an acceptable production contract.
 
-Gemini can be designed later as a separate runtime path with its own house
-prompt and output semantics. It should not be encoded indirectly by a missing
-field in a new production contract.
+Before FE integration, `bundle.json.runtime` must identify `provider` and
+`model` explicitly from an allowlist. Preview and print must pin the same bundle
+revision and transformed-pet lineage. OpenAI provides a native transparent
+background control. Gemini transparency is prompt-driven, uses native
+aspect-ratio/resolution tiers, and requires output normalization and alpha QA;
+those semantics must be named in runtime policy rather than hidden behind a
+missing field.
 
-This is a product tradeoff, not only a schema simplification. The earlier PDF
-reports approximately 60 seconds per GPT styling call versus approximately 15
-seconds for its Gemini path, with corresponding retry and model-cost impact.
-Treat those figures as historical measurements and benchmark the actual MVP
-configuration. Product and FE must knowingly accept the initial preview latency
-before GPT-only is frozen.
+Prompt filenames are provider-qualified:
+`art-template-{gpt|gemini}.md` and
+`pet-transform-{gpt|gemini}.md`. Each released bundle contains one selected
+file for each role, and its manifest identifies both paths. The runtime pet
+prompt category must match `runtime.provider`; importer validation rejects a
+GPT/Gemini mismatch. Authoring may retain all variants privately for
+side-by-side evaluation.
+
+The earlier PDF latency figures remain historical measurements. Benchmark the
+GA Gemini and OpenAI configurations on representative designs, recording p50,
+p95, retry rate, alpha failures, identity/style acceptance, and cost before
+freezing the production allowlist.
 
 ### 8.4 Runtime image order and reference decision
 
@@ -604,8 +616,9 @@ profiles except through the validated mechanical scaling flow.
 6. **Publish a geometry fixture.** Include representative transformed pet,
    sample name, expected preview, and semantic expectations. Use human visual
    review rather than cross-renderer pixel thresholds.
-7. **Add runtime policy.** Capture exact reference order, GPT Image 2 output,
-   name validation, renderer behavior, and preview/print art ownership in the
+7. **Add runtime policy.** Capture provider/model, exact reference order,
+   provider-specific output normalization and alpha requirements, name
+   validation, renderer behavior, and preview/print art ownership in the
    manifest. Enforce one-to-four runtime references in bundle-v1 schema.
 
 ### P1 — useful during the trial
@@ -646,7 +659,7 @@ Resolve these in order during kickoff:
 | 2 | Which revision is authoritative? | Generator `bundle_revision`; importer records it verbatim and uses a differently named internal ID if needed | Accept at kickoff |
 | 3 | Does FE adopt `bundle.json`? | Yes, mandatory for the dual-art contract; declining it reopens print-art architecture | Accept at kickoff |
 | 4 | Which runtime references are sent? | Bounded A/B; provisional exemplar-first, four total; template owner decides and a tie keeps exemplar-first | Deferred to measured test |
-| 5 | Which model paths are in MVP? | GPT Image 2 only, knowingly accepting the historically reported ~60s versus ~15s Gemini latency and measuring current cost/latency | Product and FE acceptance required |
+| 5 | Which model paths are in MVP? | GPT Image 2 for offline art authoring and Gemini 3.1 Flash Image for online pet transformation; retain a measured OpenAI pet fallback | Product and FE acceptance required |
 | 6 | Who creates print art? | Generator ships profile-specific high-resolution art; FE upscales only customer pet | Proposed decision |
 | 7 | How are runtime and QA references separated? | Manifest paths are authoritative; runtime exemplar gets a `runtime-references/` path independent of QA | Proposed decision |
 | 8 | How is renderer conformance tested? | Machine-check geometry/semantics plus one human golden review | Proposed decision |
@@ -716,7 +729,8 @@ temporary workaround.
   reference assets afterward.
 - Runtime exemplar and QA transformed-pet paths are separate roles even when
   their initial bytes are identical.
-- Production bundles explicitly require GPT Image 2.
+- Production bundles explicitly declare an allowlisted runtime provider/model
+  and its output-normalization policy.
 - FE uses bundled print art and does not independently upscale preview art.
 - Preview and print use the same exact bundle revision and customer values.
 - Automated conformance checks geometry; a human compares the golden preview.
@@ -732,7 +746,7 @@ temporary workaround.
 | Two revision counters | Accepted | Generator revision is authoritative; FE may use a separately named internal ID with an explicit mapping |
 | `bundle.json` was presented as settled | Accepted, then superseded by second review | It became an explicit decision first; the dual-art analysis now makes it mandatory for this proposal |
 | Finished-design-first contradicted tested exemplar | Accepted with bounded deferral | Provisional exemplar-first; run a two-design/three-pet A/B and persist the result per revision |
-| Gemini semantics missing | Accepted | MVP is explicitly GPT Image 2 only; legacy omitted-model behavior is excluded from production bundles |
+| Gemini semantics missing | Accepted, superseded by provider implementation | Generator supports Gemini; production bundles must declare provider/model and normalization explicitly, while legacy omitted-model behavior remains excluded |
 | Print-art ownership conflict | Accepted | Generator supplies preview and profile-specific print art; FE does not upscale art |
 | Reference filename mismatch | Accepted, then superseded by second review | Mandatory manifest paths resolve it; there is no filename-only fallback in this proposal |
 | Channel path used `..` | Accepted | Channel removed from MVP; any future channel uses full or base-relative paths |
@@ -753,7 +767,7 @@ temporary workaround.
 | Catalog did not hash `bundle.json` | Accepted as blocking | Added required `manifest_sha256`; idempotency is defined by the manifest digest |
 | Filename fallback conflicts with dual art | Accepted as blocking | Manifest consumption is mandatory; declining it reopens the print-art architecture |
 | Archive delivery conflicts with required base URL | Accepted | HTTP imports require `asset_base_url`; archives omit it and resolve from an archive root containing `catalog.json` and `bundles/` |
-| GPT-only hides latency/cost consequence | Accepted | Added historical ~60s/~15s context, current benchmarking, and explicit product/FE acceptance |
+| GPT-only hides latency/cost consequence | Accepted, superseded by dual-provider direction | Recommend GPT Image 2 for offline art and Gemini 3.1 Flash Image for online pet transformation; benchmark quality, alpha failures, latency, retries, and cost before freezing the allowlist |
 | Exemplar couples runtime and QA roles | Accepted | Runtime exemplar has a separate `runtime-references/` path; changing it requires a new reviewed revision |
 | Reference cap is instance data | Accepted | Removed `max_reference_assets`; schema enforces `maxItems: 4` |
 | Renderer has an undefined second version | Accepted | Removed `renderer.contract_version`; bundle schema version governs semantics |

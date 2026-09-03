@@ -57,12 +57,12 @@ class PipelineCliTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.sample = make_image(self.root / "sample.png", size=(200, 300))
         self.pet = make_image(self.root / "pet.png", size=(80, 80))
-        self.art_prompt = self.root / "art-prompt.md"
+        self.art_prompt = self.root / "art-template-gpt.md"
         self.art_prompt.write_text(
             "Create fixed background artwork only on a transparent background.",
             encoding="utf-8",
         )
-        self.pet_prompt = self.root / "pet-transform.md"
+        self.pet_prompt = self.root / "pet-transform-gpt.md"
         self.pet_prompt.write_text(
             "Use the user pet for identity and the finished reference design for "
             "style, pose, expression, and crop. Return transparent pet artwork.",
@@ -449,7 +449,7 @@ class PipelineCliTests(unittest.TestCase):
             "visual-context-only-not-layout-geometry",
         )
         self.assertNotIn("aligned_reference", record["sources"])
-        self.assertFalse((self.template / "pet-transform.md").exists())
+        self.assertFalse((self.template / "pet-transform-gpt.md").exists())
         self.assertFalse((self.template / "pet-transform.analysis.json").exists())
 
     def test_product_profile_rejects_pet_size_override(self) -> None:
@@ -547,8 +547,8 @@ class PipelineCliTests(unittest.TestCase):
                 "print",
                 "reference-design.png",
                 "reference-designs",
-                "art-template.md",
-                "pet-transform.md",
+                "art-template-gpt.md",
+                "pet-transform-gpt.md",
                 "qa",
                 "fonts",
             },
@@ -585,11 +585,11 @@ class PipelineCliTests(unittest.TestCase):
         self.assertIsNotNone(record["artifact_sha256"]["print_art"])
         self.assertIsNotNone(record["artifact_sha256"]["final_print"])
         self.assertEqual(
-            (outputs["bundle"] / "art-template.md").read_bytes(),
+            (outputs["bundle"] / "art-template-gpt.md").read_bytes(),
             self.art_prompt.read_bytes(),
         )
         self.assertEqual(
-            (outputs["bundle"] / "pet-transform.md").read_bytes(),
+            (outputs["bundle"] / "pet-transform-gpt.md").read_bytes(),
             self.pet_prompt.read_bytes(),
         )
 

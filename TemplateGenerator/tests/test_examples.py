@@ -14,13 +14,24 @@ class RepositoryExampleTests(unittest.TestCase):
             root = examples / fixture
             self.assertEqual(
                 {path.name for path in root.iterdir()},
-                {"reference-design.png", "art-template.md", "pet-transform.md"},
+                {
+                    "reference-design.png",
+                    "art-template-gpt.md",
+                    "art-template-gemini.md",
+                    "pet-transform-gpt.md",
+                    "pet-transform-gemini.md",
+                },
             )
             with Image.open(root / "reference-design.png") as image:
                 image.load()
                 self.assertGreater(image.width, 0)
                 self.assertGreater(image.height, 0)
-            for prompt in ("art-template.md", "pet-transform.md"):
+            for prompt in (
+                "art-template-gpt.md",
+                "art-template-gemini.md",
+                "pet-transform-gpt.md",
+                "pet-transform-gemini.md",
+            ):
                 self.assertGreater(
                     len((root / prompt).read_text(encoding="utf-8").strip()),
                     100,

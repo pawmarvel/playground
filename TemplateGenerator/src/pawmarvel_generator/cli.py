@@ -1,7 +1,7 @@
 # CLI purpose:
-# Generate or edit personalized design assets with GPT Image using a sample
-# design, a pet image, or both; optionally derive layer size from a reusable
-# product profile, then validate and save the returned image.
+# Generate or edit personalized design assets with OpenAI or Gemini using a
+# sample design, a pet image, or both; optionally derive layer size from a
+# reusable product profile, then validate and save the returned image.
 
 from __future__ import annotations
 
@@ -18,9 +18,12 @@ import time
 from contextlib import ExitStack
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Sequence
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .image_size import ImageSizeError, validate_generation_size
 from .product_profile import ProductProfileError, load_product_profile
@@ -29,17 +32,88 @@ from .product_profile import ProductProfileError, load_product_profile
 DEFAULT_OUTPUT_DIR = Path("output")
 SUPPORTED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 OUTPUT_FORMATS = ("png", "jpg", "jpeg", "webp")
-API_KEY_PATTERN = re.compile(rb"sk-[A-Za-z0-9_-]{20,}")
+OPENAI_API_KEY_PATTERN = re.compile(rb"sk-[A-Za-z0-9_-]{20,}")
 MAX_API_KEY_FILE_BYTES = 1024 * 1024
 PROGRESS_INTERVAL_SECONDS = 10.0
+GEMINI_INTERACTIONS_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1beta/interactions"
+)
+PROVIDERS = ("auto", "openai", "gemini")
+DEFAULT_MODELS = {
+    "openai": "gpt-image-2",
+    "gemini": "gemini-3.1-flash-image",
+}
+GEMINI_ASPECT_RATIOS = (
+    "1:8",
+    "1:4",
+    "2:3",
+    "3:4",
+    "4:5",
+    "1:1",
+    "5:4",
+    "4:3",
+    "3:2",
+    "4:1",
+    "8:1",
+    "9:16",
+    "16:9",
+    "21:9",
+)
+PROMPT_CATEGORY_PATTERN = re.compile(r"-(gpt|gemini)\.md$")
 
 
 class UserInputError(ValueError):
     """An actionable command-line input error."""
 
 
+class _GeminiRestInteractions:
+    def __init__(self, api_key: str) -> None:
+        self.api_key = api_key
+
+    def create(self, **payload: Any) -> SimpleNamespace:
+        request = Request(
+            GEMINI_INTERACTIONS_ENDPOINT,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.api_key,
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=300) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            detail = ""
+            try:
+                body = json.loads(exc.read().decode("utf-8"))
+                detail = body.get("error", {}).get("message", "")
+            except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                pass
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(f"Gemini API returned HTTP {exc.code}{suffix}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"Gemini API request failed: {exc.reason}") from exc
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Gemini API returned invalid JSON") from exc
+
+        for step in reversed(result.get("steps", [])):
+            for content in reversed(step.get("content", [])):
+                if content.get("type") == "image" and content.get("data"):
+                    return SimpleNamespace(
+                        output_image=SimpleNamespace(data=content["data"])
+                    )
+        return SimpleNamespace(output_image=None)
+
+
+class _GeminiRestClient:
+    def __init__(self, api_key: str) -> None:
+        self.interactions = _GeminiRestInteractions(api_key)
+
+
 class _ProgressReporter:
-    def __init__(self, interval: float | None = None) -> None:
+    def __init__(self, provider: str, interval: float | None = None) -> None:
+        self.provider = provider
         self.interval = PROGRESS_INTERVAL_SECONDS if interval is None else interval
         self.started_at = 0.0
         self._finished = threading.Event()
@@ -47,7 +121,8 @@ class _ProgressReporter:
 
     def __enter__(self) -> "_ProgressReporter":
         self.started_at = time.monotonic()
-        print("Submitting image edit request to OpenAI...", file=sys.stderr, flush=True)
+        service = "OpenAI" if self.provider == "openai" else "Gemini"
+        print(f"Submitting image edit request to {service}...", file=sys.stderr, flush=True)
         self._thread = threading.Thread(
             target=self._report,
             name="pawmarvel-generation-progress",
@@ -78,8 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pawmarvel-generate",
         description=(
-            "Generate or edit artwork with GPT Image 2 using a sample design, "
-            "a pet image, or both."
+            "Generate or edit artwork with OpenAI or Gemini using a sample "
+            "design, a pet image, or both."
         ),
     )
     parser.add_argument(
@@ -103,8 +178,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--api-key-file",
         type=Path,
         help=(
-            "plain-text or RTF file containing exactly one OpenAI API key; "
-            "defaults to OPENAI_API_KEY"
+            "file containing the selected provider API key; OpenAI accepts "
+            "plain text or RTF and Gemini accepts plain text; defaults to "
+            "OPENAI_API_KEY or GEMINI_API_KEY"
         ),
     )
     parser.add_argument(
@@ -123,7 +199,22 @@ def build_parser() -> argparse.ArgumentParser:
         default="png",
         help="generated image format; jpg is an alias for jpeg (default: png)",
     )
-    parser.add_argument("--model", default="gpt-image-2")
+    parser.add_argument(
+        "--provider",
+        choices=PROVIDERS,
+        default="auto",
+        help=(
+            "image API provider; auto infers Gemini from a gemini-* model and "
+            "otherwise uses OpenAI (default: auto)"
+        ),
+    )
+    parser.add_argument(
+        "--model",
+        help=(
+            "provider model ID (default: gpt-image-2 for OpenAI or "
+            "gemini-3.1-flash-image for Gemini)"
+        ),
+    )
     parser.add_argument(
         "--size",
         default="auto",
@@ -194,7 +285,32 @@ def _read_prompt(path: Path) -> tuple[Path, str]:
     return path, prompt
 
 
-def _read_api_key(path: Path) -> tuple[Path, str]:
+def _validate_prompt_category(path: Path, provider: str) -> None:
+    match = PROMPT_CATEGORY_PATTERN.search(path.name)
+    if match is None:
+        return
+    expected = "gemini" if provider == "gemini" else "gpt"
+    if match.group(1) != expected:
+        raise UserInputError(
+            f"prompt category {match.group(1)} does not match {provider} provider: "
+            f"{path.name}"
+        )
+
+
+def _resolve_provider_model(provider: str, model: str | None) -> tuple[str, str]:
+    if provider not in PROVIDERS:
+        raise UserInputError(f"unsupported image provider: {provider}")
+    inferred = "gemini" if model and model.startswith("gemini-") else "openai"
+    resolved_provider = inferred if provider == "auto" else provider
+    resolved_model = model or DEFAULT_MODELS[resolved_provider]
+    if resolved_provider == "gemini" and not resolved_model.startswith("gemini-"):
+        raise UserInputError("--provider gemini requires a gemini-* model")
+    if resolved_provider == "openai" and resolved_model.startswith("gemini-"):
+        raise UserInputError("a gemini-* model requires --provider gemini or auto")
+    return resolved_provider, resolved_model
+
+
+def _read_api_key(path: Path, provider: str = "openai") -> tuple[Path, str]:
     path = _validate_regular_file(path, "API key file")
     size = path.stat().st_size
     if size == 0:
@@ -203,27 +319,54 @@ def _read_api_key(path: Path) -> tuple[Path, str]:
         raise UserInputError(f"API key file is unexpectedly large: {path}")
 
     contents = path.read_bytes()
-    matches = {match.decode("ascii") for match in API_KEY_PATTERN.findall(contents)}
-    if not matches:
+    if provider == "openai":
+        matches = {
+            match.decode("ascii")
+            for match in OPENAI_API_KEY_PATTERN.findall(contents)
+        }
+        if not matches:
+            raise UserInputError(
+                f"API key file does not contain a valid sk-... key: {path}"
+            )
+        if len(matches) != 1:
+            raise UserInputError(
+                f"API key file must contain exactly one distinct API key: {path}"
+            )
+        return path, matches.pop()
+
+    try:
+        key = contents.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise UserInputError(f"Gemini API key file must be UTF-8 plain text: {path}") from exc
+    if not key or any(character.isspace() for character in key):
         raise UserInputError(
-            f"API key file does not contain a valid sk-... key: {path}"
+            f"Gemini API key file must contain only one non-empty key: {path}"
         )
-    if len(matches) != 1:
-        raise UserInputError(
-            f"API key file must contain exactly one distinct API key: {path}"
-        )
-    return path, matches.pop()
+    return path, key
 
 
-def _resolve_api_key(path: Path | None) -> tuple[Path | None, str]:
+def _resolve_api_key(
+    path: Path | None, provider: str = "openai"
+) -> tuple[Path | None, str]:
     if path is not None:
-        return _read_api_key(path)
-    key = os.environ.get("OPENAI_API_KEY", "").strip()
+        return _read_api_key(path, provider=provider)
+    environment_names = (
+        ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+        if provider == "gemini"
+        else ("OPENAI_API_KEY",)
+    )
+    source = next(
+        (name for name in environment_names if os.environ.get(name, "").strip()),
+        environment_names[0],
+    )
+    key = os.environ.get(source, "").strip()
     if not key:
         raise UserInputError(
-            "provide --api-key-file or set the OPENAI_API_KEY environment variable"
+            "provide --api-key-file or set " + " or ".join(environment_names)
         )
-    if not API_KEY_PATTERN.fullmatch(key.encode("ascii", errors="ignore")):
+    if provider == "openai" and not OPENAI_API_KEY_PATTERN.fullmatch(
+        key.encode("ascii", errors="ignore")
+    ):
         raise UserInputError("OPENAI_API_KEY does not contain a valid sk-... key")
     return None, key
 
@@ -298,6 +441,51 @@ def _api_prompt(user_prompt: str, samples: list[Path], pet: Path | None) -> str:
     )
 
 
+def _gemini_prompt(prompt: str, background: str) -> str:
+    if background != "transparent":
+        return prompt
+    return (
+        f"{prompt}\n\n"
+        "GEMINI OUTPUT REQUIREMENT: Return only one PNG image. The background "
+        "must be genuine transparent alpha, not white, gray, a checkerboard, or "
+        "a simulated transparency pattern."
+    )
+
+
+def _gemini_aspect_ratio(size: str) -> str | None:
+    if size == "auto":
+        return None
+    width, height = (int(value) for value in size.split("x", 1))
+    target = width / height
+
+    def distance(value: str) -> float:
+        numerator, denominator = (int(part) for part in value.split(":", 1))
+        return abs((numerator / denominator) - target)
+
+    return min(GEMINI_ASPECT_RATIOS, key=distance)
+
+
+def _gemini_image_size(size: str, model: str) -> str | None:
+    if size == "auto":
+        return None
+    if "flash-lite-image" in model:
+        return "1K"
+    width, height = (int(value) for value in size.split("x", 1))
+    longest = max(width, height)
+    if longest <= 512:
+        return "512"
+    if longest <= 1024:
+        return "1K"
+    if longest <= 2048:
+        return "2K"
+    return "4K"
+
+
+def _image_mime_type(path: Path) -> str:
+    suffix = path.suffix.lower()
+    return "image/jpeg" if suffix in {".jpg", ".jpeg"} else f"image/{suffix[1:]}"
+
+
 def _request_summary(
     *,
     samples: list[Path],
@@ -313,21 +501,31 @@ def _request_summary(
     product_profile: Path | None,
     product_profile_id: str | None,
     profile_layer: str | None,
+    provider: str = "openai",
 ) -> dict[str, Any]:
     input_fidelity = (
         "model default (high fidelity)"
         if model == "gpt-image-2" or model.startswith("gpt-image-2-")
         else "high"
+        if provider == "openai"
+        else "provider managed"
     )
     return {
         "sample_designs": [str(sample) for sample in samples],
         "pet_image": str(pet) if pet else None,
         "prompt_file": str(prompt_file),
-        "api_key_source": str(api_key_file) if api_key_file else "OPENAI_API_KEY",
+        "api_key_source": (
+            str(api_key_file)
+            if api_key_file
+            else "GEMINI_API_KEY or GOOGLE_API_KEY"
+            if provider == "gemini"
+            else "OPENAI_API_KEY"
+        ),
         "output": str(output),
         "product_profile": str(product_profile) if product_profile else None,
         "product_profile_id": product_profile_id,
         "profile_layer": profile_layer,
+        "provider": provider,
         "model": model,
         "size": size,
         "quality": quality,
@@ -351,17 +549,36 @@ def _print_request_details(summary: dict[str, Any]) -> None:
     images = (
         [summary["pet_image"]] if summary["pet_image"] is not None else []
     ) + list(summary["sample_designs"])
-    api_parameters = {
-        "model": summary["model"],
-        "image": images,
-        "quality": summary["quality"],
-        "size": summary["size"],
-        "background": summary["background"],
-        "output_format": summary["output_format"],
-        "n": 1,
-    }
-    if summary["input_fidelity"] == "high":
-        api_parameters["input_fidelity"] = "high"
+    if summary["provider"] == "gemini":
+        api_parameters = {
+            "provider": "gemini",
+            "model": summary["model"],
+            "input_images": images,
+            "response_format": {
+                "type": "image",
+                "mime_type": "image/png",
+                "aspect_ratio": _gemini_aspect_ratio(summary["size"]),
+                "image_size": _gemini_image_size(
+                    summary["size"], summary["model"]
+                ),
+            },
+            "postprocess_size": summary["size"],
+            "postprocess_format": summary["output_format"],
+            "background": f"prompt-driven ({summary['background']})",
+        }
+    else:
+        api_parameters = {
+            "provider": "openai",
+            "model": summary["model"],
+            "image": images,
+            "quality": summary["quality"],
+            "size": summary["size"],
+            "background": summary["background"],
+            "output_format": summary["output_format"],
+            "n": 1,
+        }
+        if summary["input_fidelity"] == "high":
+            api_parameters["input_fidelity"] = "high"
     print("Input parameters:", file=sys.stderr)
     print(json.dumps(inputs, indent=2), file=sys.stderr)
     print("API parameters (prompt omitted):", file=sys.stderr)
@@ -374,33 +591,77 @@ def _decode_and_validate_image(
     output_format: str,
     background: str,
     size: str,
+    provider: str = "openai",
 ) -> bytes:
     try:
         image_bytes = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise RuntimeError("OpenAI returned invalid base64 image data") from exc
+        raise RuntimeError(f"{provider.title()} returned invalid base64 image data") from exc
     if not image_bytes:
-        raise RuntimeError("OpenAI returned an empty image")
+        raise RuntimeError(f"{provider.title()} returned an empty image")
 
     try:
         with Image.open(BytesIO(image_bytes)) as image:
             image.load()
-            actual_format = (image.format or "").lower()
-            expected_format = _api_output_format(output_format)
-            if actual_format != expected_format:
-                raise RuntimeError(
-                    f"OpenAI returned {actual_format or 'unknown'} instead of {expected_format}"
-                )
-            if size != "auto" and re.fullmatch(r"\d+x\d+", size):
-                width, height = (int(value) for value in size.split("x", 1))
-                if image.size != (width, height):
-                    raise RuntimeError(
-                        f"OpenAI returned {image.width}x{image.height}; expected {size}"
+            if provider == "gemini":
+                if background == "transparent" and "A" not in image.getbands():
+                    print(
+                        "Warning: Gemini did not return an alpha channel; the API "
+                        "does not provide a native transparency control.",
+                        file=sys.stderr,
+                        flush=True,
                     )
-            if background == "transparent" and "A" not in image.getbands():
-                raise RuntimeError("OpenAI returned an image without an alpha channel")
+                normalized = image.convert("RGBA")
+                if size != "auto" and re.fullmatch(r"\d+x\d+", size):
+                    width, height = (int(value) for value in size.split("x", 1))
+                    fitted = ImageOps.contain(
+                        normalized,
+                        (width, height),
+                        method=Image.Resampling.LANCZOS,
+                    )
+                    fill = (
+                        (0, 0, 0, 0)
+                        if background == "transparent"
+                        else (255, 255, 255, 255)
+                    )
+                    canvas = Image.new("RGBA", (width, height), fill)
+                    canvas.alpha_composite(
+                        fitted,
+                        ((width - fitted.width) // 2, (height - fitted.height) // 2),
+                    )
+                    normalized = canvas
+                expected_format = _api_output_format(output_format)
+                if expected_format == "jpeg":
+                    normalized = normalized.convert("RGB")
+                buffer = BytesIO()
+                normalized.save(buffer, format=expected_format.upper())
+                image_bytes = buffer.getvalue()
+            else:
+                actual_format = (image.format or "").lower()
+                expected_format = _api_output_format(output_format)
+                if actual_format != expected_format:
+                    raise RuntimeError(
+                        f"OpenAI returned {actual_format or 'unknown'} instead of {expected_format}"
+                    )
+            if size != "auto" and re.fullmatch(r"\d+x\d+", size):
+                with Image.open(BytesIO(image_bytes)) as validated:
+                    width, height = (int(value) for value in size.split("x", 1))
+                    actual_size = validated.size
+                if actual_size != (width, height):
+                    raise RuntimeError(
+                        f"{provider.title()} returned {actual_size[0]}x{actual_size[1]}; "
+                        f"expected {size}"
+                    )
+            if background == "transparent":
+                with Image.open(BytesIO(image_bytes)) as validated:
+                    if "A" not in validated.getbands():
+                        raise RuntimeError(
+                            f"{provider.title()} returned an image without an alpha channel"
+                        )
     except UnidentifiedImageError as exc:
-        raise RuntimeError("OpenAI returned data that is not a supported image") from exc
+        raise RuntimeError(
+            f"{provider.title()} returned data that is not a supported image"
+        ) from exc
     return image_bytes
 
 
@@ -427,6 +688,9 @@ def _atomic_write_bytes(output: Path, contents: bytes) -> None:
 
 
 def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
+    provider, model = _resolve_provider_model(
+        getattr(args, "provider", "auto"), getattr(args, "model", None)
+    )
     raw_samples = getattr(args, "sample_design", None)
     sample_values = (
         []
@@ -448,6 +712,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         raise UserInputError("provide at least one of --sample-design or --pet-image")
 
     prompt_file, user_prompt = _read_prompt(args.prompt_file)
+    _validate_prompt_category(prompt_file, provider)
     product_profile_arg = getattr(args, "product_profile", None)
     profile_layer = getattr(args, "profile_layer", None)
     if (product_profile_arg is None) != (profile_layer is None):
@@ -477,7 +742,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
     try:
         request_size = validate_generation_size(
             requested_size,
-            model=args.model,
+            model=model,
             label=(
                 f"product profile preview.{profile_layer}"
                 if product_profile_path is not None
@@ -486,7 +751,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         )
     except ImageSizeError as exc:
         raise UserInputError(str(exc)) from exc
-    api_key_file, api_key = _resolve_api_key(args.api_key_file)
+    api_key_file, api_key = _resolve_api_key(args.api_key_file, provider=provider)
     api_output_format = _api_output_format(args.output_format)
     primary_input = samples[0] if samples else pet
     assert primary_input is not None
@@ -509,7 +774,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         prompt_file=prompt_file,
         api_key_file=api_key_file,
         output=output,
-        model=args.model,
+        model=model,
         size=request_size,
         quality=args.quality,
         background=background,
@@ -517,6 +782,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         product_profile=product_profile_path,
         product_profile_id=product_profile_id,
         profile_layer=profile_layer,
+        provider=provider,
     )
     if args.dry_run:
         print(json.dumps(summary, indent=2))
@@ -529,41 +795,77 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
     _print_request_details(summary)
 
     if client is None:
-        from openai import OpenAI
+        if provider == "gemini":
+            client = _GeminiRestClient(api_key)
+        else:
+            from openai import OpenAI
 
-        client = OpenAI(api_key=api_key)
+            client = OpenAI(api_key=api_key)
 
-    with ExitStack() as stack:
-        image_paths = ([pet] if pet is not None else []) + samples
-        image_files = [stack.enter_context(path.open("rb")) for path in image_paths]
-        request: dict[str, Any] = dict(
-            model=args.model,
-            image=image_files,
-            prompt=_api_prompt(user_prompt, samples=samples, pet=pet),
-            quality=args.quality,
-            size=request_size,
-            background=background,
-            output_format=api_output_format,
-            n=1,
+    image_paths = ([pet] if pet is not None else []) + samples
+    api_prompt = _api_prompt(user_prompt, samples=samples, pet=pet)
+    if provider == "gemini":
+        input_items: list[dict[str, str]] = [
+            {"type": "text", "text": _gemini_prompt(api_prompt, background)}
+        ]
+        input_items.extend(
+            {
+                "type": "image",
+                "data": base64.b64encode(path.read_bytes()).decode("ascii"),
+                "mime_type": _image_mime_type(path),
+            }
+            for path in image_paths
         )
-        if not (
-            args.model == "gpt-image-2" or args.model.startswith("gpt-image-2-")
-        ):
-            request["input_fidelity"] = "high"
-        with _ProgressReporter():
-            result = client.images.edit(**request)
+        response_format: dict[str, str] = {
+            "type": "image",
+            "mime_type": "image/png",
+        }
+        aspect_ratio = _gemini_aspect_ratio(request_size)
+        image_size = _gemini_image_size(request_size, model)
+        if aspect_ratio is not None:
+            response_format["aspect_ratio"] = aspect_ratio
+        if image_size is not None:
+            response_format["image_size"] = image_size
+        with _ProgressReporter(provider):
+            result = client.interactions.create(
+                model=model,
+                input=input_items,
+                response_format=response_format,
+            )
+        output_image = getattr(result, "output_image", None)
+        encoded = getattr(output_image, "data", None)
+        if not encoded:
+            raise RuntimeError("Gemini returned no generated image")
+    else:
+        with ExitStack() as stack:
+            image_files = [stack.enter_context(path.open("rb")) for path in image_paths]
+            request: dict[str, Any] = dict(
+                model=model,
+                image=image_files,
+                prompt=api_prompt,
+                quality=args.quality,
+                size=request_size,
+                background=background,
+                output_format=api_output_format,
+                n=1,
+            )
+            if not (model == "gpt-image-2" or model.startswith("gpt-image-2-")):
+                request["input_fidelity"] = "high"
+            with _ProgressReporter(provider):
+                result = client.images.edit(**request)
 
-    if not getattr(result, "data", None):
-        raise RuntimeError("OpenAI returned no generated image")
-    encoded = getattr(result.data[0], "b64_json", None)
-    if not encoded:
-        raise RuntimeError("OpenAI response did not contain base64 image data")
+        if not getattr(result, "data", None):
+            raise RuntimeError("OpenAI returned no generated image")
+        encoded = getattr(result.data[0], "b64_json", None)
+        if not encoded:
+            raise RuntimeError("OpenAI response did not contain base64 image data")
     print("Validating and saving generated image...", file=sys.stderr, flush=True)
     image_bytes = _decode_and_validate_image(
         encoded,
         output_format=args.output_format,
         background=background,
         size=request_size,
+        provider=provider,
     )
     _atomic_write_bytes(output, image_bytes)
     print(f"Saved generated image: {output}", file=sys.stderr, flush=True)

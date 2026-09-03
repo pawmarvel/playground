@@ -7,14 +7,17 @@ create a second personalized preview and print-size design without regenerating
 or editing the reusable template.
 
 The MVP deliberately does not derive prompts automatically. Each design owns
-two reviewed prompt source files beside its finished reference:
+four independently reviewed prompt source files beside its finished reference:
 
 ```text
-examples/<design>/art-template.md
-examples/<design>/pet-transform.md
+examples/<design>/art-template-gpt.md
+examples/<design>/art-template-gemini.md
+examples/<design>/pet-transform-gpt.md
+examples/<design>/pet-transform-gemini.md
 ```
 
-Every new pet transformation sends ordered images to GPT Image 2:
+Every new pet transformation sends ordered images to the selected image
+provider:
 
 1. the user pet, used only for identity;
 2. the primary finished design reference, used for pose, expression, crop, and style;
@@ -30,22 +33,27 @@ visual comparison source.
 ```text
 LifeIsGood design contract:
 examples/life-is-good/reference-design.png
-examples/life-is-good/art-template.md
-examples/life-is-good/pet-transform.md
+examples/life-is-good/art-template-gpt.md
+examples/life-is-good/art-template-gemini.md
+examples/life-is-good/pet-transform-gpt.md
+examples/life-is-good/pet-transform-gemini.md
 
 Charlie design contract:
 examples/charlie-well-trained/reference-design.png
-examples/charlie-well-trained/art-template.md
-examples/charlie-well-trained/pet-transform.md
+examples/charlie-well-trained/art-template-gpt.md
+examples/charlie-well-trained/art-template-gemini.md
+examples/charlie-well-trained/pet-transform-gpt.md
+examples/charlie-well-trained/pet-transform-gemini.md
 
 Reusable sample user pets:
 examples/pet-inputs/sausage-dog-puppy.png
 examples/pet-inputs/white-fluffy-dog.png
 ```
 
-Each design directory contains its reference and its two corresponding prompts.
-Pet inputs remain reusable across designs, but prompts must not be mixed between
-design contracts. Never add an API key under `examples/`.
+Each design directory contains its reference and both provider variants for
+each operation. Pet inputs remain reusable across designs, but prompts must not
+be mixed between design or provider contracts. Never add an API key under
+`examples/`.
 
 ## 2. Install and configure the API key
 
@@ -79,6 +87,18 @@ printf "\n"
 export OPENAI_API_KEY
 ```
 
+For Gemini pet-transformation tests, export a Gemini API key instead:
+
+```bash
+printf "Gemini API key: "
+read -r -s GEMINI_API_KEY
+printf "\n"
+export GEMINI_API_KEY
+```
+
+`pawmarvel-generate --provider gemini` also accepts a plain-text
+`--api-key-file`. Keep both providers' keys outside Git.
+
 ## 3. Set the LifeIsGood example paths
 
 ```bash
@@ -86,8 +106,10 @@ PAWMARVEL_PROJECT="/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGener
 PAWMARVEL_TEMPLATE="$PAWMARVEL_PROJECT/work/manual-life-is-good"
 PAWMARVEL_SAMPLE="$PAWMARVEL_PROJECT/examples/life-is-good/reference-design.png"
 PAWMARVEL_PET="$PAWMARVEL_PROJECT/examples/pet-inputs/sausage-dog-puppy.png"
-PAWMARVEL_ART_PROMPT="$PAWMARVEL_PROJECT/examples/life-is-good/art-template.md"
-PAWMARVEL_PET_PROMPT="$PAWMARVEL_PROJECT/examples/life-is-good/pet-transform.md"
+PAWMARVEL_ART_PROMPT="$PAWMARVEL_PROJECT/examples/life-is-good/art-template-gpt.md"
+PAWMARVEL_PET_PROMPT="$PAWMARVEL_PROJECT/examples/life-is-good/pet-transform-gpt.md"
+PAWMARVEL_ART_PROMPT_GEMINI="$PAWMARVEL_PROJECT/examples/life-is-good/art-template-gemini.md"
+PAWMARVEL_PET_PROMPT_GEMINI="$PAWMARVEL_PROJECT/examples/life-is-good/pet-transform-gemini.md"
 PAWMARVEL_FONT_CATALOG="$PAWMARVEL_PROJECT/assets/fonts"
 PAWMARVEL_PROFILE="$PAWMARVEL_PROJECT/profiles/blanket-king-9375x12375.json"
 
@@ -113,7 +135,7 @@ generated `art.png`, not with the screenshot dimensions.
 
 ## 4. Optional one-command E2E bundle pipeline
 
-The pipeline uses the design's two checked-in prompts directly. It does not
+The pipeline uses the design's two selected checked-in prompts directly. It does not
 call a text model, generate a prompt, or write derived prompt artifacts. With
 the bundle flags below, it continues after preview generation through print
 upscaling, print rendering, and clean bundle publication.
@@ -200,17 +222,18 @@ bundles/life-is-good--blanket-king-9375x12375/
   reference-design.png
   reference-designs/                 # optional supporting references
     reference-design-0002.png
-  art-template.md
-  pet-transform.md
+  art-template-gpt.md
+  pet-transform-gpt.md
   qa/transformed-pet.png
   fonts/<selected-font>.ttf
   fonts/OFL.txt
 ```
 
-`run.json` records the source paths and SHA-256 hashes of both design prompts.
-The pipeline also publishes exact copies as `art-template.md` and
-`pet-transform.md` in the bundle contract. It records the print artifacts and
-successful publication; customer source data remains excluded from the bundle.
+`run.json` records the source paths and SHA-256 hashes of both selected design
+prompts. The pipeline preserves their provider-qualified filenames in the
+bundle contract and records those paths in `catalog.json`. It records the print
+artifacts and successful publication; customer source data remains excluded
+from the bundle.
 
 ### Selectively rerun an authoring step
 
@@ -223,8 +246,8 @@ pawmarvel_pipeline_debug --rerun-step pet
 pawmarvel_pipeline_debug --rerun-step layout
 ```
 
-For example, after editing `art-template.md`, add `--rerun-step art` to replace
-only `art.png`. After changing the customer pet or `pet-transform.md`, add
+For example, after editing `art-template-gpt.md`, add `--rerun-step art` to replace
+only `art.png`. After changing the customer pet or `pet-transform-gpt.md`, add
 `--rerun-step pet`. Add `--rerun-step layout` to reopen the layout editor with
 the existing art and transformed pet. Options are repeatable when two stages
 must change together:
@@ -294,6 +317,27 @@ The profile resolves the request to `800x1056`. Accept `art.png` only when it
 contains fixed reusable artwork and excludes the example pet, personalized pet
 name, mockup, garment, and placeholder pet.
 
+For a side-by-side Gemini art comparison, keep the accepted GPT artifact
+unchanged and write a separately named candidate:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
+  --provider gemini \
+  --sample-design "$PAWMARVEL_SAMPLE" \
+  --prompt-file "$PAWMARVEL_ART_PROMPT_GEMINI" \
+  --output-dir "$PAWMARVEL_TEMPLATE/qa" \
+  --output-name art-gemini.png \
+  --product-profile "$PAWMARVEL_TEMPLATE/product-profile.json" \
+  --profile-layer art \
+  --quality high \
+  --background transparent \
+  --output-format png
+```
+
+Compare that file with `art.png`. Promote one provider result into the working
+`art.png` deliberately; do not overwrite the accepted candidate merely to run
+an experiment.
+
 Pipeline-managed debug equivalent, after editing the art prompt:
 
 ```bash
@@ -333,6 +377,33 @@ Inspect the result before layout authoring. It must preserve the input pet's
 recognizable identity while matching the reference pet's pose, expression,
 crop, and rendering style. It must contain one isolated pet on genuine
 transparency, without fixed design text or decoration.
+
+To run the same pet transformation through the current GA low-latency Gemini
+image route, replace the OpenAI invocation above with:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
+  --provider gemini \
+  --pet-image "$PAWMARVEL_PET" \
+  --sample-design "$PAWMARVEL_SAMPLE" \
+  --prompt-file "$PAWMARVEL_PET_PROMPT_GEMINI" \
+  --output-dir "$PAWMARVEL_TEMPLATE/qa" \
+  --output-name transformed-pet-gemini.png \
+  --product-profile "$PAWMARVEL_TEMPLATE/product-profile.json" \
+  --profile-layer transformed-pet \
+  --background transparent \
+  --output-format png
+```
+
+The different filename is intentional: provider-specific prompts evolve
+independently and make side-by-side results reproducible. The generator rejects
+a categorized GPT prompt with Gemini, or a categorized Gemini prompt with
+OpenAI. The default Gemini model is `gemini-3.1-flash-image`. Gemini generates a native
+aspect-ratio/resolution tier; the tool contains that result on the profile's
+exact `816x816` canvas without cropping. Unlike OpenAI, Gemini does not expose a
+native transparency control. The prompt requests genuine alpha and the command
+warns if the response lacks an alpha channel, but visual alpha/matting
+inspection remains required before the layer is bundled or printed.
 
 Pipeline-managed debug equivalent, after changing the pet prompt or input pet:
 
@@ -406,8 +477,8 @@ PAWMARVEL_CHARLIE_RUN="$PAWMARVEL_CHARLIE_TEMPLATE/runs/sausage-dog-puppy"
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-pipeline" \
   --sample-design "$PAWMARVEL_PROJECT/examples/charlie-well-trained/reference-design.png" \
-  --art-prompt "$PAWMARVEL_PROJECT/examples/charlie-well-trained/art-template.md" \
-  --pet-prompt "$PAWMARVEL_PROJECT/examples/charlie-well-trained/pet-transform.md" \
+  --art-prompt "$PAWMARVEL_PROJECT/examples/charlie-well-trained/art-template-gpt.md" \
+  --pet-prompt "$PAWMARVEL_PROJECT/examples/charlie-well-trained/pet-transform-gpt.md" \
   --pet-image "$PAWMARVEL_PROJECT/examples/pet-inputs/sausage-dog-puppy.png" \
   --pet-name "SAUSAGE" \
   --product-profile "$PAWMARVEL_PROFILE" \
@@ -533,8 +604,8 @@ PAWMARVEL_BUNDLES="$PAWMARVEL_PROJECT/bundles"
 ```
 
 The clean consumer bundle contains the primary finished design reference,
-optional ordered supporting references, and its exact two design-specific
-prompt sources:
+optional ordered supporting references, and its exact two selected,
+provider-qualified design prompt sources:
 
 ```text
 bundles/catalog.json
@@ -546,8 +617,8 @@ bundles/life-is-good--blanket-king-9375x12375/
   reference-design.png
   reference-designs/                 # optional
     reference-design-0002.png
-  art-template.md
-  pet-transform.md
+  art-template-gpt.md
+  pet-transform-gpt.md
   qa/transformed-pet.png
   fonts/<selected-font>.ttf
   fonts/OFL.txt
@@ -559,11 +630,12 @@ path. The frontend selects a template by both design and product variant; it
 must not key a catalog by design alone. The `reference_designs` array lists the
 primary and supporting reference paths in API input order.
 
-The frontend or backend reads `pet-transform.md` from the same bundle as the
-primary `reference-design.png` and appends any files under `reference-designs/`
-in lexical order before combining them with the current user pet.
-`art-template.md` preserves template-generation provenance for later controlled
-regeneration. Do not publish the mutable authoring `work/` directory.
+The frontend or backend reads `prompts.pet_transform` from the catalog entry,
+then loads that provider-qualified file from the same bundle as the primary
+`reference-design.png`. It appends any files under `reference-designs/` in
+lexical order before combining them with the current user pet.
+`prompts.art_template` identifies the provider-qualified template-generation
+provenance. Do not publish the mutable authoring `work/` directory.
 
 The section 4 pipeline debug function republishes this bundle after every
 selective rerun. No separate `bundle` rerun selector is needed because bundle
@@ -592,8 +664,8 @@ test -f "$PAWMARVEL_BUNDLE/layout.json"
 test -f "$PAWMARVEL_BUNDLE/print/art.png"
 test -f "$PAWMARVEL_BUNDLE/layout-print.json"
 test -f "$PAWMARVEL_BUNDLE/reference-design.png"
-test -f "$PAWMARVEL_BUNDLE/art-template.md"
-test -f "$PAWMARVEL_BUNDLE/pet-transform.md"
+test -f "$PAWMARVEL_BUNDLE/art-template-gpt.md"
+test -f "$PAWMARVEL_BUNDLE/pet-transform-gpt.md"
 test -f "$PAWMARVEL_SECOND_PET"
 test -n "${OPENAI_API_KEY:-}"
 
@@ -607,7 +679,7 @@ mkdir -p "$PAWMARVEL_SECOND_PREVIEW"
   --template-dir "$PAWMARVEL_BUNDLE" \
   --pet-image "$PAWMARVEL_SECOND_PET" \
   --reference-design "$PAWMARVEL_BUNDLE/reference-design.png" \
-  --prompt-file "$PAWMARVEL_BUNDLE/pet-transform.md" \
+  --prompt-file "$PAWMARVEL_BUNDLE/pet-transform-gpt.md" \
   --pet-name "$PAWMARVEL_SECOND_NAME" \
   --size 816x816 \
   --quality high \
@@ -696,12 +768,12 @@ cd "$PAWMARVEL_PROJECT"
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Tests mock OpenAI calls and consume no API credits.
+Tests mock OpenAI and Gemini calls and consume no API credits.
 
 | Problem | Action |
 | --- | --- |
-| Fixed art contains a pet or name | Refine that design's `art-template.md`, then run `pawmarvel_pipeline_debug --rerun-step art` |
-| Pet identity, pose, crop, or style is weak | Refine that design's `pet-transform.md`, keep exactly one user pet, and add only relevant ordered finished-design references before running `pawmarvel_pipeline_debug --rerun-step pet` |
+| Fixed art contains a pet or name | Refine that design's `art-template-gpt.md`, then run `pawmarvel_pipeline_debug --rerun-step art` |
+| Pet identity, pose, crop, or style is weak | Refine that design's `pet-transform-gpt.md`, keep exactly one user pet, and add only relevant ordered finished-design references before running `pawmarvel_pipeline_debug --rerun-step pet` |
 | Pet or name position is wrong | Run `pawmarvel_pipeline_debug --rerun-step layout` |
 | Upscale reports an aspect-ratio mismatch | Regenerate preview art from the same product profile; do not use screenshot-sized art |
 | A standalone manual command reports an existing output | Review it first, then pass `--force` only to that standalone command; pipeline debug reruns do not use `--force` |
@@ -722,6 +794,11 @@ reference-guided transformation and renders the preview:
   --quality high \
   --output-dir "$PAWMARVEL_TEMPLATE/qa"
 ```
+
+To test the same end-to-end preview against Gemini, add `--provider gemini` and
+replace the prompt argument with
+`--prompt-file "$PAWMARVEL_PET_PROMPT_GEMINI"`. Use a different
+`--output-dir` or `--force` when comparing both providers.
 
 When rendering an already transformed preview or print layer, use
 `--transformed-pet` instead of `--pet-image`; reference and prompt inputs are

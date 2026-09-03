@@ -13,26 +13,30 @@ release.
 ## 2. Core decision: design-specific image prompts
 
 Automated pet-prompt derivation was removed because its generated prompts did
-not produce reliable enough results. Each design instead owns two reviewed,
-checked-in prompt sources beside its finished reference:
+not produce reliable enough results. Each design instead owns provider-specific
+reviewed prompt sources beside its finished reference:
 
 ```text
-examples/<design>/art-template.md
-examples/<design>/pet-transform.md
+examples/<design>/art-template-gpt.md
+examples/<design>/art-template-gemini.md
+examples/<design>/pet-transform-gpt.md
+examples/<design>/pet-transform-gemini.md
 ```
 
 They are treated like source code: reviewed, versioned, and regression-tested
 with their corresponding finished design. The pipeline reads them directly. It
 does not make a multimodal text-model call, derive prompts, or copy prompt
-variants into mutable working directories. Bundle publication copies the exact
-two reviewed sources into the immutable template contract.
+variants into mutable working directories. A bundle publication copies the
+selected art and pet variants with their qualified filenames into the immutable
+template contract.
 
 Every pet-transformation image request has exactly this ordered input contract:
 
 1. `USER PET` / `IMAGE A`: the first image and sole identity source.
 2. `REFERENCE DESIGN` / `IMAGE B`: the authoritative finished design
    providing pet pose, expression, crop, composition, and rendering style.
-3. The design's `pet-transform.md` text prompt.
+3. The design's `pet-transform-{gpt|gemini}.md` prompt matching the selected
+   provider.
 
 The reference pet must never replace the user's pet identity. Additional style
 references and selected transformed-pet exemplars are not part of this MVP
@@ -60,7 +64,8 @@ The POC succeeds when an operator can:
 
 ### Included
 
-- GPT Image 2 art and pet generation.
+- OpenAI or Gemini image generation/editing, with GPT Image 2 retained as the
+  offline authoring default.
 - One primary finished design reference and optional ordered supporting
   references.
 - One reviewed art prompt and one reviewed pet prompt per design.
@@ -96,16 +101,20 @@ examples/
     white-fluffy-dog.png
   life-is-good/
     reference-design.png
-    art-template.md
-    pet-transform.md
+    art-template-gpt.md
+    art-template-gemini.md
+    pet-transform-gpt.md
+    pet-transform-gemini.md
   charlie-well-trained/
     reference-design.png
-    art-template.md
-    pet-transform.md
+    art-template-gpt.md
+    art-template-gemini.md
+    pet-transform-gpt.md
+    pet-transform-gemini.md
 ```
 
-Each design folder contains its primary finished reference and exactly two
-corresponding prompt sources. Optional supporting finished-design references
+Each design folder contains its primary finished reference and four
+provider-qualified prompt sources. Optional supporting finished-design references
 may be stored in a `reference-designs/` subdirectory. Customer-pet fixtures are
 reusable across designs; prompt files are not interchangeable between designs.
 
@@ -119,7 +128,7 @@ A versioned product profile owns:
 - `profile_id`;
 - exact print width and height;
 - preview art dimensions with the same exact aspect ratio;
-- GPT Image 2-compatible transformed-pet generation dimensions;
+- provider-compatible transformed-pet generation dimensions;
 - optional DPI, physical dimensions, bleed, safe margin, background, color
   space, format, and file-size constraints;
 - whether vendor requirements were confirmed; and
@@ -131,15 +140,18 @@ generated `art.png`.
 
 ## 7. Tool 1 — `pawmarvel-generate`
 
-This remains a flexible prompt-driven GPT Image 2 wrapper. It supports sample
-only, pet only, or combined inputs. The two MVP operations are:
+This remains a flexible prompt-driven image wrapper. It supports OpenAI
+(`gpt-image-2` by default) and Gemini (`gemini-3.1-flash-image` by default), plus
+sample-only, pet-only, or combined inputs. GPT Image 2 remains recommended for
+offline art authoring; Gemini can be selected for latency-sensitive pet
+transformation tests. The two MVP operations are:
 
 ### Art generation
 
 ```bash
 pawmarvel-generate \
   --sample-design examples/life-is-good/reference-design.png \
-  --prompt-file examples/life-is-good/art-template.md \
+  --prompt-file examples/life-is-good/art-template-gpt.md \
   --product-profile work/life-is-good/product-profile.json \
   --profile-layer art \
   --output-dir work/life-is-good \
@@ -148,13 +160,21 @@ pawmarvel-generate \
   --output-format png
 ```
 
+To exercise the lower-latency Gemini route for the pet operation, add
+`--provider gemini`. A concrete `--model gemini-*` also selects Gemini when
+`--provider auto` is retained. The wrapper maps an exact requested canvas to
+the nearest Gemini native aspect/resolution tier, then contains the result on
+the exact canvas without cropping. Gemini has no native transparent-background
+request parameter: transparency is reinforced in the prompt and must remain a
+QA gate.
+
 ### Pet transformation
 
 ```bash
 pawmarvel-generate \
   --pet-image examples/pet-inputs/sausage-dog-puppy.png \
   --sample-design examples/life-is-good/reference-design.png \
-  --prompt-file examples/life-is-good/pet-transform.md \
+  --prompt-file examples/life-is-good/pet-transform-gpt.md \
   --product-profile work/life-is-good/product-profile.json \
   --profile-layer transformed-pet \
   --output-dir work/life-is-good/qa \
@@ -272,7 +292,7 @@ pawmarvel-poc-run \
   --template-dir work/life-is-good \
   --pet-image examples/pet-inputs/sausage-dog-puppy.png \
   --reference-design examples/life-is-good/reference-design.png \
-  --prompt-file examples/life-is-good/pet-transform.md \
+  --prompt-file examples/life-is-good/pet-transform-gpt.md \
   --pet-name SAUSAGE \
   --output-dir work/life-is-good/qa
 ```
@@ -375,8 +395,8 @@ bundles/<design-id>--<product-profile-id>/
   reference-designs/                 # optional; supporting references only
     reference-design-0002.png
     reference-design-0003.png
-  art-template.md
-  pet-transform.md
+  art-template-{gpt|gemini}.md       # exactly one selected variant
+  pet-transform-{gpt|gemini}.md      # exactly one; matches runtime route
   qa/transformed-pet.png
   fonts/<font>.ttf
   fonts/OFL.txt
@@ -385,7 +405,7 @@ bundles/<design-id>--<product-profile-id>/
 `catalog.json` is schema-versioned and contains one entry per design/product
 pair. Each entry includes the composite `template_id`, separate `design_id` and
 `product_profile_id`, design metadata, the complete product-profile metadata,
-preview/print dimensions, runtime model, and relative bundle path. This avoids
+preview/print dimensions, runtime model, selected prompt paths, and relative bundle path. This avoids
 collisions when the same visual design is published for multiple products or
 variants. Catalog publication replaces only the matching pair and preserves
 other variants. Its ordered `reference_designs` array gives static consumers
@@ -393,8 +413,9 @@ the primary and supporting bundle paths without requiring directory listing.
 
 The bundle contains a primary `reference-design.png`, zero or more ordered
 supporting references under `reference-designs/`, and the corresponding
-`art-template.md` and `pet-transform.md`. Supporting filenames use consecutive,
-zero-padded sequence numbers beginning at `0002`. It contains no prompt analysis,
+provider-qualified art and pet prompt files. Supporting filenames use consecutive,
+zero-padded sequence numbers beginning at `0002`. The catalog's `prompts`
+object identifies both exact filenames. It contains no prompt analysis,
 customer source pet, product profile, run manifest, local paths, or API
 credentials. The application reads the pet prompt from the selected bundle when
 transforming a customer pet; the art prompt preserves reproducible authoring
@@ -405,7 +426,8 @@ The publisher validates:
 - true-alpha preview and print art;
 - exact preview/print aspect ratio and uniform geometry scaling;
 - one readable primary finished reference and a valid ordered supporting set;
-- two nonempty UTF-8 prompt artifacts with exact contract filenames;
+- two nonempty UTF-8 prompt artifacts with valid provider-qualified filenames,
+  with the pet category matching the runtime route;
 - the representative transparent pet;
 - OFL font/license pairing; and
 - a strict allowlist of bundle files.
@@ -454,7 +476,7 @@ prompt copies belong only in the source example and published bundle.
 
 ```text
 src/pawmarvel_generator/
-  cli.py                 # GPT Image 2 wrapper
+  cli.py                 # OpenAI/Gemini image-generation wrapper
   pipeline_cli.py        # art + pet + layout + preview + print + bundle coordinator
   poc_runner.py          # one ordered-reference-guided personalization run
   layout_cli.py          # local layout command
@@ -486,7 +508,7 @@ Unit and integration tests verify:
   in the published bundle;
 - POC generation fails before payment without at least one finished reference or
   design-specific prompt;
-- design folders contain their reference and two corresponding prompt sources;
+- design folders contain their reference and four provider-qualified prompt sources;
 - layout geometry, alpha trimming, font fitting, profile size derivation,
   preview/print scaling, manifests, and OFL licensing;
 - bundle publication includes all ordered references plus both required prompts;

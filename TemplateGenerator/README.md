@@ -6,8 +6,8 @@ candidate.
 
 The MVP provides:
 
-- `pawmarvel-generate`: prompt-driven GPT Image 2 generation/editing with a
-  sample image, a pet image, or both; manual profile mode derives the selected
+- `pawmarvel-generate`: prompt-driven OpenAI or Gemini generation/editing with
+  a sample image, a pet image, or both; manual profile mode derives the selected
   preview-art or transformed-pet size from `product-profile.json`.
 - `pawmarvel-layout-config`: localhost visual editor for `layout.json`, using
   deterministic font-name preview in the MVP.
@@ -27,8 +27,8 @@ The MVP provides:
   diagnostic only and is not used by the pipeline.
 - `pawmarvel-bundle`: publish a clean, OFL-licensed template bundle containing
   low-resolution web art/layout, high-resolution print art/layout, ordered
-  finished-design references, both design-specific prompts, and a representative
-  transformed-pet QA asset.
+  finished-design references, the two selected provider-qualified prompts, and
+  a representative transformed-pet QA asset.
 
 ## Documentation
 
@@ -39,7 +39,8 @@ The MVP provides:
 
 Design folders such as [`examples/life-is-good`](examples/life-is-good) and
 [`examples/charlie-well-trained`](examples/charlie-well-trained) contain their
-finished reference plus design-specific art and pet-transformation prompts.
+finished reference plus independently editable `-gpt.md` and `-gemini.md` art
+and pet-transformation prompts.
 Reusable customer-pet fixtures live in
 [`examples/pet-inputs`](examples/pet-inputs).
 
@@ -66,9 +67,13 @@ python3 -m venv .venv
 .venv/bin/pawmarvel-bundle --help
 ```
 
-Tool 1 reads the API key from `--api-key-file` or `OPENAI_API_KEY`. The layout
-and render tools work offline. The POC runner calls Tool 1 once and the renderer
-once.
+Tool 1 keeps `gpt-image-2` as its default. Pass `--provider gemini` to use the
+GA `gemini-3.1-flash-image` default, or pass a concrete `gemini-*` model and let
+provider auto-detection select Gemini. Credentials come from `--api-key-file`,
+`OPENAI_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY` as appropriate. Gemini
+key files must be plain text. The layout and render tools work offline. The POC
+runner exposes the same provider/model options and calls Tool 1 once followed
+by the renderer once.
 It can instead reuse `--transformed-pet` with an explicit `--layout`, which is
 the no-generation path used to inspect a prepared print bundle.
 
@@ -110,9 +115,15 @@ certification.
 
 Design-specific prompts are treated like source code. For pet transformation,
 `pawmarvel-generate` sends the customer pet first for identity, then the finished
-design for pose, expression, crop, and style. Working directories and
-published bundles do not carry customer source data; each bundle does carry its
-exact `art-template.md` and `pet-transform.md` contract files.
+design for pose, expression, crop, and style with either provider. Gemini uses
+native aspect-ratio/resolution tiers; its response is fitted without cropping
+onto the exact requested CLI canvas. Gemini transparency is prompt-driven and
+must be inspected because its API has no equivalent of OpenAI's native
+`background=transparent` control. Working directories and
+published bundles do not carry customer source data. Each bundle carries its
+selected `art-template-{gpt|gemini}.md` and
+`pet-transform-{gpt|gemini}.md` contract files without removing their provider
+category, and the catalog identifies the two paths.
 
 The layout editor compares the checked-in 40-face OFL catalog with lettering in
 the reference. The catalog is the default when neither `--font` nor

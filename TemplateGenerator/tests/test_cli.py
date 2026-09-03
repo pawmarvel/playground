@@ -9,7 +9,9 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
-from helpers import FakeClient, make_image
+from PIL import Image
+
+from helpers import FakeClient, FakeGeminiClient, make_image
 from pawmarvel_generator.cli import UserInputError, _read_api_key, build_parser, generate
 from pawmarvel_generator.image_size import ImageSize
 from pawmarvel_generator.product_profile import (
@@ -253,6 +255,64 @@ class CliTests(unittest.TestCase):
             ]
         )
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test_1234567890abcdefghij"}):
+            generate(args, client=FakeClient())
+
+    def test_gemini_provider_uses_ordered_images_and_exact_local_canvas(self) -> None:
+        client = FakeGeminiClient()
+        gemini_key = self.root / "GEMINI_API_KEY.txt"
+        gemini_key.write_text("test-gemini-key", encoding="utf-8")
+        args = self.args(
+            "--provider",
+            "gemini",
+            "--api-key-file",
+            str(gemini_key),
+            "--size",
+            "816x816",
+            "--output-dir",
+            str(self.root / "gemini-output"),
+        )
+        output = generate(args, client=client)
+        request = client.interactions.kwargs
+        self.assertEqual(request["model"], "gemini-3.1-flash-image")
+        self.assertEqual(
+            [part["mime_type"] for part in request["input"][1:]],
+            ["image/png", "image/png"],
+        )
+        self.assertIn("USER PET", request["input"][0]["text"])
+        self.assertEqual(request["response_format"]["aspect_ratio"], "1:1")
+        self.assertEqual(request["response_format"]["image_size"], "1K")
+        with Image.open(output) as image:
+            self.assertEqual(image.size, (816, 816))
+            self.assertIn("A", image.getbands())
+
+    def test_gemini_model_infers_provider_and_environment_key(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "--pet-image",
+                str(self.pet),
+                "--prompt-file",
+                str(self.prompt),
+                "--model",
+                "gemini-3.1-flash-lite-image",
+                "--output-dir",
+                str(self.root / "gemini-output"),
+            ]
+        )
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-gemini-key"}):
+            generate(args, client=FakeGeminiClient())
+
+    def test_rejects_provider_model_mismatch(self) -> None:
+        with self.assertRaisesRegex(UserInputError, "requires a gemini"):
+            generate(
+                self.args("--provider", "gemini", "--model", "gpt-image-2"),
+                client=FakeGeminiClient(),
+            )
+
+    def test_rejects_prompt_category_that_disagrees_with_provider(self) -> None:
+        gemini_prompt = self.root / "pet-transform-gemini.md"
+        gemini_prompt.write_text("Create the requested pet.", encoding="utf-8")
+        args = self.args("--prompt-file", str(gemini_prompt))
+        with self.assertRaisesRegex(UserInputError, "does not match openai"):
             generate(args, client=FakeClient())
 
     def test_older_model_requests_high_input_fidelity(self) -> None:

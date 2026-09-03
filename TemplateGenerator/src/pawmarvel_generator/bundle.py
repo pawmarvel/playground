@@ -19,6 +19,9 @@ TEMPLATE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 PROMPT_MAX_BYTES = 1024 * 1024
 CATALOG_FILENAME = "catalog.json"
 SUPPORTING_REFERENCES_DIR = "reference-designs"
+PROMPT_FILENAME_PATTERN = re.compile(
+    r"^(art-template|pet-transform)-(gpt|gemini)\.md$"
+)
 
 
 class BundleError(ValueError):
@@ -44,6 +47,8 @@ def _catalog_entry(
     print_layout: Layout,
     runtime_model: str | None,
     reference_count: int,
+    art_prompt_name: str,
+    pet_prompt_name: str,
 ) -> dict[str, object]:
     template_id = catalog_template_id(design_id, profile.profile_id)
     return {
@@ -54,6 +59,10 @@ def _catalog_entry(
         "product_profile": profile.to_dict(),
         "bundle": template_id,
         "runtime_model": runtime_model or "gemini",
+        "prompts": {
+            "art_template": art_prompt_name,
+            "pet_transform": pet_prompt_name,
+        },
         "reference_designs": ["reference-design.png"]
         + [
             f"{SUPPORTING_REFERENCES_DIR}/reference-design-{index:04d}.png"
@@ -74,6 +83,31 @@ def _catalog_entry(
             "delivery_status": profile.print_spec["delivery_status"],
         },
     }
+
+
+def _prompt_contract(path: Path, kind: str) -> tuple[str, str]:
+    match = PROMPT_FILENAME_PATTERN.fullmatch(path.name)
+    if match is None or match.group(1) != kind:
+        expected = f"{kind}-{{gpt|gemini}}.md"
+        raise BundleError(f"{kind} prompt filename must match {expected}: {path.name}")
+    return path.name, match.group(2)
+
+
+def _bundle_prompt_name(root: Path, kind: str) -> tuple[str, str]:
+    matches = [
+        path.name
+        for path in root.iterdir()
+        if path.is_file()
+        and (match := PROMPT_FILENAME_PATTERN.fullmatch(path.name)) is not None
+        and match.group(1) == kind
+    ]
+    if len(matches) != 1:
+        raise BundleError(
+            f"bundle must contain exactly one {kind}-{{gpt|gemini}}.md prompt"
+        )
+    match = PROMPT_FILENAME_PATTERN.fullmatch(matches[0])
+    assert match is not None
+    return matches[0], match.group(2)
 
 
 def load_catalog(root: Path, *, validate_bundles: bool = True) -> dict[str, object]:
@@ -143,6 +177,26 @@ def load_catalog(root: Path, *, validate_bundles: bool = True) -> dict[str, obje
             )
         if not isinstance(entry.get("runtime_model"), str):
             raise BundleError("catalog runtime_model must be a string")
+        runtime_model = entry["runtime_model"]
+        prompts = entry.get("prompts")
+        if not isinstance(prompts, dict) or set(prompts) != {
+            "art_template",
+            "pet_transform",
+        }:
+            raise BundleError("catalog prompts must identify art and pet prompt paths")
+        art_prompt_value = prompts.get("art_template")
+        pet_prompt_value = prompts.get("pet_transform")
+        if not isinstance(art_prompt_value, str) or not isinstance(
+            pet_prompt_value, str
+        ):
+            raise BundleError("catalog prompt paths must be strings")
+        _prompt_contract(Path(art_prompt_value), "art-template")
+        _, pet_prompt_category = _prompt_contract(
+            Path(pet_prompt_value), "pet-transform"
+        )
+        expected_pet_category = "gpt" if runtime_model == "gpt-image-2" else "gemini"
+        if pet_prompt_category != expected_pet_category:
+            raise BundleError("catalog pet prompt category does not match runtime_model")
         reference_designs = entry.get(
             "reference_designs", ["reference-design.png"]
         )
@@ -169,6 +223,13 @@ def load_catalog(root: Path, *, validate_bundles: bool = True) -> dict[str, obje
         if validate_bundles:
             bundle_root = root / template_id
             validate_bundle(bundle_root)
+            actual_art_prompt, _ = _bundle_prompt_name(bundle_root, "art-template")
+            actual_pet_prompt, _ = _bundle_prompt_name(bundle_root, "pet-transform")
+            if prompts != {
+                "art_template": actual_art_prompt,
+                "pet_transform": actual_pet_prompt,
+            }:
+                raise BundleError("catalog prompt paths do not match the published bundle")
             actual_references = ["reference-design.png"] + [
                 path.relative_to(bundle_root).as_posix()
                 for path in _validate_supporting_references(bundle_root)
@@ -364,6 +425,8 @@ def validate_bundle(root: Path, *, validate_template_id: bool = True) -> Layout:
         raise BundleError(f"bundle directory name is not a valid template id: {root.name}")
     if not root.is_dir():
         raise BundleError(f"bundle directory does not exist: {root}")
+    art_prompt_name, _ = _bundle_prompt_name(root, "art-template")
+    pet_prompt_name, pet_prompt_category = _bundle_prompt_name(root, "pet-transform")
     allowed_entries = {
         "layout.json",
         "layout-print.json",
@@ -372,8 +435,8 @@ def validate_bundle(root: Path, *, validate_template_id: bool = True) -> Layout:
         "qa",
         "reference-design.png",
         SUPPORTING_REFERENCES_DIR,
-        "art-template.md",
-        "pet-transform.md",
+        art_prompt_name,
+        pet_prompt_name,
         "fonts",
     }
     unknown_entries = {path.name for path in root.iterdir()} - allowed_entries
@@ -399,8 +462,13 @@ def validate_bundle(root: Path, *, validate_template_id: bool = True) -> Layout:
     _validate_png_alpha(root / "qa" / "transformed-pet.png", "qa/transformed-pet.png")
     _validate_reference(root / "reference-design.png", "reference-design.png")
     _validate_supporting_references(root)
-    _validate_prompt(root / "art-template.md", "art-template.md")
-    _validate_prompt(root / "pet-transform.md", "pet-transform.md")
+    _validate_prompt(root / art_prompt_name, art_prompt_name)
+    _validate_prompt(root / pet_prompt_name, pet_prompt_name)
+    expected_pet_category = "gpt" if layout.runtime_model == "gpt-image-2" else "gemini"
+    if pet_prompt_category != expected_pet_category:
+        raise BundleError(
+            f"{pet_prompt_name} does not match the {expected_pet_category} runtime route"
+        )
     try:
         resolve_ofl_license(layout.font_path)
     except FontLicenseError as exc:
@@ -460,6 +528,15 @@ def publish_bundle(
     reference_designs = _ordered_reference_designs(reference_design)
     art_prompt = _validate_prompt(art_prompt, "art template prompt")
     pet_prompt = _validate_prompt(pet_prompt, "pet transformation prompt")
+    art_prompt_name, _ = _prompt_contract(art_prompt, "art-template")
+    pet_prompt_name, pet_prompt_category = _prompt_contract(
+        pet_prompt, "pet-transform"
+    )
+    expected_pet_category = "gpt" if runtime_model == "gpt-image-2" else "gemini"
+    if pet_prompt_category != expected_pet_category:
+        raise BundleError(
+            f"{pet_prompt_name} does not match the {expected_pet_category} runtime route"
+        )
     _validate_png_alpha(exemplar, "approved exemplar")
 
     selected_print_art = print_art.expanduser().resolve()
@@ -512,8 +589,8 @@ def publish_bundle(
         shutil.copyfile(preview_layout.art_path, stage / "art.png")
         shutil.copyfile(selected_print_art, stage / "print" / "art.png")
         shutil.copyfile(exemplar, stage / "qa" / "transformed-pet.png")
-        shutil.copyfile(art_prompt, stage / "art-template.md")
-        shutil.copyfile(pet_prompt, stage / "pet-transform.md")
+        shutil.copyfile(art_prompt, stage / art_prompt_name)
+        shutil.copyfile(pet_prompt, stage / pet_prompt_name)
         with Image.open(reference_designs[0]) as source_reference:
             source_reference.convert("RGB").save(stage / "reference-design.png", "PNG")
         if len(reference_designs) > 1:
@@ -574,6 +651,8 @@ def publish_bundle(
                 print_layout=print_layout,
                 runtime_model=runtime_model,
                 reference_count=len(reference_designs),
+                art_prompt_name=art_prompt_name,
+                pet_prompt_name=pet_prompt_name,
             ),
         )
         if backup is not None:

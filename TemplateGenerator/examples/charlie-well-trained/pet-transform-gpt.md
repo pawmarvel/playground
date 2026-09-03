@@ -1,3 +1,5 @@
+# GPT Image 2 — Transform the personalized pet
+
 You will receive exactly 2 images in this fixed order.
 
 IMAGE A = USER PET PHOTO

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from helpers import (
     FakeClient,
+    FakeGeminiClient,
     copy_font,
     layout_data,
     make_image,
@@ -32,7 +33,7 @@ class PocRunnerTests(unittest.TestCase):
         (self.template / "layout.json").write_text(
             json.dumps(layout_data()), encoding="utf-8"
         )
-        self.prompt = self.root / "pet-transform.md"
+        self.prompt = self.root / "pet-transform-gpt.md"
         self.prompt.write_text(
             "BACKGROUND = TRANSPARENT\nCreate an isolated pet portrait.",
             encoding="utf-8",
@@ -83,6 +84,29 @@ class PocRunnerTests(unittest.TestCase):
         self.assertEqual(
             [Path(file.name).name for file in client.images.kwargs["image"]],
             ["pet.png", "reference.png", "supporting.png"],
+        )
+
+    def test_runs_generation_and_rendering_with_gemini(self) -> None:
+        args = self.args()
+        args.provider = "gemini"
+        args.model = None
+        args.prompt_file = self.root / "pet-transform-gemini.md"
+        args.prompt_file.write_text(
+            "BACKGROUND = TRANSPARENT\nCreate an isolated pet portrait.",
+            encoding="utf-8",
+        )
+        args.api_key_file = self.root / "GEMINI_API_KEY.txt"
+        args.api_key_file.write_text("test-gemini-key", encoding="utf-8")
+        client = FakeGeminiClient()
+
+        transformed, final, debug = run_poc(args, client=client)
+
+        self.assertEqual(client.interactions.call_count, 1)
+        self.assertTrue(transformed.is_file())
+        self.assertTrue(final.is_file())
+        self.assertTrue(debug.is_file())
+        self.assertEqual(
+            client.interactions.kwargs["model"], "gemini-3.1-flash-image"
         )
 
     def test_preflight_prevents_paid_call_when_output_exists(self) -> None:

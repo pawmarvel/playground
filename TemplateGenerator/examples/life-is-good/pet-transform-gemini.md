@@ -1,3 +1,9 @@
+# Gemini Image — Transform the personalized pet
+
+Return one image response only; do not include explanatory text. Preserve the
+literal ordered-image roles, identity priority, composition, and genuine-alpha
+requirements below.
+
 You will receive exactly 2 images in this fixed order.
 
 IMAGE A = USER PET PHOTO

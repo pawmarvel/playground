@@ -36,10 +36,15 @@ class BundleTests(unittest.TestCase):
         )
         self.exemplar = make_transparent_mark(self.root / "exemplar.png")
         self.reference = make_image(self.root / "sample.png")
-        self.art_prompt = self.root / "art-template.md"
+        self.art_prompt = self.root / "art-template-gpt.md"
         self.art_prompt.write_text("Generate reusable fixed artwork.\n", encoding="utf-8")
-        self.pet_prompt = self.root / "pet-transform.md"
+        self.pet_prompt = self.root / "pet-transform-gpt.md"
         self.pet_prompt.write_text("Transform the user pet for this design.\n", encoding="utf-8")
+        self.pet_prompt_gemini = self.root / "pet-transform-gemini.md"
+        self.pet_prompt_gemini.write_text(
+            "Transform the user pet for this design with Gemini.\n",
+            encoding="utf-8",
+        )
         self.print_dir = self.root / "print"
         self.print_dir.mkdir()
         self.print_art = make_transparent_mark(
@@ -88,6 +93,13 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(entry["design"], {"id": "life-is-good"})
         self.assertEqual(entry["reference_designs"], ["reference-design.png"])
         self.assertEqual(
+            entry["prompts"],
+            {
+                "art_template": "art-template-gpt.md",
+                "pet_transform": "pet-transform-gpt.md",
+            },
+        )
+        self.assertEqual(
             entry["product_profile"]["profile_id"], "test-blanket"
         )
         self.assertEqual(entry["preview"]["canvas"], {"width": 672, "height": 1008})
@@ -104,10 +116,10 @@ class BundleTests(unittest.TestCase):
         self.assertTrue((output / "qa" / "transformed-pet.png").is_file())
         self.assertTrue((output / "reference-design.png").is_file())
         self.assertEqual(
-            (output / "art-template.md").read_bytes(), self.art_prompt.read_bytes()
+            (output / "art-template-gpt.md").read_bytes(), self.art_prompt.read_bytes()
         )
         self.assertEqual(
-            (output / "pet-transform.md").read_bytes(), self.pet_prompt.read_bytes()
+            (output / "pet-transform-gpt.md").read_bytes(), self.pet_prompt.read_bytes()
         )
         self.assertEqual(
             {path.name for path in output.iterdir()},
@@ -118,8 +130,8 @@ class BundleTests(unittest.TestCase):
                 "print",
                 "qa",
                 "reference-design.png",
-                "art-template.md",
-                "pet-transform.md",
+                "art-template-gpt.md",
+                "pet-transform-gpt.md",
                 "fonts",
             },
         )
@@ -185,7 +197,7 @@ class BundleTests(unittest.TestCase):
             exemplar=self.exemplar,
             reference_design=self.reference,
             art_prompt=self.art_prompt,
-            pet_prompt=self.pet_prompt,
+            pet_prompt=self.pet_prompt_gemini,
             print_art=self.print_art,
             print_layout_path=self.print_layout,
             runtime_model=None,
@@ -194,6 +206,23 @@ class BundleTests(unittest.TestCase):
         self.assertNotIn(
             "model", json.loads((output / "layout-print.json").read_text())
         )
+        self.assertTrue((output / "pet-transform-gemini.md").is_file())
+
+    def test_rejects_prompt_category_that_disagrees_with_runtime(self) -> None:
+        with self.assertRaisesRegex(BundleError, "does not match the gemini"):
+            publish_bundle(
+                template_dir=self.template,
+                output_dir=self.root / "bundles",
+                design_id="mismatched-prompt",
+                product_profile=self.product_profile,
+                exemplar=self.exemplar,
+                reference_design=self.reference,
+                art_prompt=self.art_prompt,
+                pet_prompt=self.pet_prompt,
+                print_art=self.print_art,
+                print_layout_path=self.print_layout,
+                runtime_model=None,
+            )
 
     def test_catalog_distinguishes_product_variants_for_one_design(self) -> None:
         alternate_profile = write_product_profile(
@@ -360,8 +389,8 @@ class BundleTests(unittest.TestCase):
             print_art=self.print_art,
             print_layout_path=self.print_layout,
         )
-        (output / "pet-transform.md").unlink()
-        with self.assertRaisesRegex(BundleError, "pet-transform.md"):
+        (output / "pet-transform-gpt.md").unlink()
+        with self.assertRaisesRegex(BundleError, "exactly one pet-transform"):
             validate_bundle(output)
 
 

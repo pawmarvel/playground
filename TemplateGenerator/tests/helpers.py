@@ -109,3 +109,29 @@ class FakeImages:
 class FakeClient:
     def __init__(self) -> None:
         self.images = FakeImages()
+
+
+class FakeInteractions:
+    def __init__(self) -> None:
+        self.kwargs = None
+        self.call_count = 0
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        self.call_count += 1
+        image = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+        ImageDraw.Draw(image).ellipse(
+            (256, 128, 768, 896), fill=(80, 120, 180, 255)
+        )
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return SimpleNamespace(
+            output_image=SimpleNamespace(
+                data=base64.b64encode(buffer.getvalue()).decode("ascii")
+            )
+        )
+
+
+class FakeGeminiClient:
+    def __init__(self) -> None:
+        self.interactions = FakeInteractions()

@@ -54,13 +54,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--art-prompt",
         type=Path,
         required=True,
-        help="design-specific art-template prompt published as art-template.md",
+        help=(
+            "design-specific prompt named art-template-gpt.md or "
+            "art-template-gemini.md; its qualified name is preserved"
+        ),
     )
     parser.add_argument(
         "--pet-prompt",
         type=Path,
         required=True,
-        help="design-specific pet prompt published as pet-transform.md",
+        help=(
+            "design-specific prompt named pet-transform-gpt.md or "
+            "pet-transform-gemini.md; category must match --runtime-model"
+        ),
     )
     parser.add_argument(
         "--print-art",

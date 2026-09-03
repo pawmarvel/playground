@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from .cli import UserInputError, generate
+from .cli import UserInputError, _resolve_provider_model, generate
 from .config import ConfigError, load_layout
 from .renderer import RenderError, render_to_files
 
@@ -36,7 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="reuse an approved transformed pet and skip the paid image API call",
     )
     parser.add_argument("--pet-name", required=True)
-    parser.add_argument("--api-key-file", type=Path)
+    parser.add_argument(
+        "--api-key-file",
+        type=Path,
+        help="selected image provider API key file",
+    )
     parser.add_argument(
         "--reference-design",
         type=Path,
@@ -52,7 +56,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="design-specific pet prompt required when --pet-image is used",
     )
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--model", default="gpt-image-2")
+    parser.add_argument(
+        "--provider",
+        choices=("auto", "openai", "gemini"),
+        default="auto",
+        help="pet transformation provider (default: infer from --model)",
+    )
+    parser.add_argument(
+        "--model",
+        help="pet transformation model; provider default when omitted",
+    )
     parser.add_argument("--size", default="1024x1024")
     parser.add_argument(
         "--quality", choices=("low", "medium", "high", "auto"), default="high"
@@ -90,6 +103,12 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
     transformed = supplied_transformed or output_dir / "transformed-pet.png"
     final = output_dir / "final-preview.png"
     debug = output_dir / "final-preview-debug.png"
+    provider: str | None = None
+    model: str | None = None
+    if supplied_transformed is None:
+        provider, model = _resolve_provider_model(
+            getattr(args, "provider", "auto"), getattr(args, "model", None)
+        )
 
     layout = load_layout(template_dir, layout_path=layout_path)
     if supplied_transformed is not None:
@@ -143,7 +162,8 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
         "transformed_pet": str(transformed),
         "final_preview": str(final),
         "debug_preview": str(debug),
-        "model": args.model,
+        "provider": provider,
+        "model": model,
         "size": args.size,
         "quality": args.quality,
         "runtime_model": layout.runtime_model or "gemini",
@@ -157,10 +177,11 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
             pet_image=pet_image,
             prompt_file=prompt_file,
             api_key_file=args.api_key_file,
+            provider=provider,
             output_dir=output_dir,
             output_name=transformed.name,
             output_format="png",
-            model=args.model,
+            model=model,
             size=args.size,
             quality=args.quality,
             background="transparent",
