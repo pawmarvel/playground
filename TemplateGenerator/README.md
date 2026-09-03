@@ -34,6 +34,7 @@ The MVP provides:
 
 - [MVP operations guide](docs/MVP_OPERATIONS_GUIDE.md)
 - [MVP design](docs/OFFLINE_PERSONALIZATION_TOOLSET_DESIGN.md)
+- [MVP production bundle catalog design](docs/MVP_PRODUCTION_BUNDLE_CATALOG_DESIGN.md)
 - [Future iterations](docs/FUTURE_PERSONALIZATION_ITERATIONS.md)
 
 Design folders such as [`examples/life-is-good`](examples/life-is-good) and
