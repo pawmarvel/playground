@@ -84,12 +84,19 @@ class _GeminiRestInteractions:
             with urlopen(request, timeout=300) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
-            detail = ""
+            raw_detail = exc.read().decode("utf-8", errors="replace").strip()
+            exc.close()
+            detail = raw_detail
             try:
-                body = json.loads(exc.read().decode("utf-8"))
-                detail = body.get("error", {}).get("message", "")
-            except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+                body = json.loads(raw_detail)
+                error = body.get("error", {})
+                if isinstance(error, dict):
+                    detail = str(error.get("message", ""))
+                elif error:
+                    detail = str(error)
+            except (json.JSONDecodeError, AttributeError):
                 pass
+            detail = " ".join(detail.split())[:1000]
             suffix = f": {detail}" if detail else ""
             raise RuntimeError(f"Gemini API returned HTTP {exc.code}{suffix}") from exc
         except URLError as exc:
@@ -446,9 +453,12 @@ def _gemini_prompt(prompt: str, background: str) -> str:
         return prompt
     return (
         f"{prompt}\n\n"
-        "GEMINI OUTPUT REQUIREMENT: Return only one PNG image. The background "
-        "must be genuine transparent alpha, not white, gray, a checkerboard, or "
-        "a simulated transparency pattern."
+        "GEMINI OUTPUT REQUIREMENT: Return one isolated subject image only. Do "
+        "not reproduce any reference background, template, text, decoration, "
+        "product, or mockup. Prefer genuine transparent alpha. If the response "
+        "transport cannot encode alpha, use a perfectly uniform pure-white "
+        "(#FFFFFF) isolation matte with no shadow, texture, gradient, or other "
+        "content so a downstream background-removal step can isolate the subject."
     )
 
 
@@ -556,7 +566,6 @@ def _print_request_details(summary: dict[str, Any]) -> None:
             "input_images": images,
             "response_format": {
                 "type": "image",
-                "mime_type": "image/png",
                 "aspect_ratio": _gemini_aspect_ratio(summary["size"]),
                 "image_size": _gemini_image_size(
                     summary["size"], summary["model"]
@@ -816,10 +825,10 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
             }
             for path in image_paths
         )
-        response_format: dict[str, str] = {
-            "type": "image",
-            "mime_type": "image/png",
-        }
+        # Interactions currently supports image/jpeg as its only explicit image
+        # response MIME type. Omit the field and convert the result locally to
+        # the caller's requested PNG/JPEG/WebP format.
+        response_format: dict[str, str] = {"type": "image"}
         aspect_ratio = _gemini_aspect_ratio(request_size)
         image_size = _gemini_image_size(request_size, model)
         if aspect_ratio is not None:

@@ -164,9 +164,11 @@ To exercise the lower-latency Gemini route for the pet operation, add
 `--provider gemini`. A concrete `--model gemini-*` also selects Gemini when
 `--provider auto` is retained. The wrapper maps an exact requested canvas to
 the nearest Gemini native aspect/resolution tier, then contains the result on
-the exact canvas without cropping. Gemini has no native transparent-background
-request parameter: transparency is reinforced in the prompt and must remain a
-QA gate.
+the exact canvas without cropping. Gemini does not support guaranteed
+transparent-background output. Its prompt forbids reference-background content
+and permits a flat-white isolation matte as a transport fallback, but a separate
+background-removal/matting step is required before that result can pass the
+bundle alpha gate.
 
 ### Pet transformation
 

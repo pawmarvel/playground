@@ -7,12 +7,19 @@ import time
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 from PIL import Image
 
 from helpers import FakeClient, FakeGeminiClient, make_image
-from pawmarvel_generator.cli import UserInputError, _read_api_key, build_parser, generate
+from pawmarvel_generator.cli import (
+    UserInputError,
+    _GeminiRestInteractions,
+    _read_api_key,
+    build_parser,
+    generate,
+)
 from pawmarvel_generator.image_size import ImageSize
 from pawmarvel_generator.product_profile import (
     create_product_profile,
@@ -279,6 +286,9 @@ class CliTests(unittest.TestCase):
             ["image/png", "image/png"],
         )
         self.assertIn("USER PET", request["input"][0]["text"])
+        self.assertIn("not reproduce any reference background", request["input"][0]["text"])
+        self.assertIn("pure-white (#FFFFFF) isolation matte", request["input"][0]["text"])
+        self.assertNotIn("mime_type", request["response_format"])
         self.assertEqual(request["response_format"]["aspect_ratio"], "1:1")
         self.assertEqual(request["response_format"]["image_size"], "1K")
         with Image.open(output) as image:
@@ -306,6 +316,26 @@ class CliTests(unittest.TestCase):
             generate(
                 self.args("--provider", "gemini", "--model", "gpt-image-2"),
                 client=FakeGeminiClient(),
+            )
+
+    def test_gemini_http_error_includes_json_diagnostic(self) -> None:
+        error = HTTPError(
+            "https://example.invalid",
+            400,
+            "Bad Request",
+            {},
+            io.BytesIO(
+                b'{"error":{"message":"Unsupported response MIME type"}}'
+            ),
+        )
+        with patch(
+            "pawmarvel_generator.cli.urlopen", side_effect=error
+        ), self.assertRaisesRegex(
+            RuntimeError, "400: Unsupported response MIME type"
+        ):
+            _GeminiRestInteractions("secret").create(
+                model="gemini-3.1-flash-image",
+                input="test",
             )
 
     def test_rejects_prompt_category_that_disagrees_with_provider(self) -> None:

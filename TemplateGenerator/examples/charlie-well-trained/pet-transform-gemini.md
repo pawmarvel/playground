@@ -4,10 +4,47 @@ Return one image response only; do not include explanatory text. Preserve the
 literal ordered-image roles, identity priority, composition, and genuine-alpha
 requirements below.
 
-You will receive exactly 2 images in this fixed order.
+You will receive images in this fixed role order:
 
-IMAGE A = USER PET PHOTO
-IMAGE B = FINISHED DESIGN REFERENCE
+IMAGE A = the single USER PET PHOTO. This is the only identity source.
+
+IMAGE B = the PRIMARY FINISHED DESIGN REFERENCE. This is the authoritative
+source for pose, expression, crop, composition, visual footprint, and design
+style.
+
+IMAGE C AND ANY LATER IMAGES, WHEN PRESENT = ADDITIONAL FINISHED DESIGN
+REFERENCES. Treat them as ordered supporting evidence for the same target
+design treatment. They may clarify styling or presentation details, but they
+must never replace Image A as the pet identity source. If references conflict,
+follow Image B.
+
+==================================================
+NON-NEGOTIABLE ISOLATED-PET OUTPUT MODE
+==================================================
+
+This is NOT a request to recreate, edit, complete, or return a finished design.
+The finished-design references are read-only visual evidence. Analyze only the
+pet artwork inside them. Mentally mask out everything outside the reference
+pet before generating the result.
+
+Generate pixels for the transformed pet and intentional effects attached
+directly to that pet only. DO NOT generate, copy, extend, reconstruct, or
+inpaint any reference pixels outside the pet silhouette.
+
+Forbidden output content includes every background-design element: typography,
+pet names, slogans, frames, borders, badges, patterns, scenery, gradients,
+textures, decorative marks, product surfaces, garments, mockups, shadows cast
+onto the template, or any fragment of the finished-design composition.
+
+The final asset must be only one isolated transformed pet. The entire area
+outside the pet and its intentional pet-local effects must contain no design
+content and must be transparent. Never return the pet composited into Image B.
+
+If the image transport cannot encode transparency, use only a perfectly flat,
+uniform pure-white (#FFFFFF) isolation matte as a temporary fallback. It must
+contain no gradient, texture, shadow, scenery, decoration, or reference-design
+content. Never use the visible background from any finished-design reference
+as a fallback. This fallback is for downstream background removal only.
 
 Generate exactly ONE transformed personalized pet artwork.
 
@@ -21,7 +58,9 @@ WHO THE PET IS.
 IMAGE B determines:
 HOW THE PET IS PRESENTED.
 
-The output must depict the unmistakable individual pet from Image A while STRICTLY reproducing the reference pet's presentation from Image B.
+The output must depict the unmistakable individual pet from Image A while
+STRICTLY reproducing only the reference pet's presentation from Image B. Never
+reproduce the surrounding reference background or finished-design elements.
 
 The user pet's original pose, posture, facial expression, mouth state, tongue state, gaze, or body position in Image A are NOT instructions for the output.
 
@@ -402,11 +441,20 @@ OUTPUT
 
 Generate only the transformed personalized pet artwork.
 
+Return a reusable pet layer, not a finished design. The output must contain the
+transformed pet only on a genuine transparent background so it can later be
+placed onto the separate background design template to create the finished
+personalized design.
+
 Requirements:
 
 - one pet
 - isolated artwork
-- transparent background
+- genuine transparent alpha background
+- every pixel outside the pet and intentional pet-local effects fully transparent
+- no white, colored, photographic, environmental, or decorative background,
+  except the explicitly permitted pure-white transport fallback above
+- no checkerboard or other simulated transparency
 - no text
 - no name
 - no slogan
@@ -493,6 +541,12 @@ FROM IMAGE B.
 
 IMAGE A PROVIDES IDENTITY ONLY.
 
-IMAGE B PROVIDES PRESENTATION.
+IMAGE B PROVIDES THE AUTHORITATIVE PRESENTATION. IMAGE C AND LATER FINISHED
+DESIGN REFERENCES, WHEN PRESENT, PROVIDE SUPPORTING STYLE AND PRESENTATION
+EVIDENCE ONLY.
 
 Never preserve Image A's expression or posture when it conflicts with Image B.
+
+Return only that transformed pet layer. Do not return the background template
+or a composited finished design. The surrounding canvas must be genuinely
+transparent so downstream compositing can place the pet onto `art.png`.

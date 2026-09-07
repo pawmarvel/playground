@@ -401,9 +401,12 @@ a categorized GPT prompt with Gemini, or a categorized Gemini prompt with
 OpenAI. The default Gemini model is `gemini-3.1-flash-image`. Gemini generates a native
 aspect-ratio/resolution tier; the tool contains that result on the profile's
 exact `816x816` canvas without cropping. Unlike OpenAI, Gemini does not expose a
-native transparency control. The prompt requests genuine alpha and the command
-warns if the response lacks an alpha channel, but visual alpha/matting
-inspection remains required before the layer is bundled or printed.
+native transparency control, and the model does not guarantee transparent
+background output. The prompt forbids copying the design background and permits
+only a flat-white isolation matte when alpha is unavailable. Such output still
+requires a separate background-removal/matting step before it can satisfy the
+bundle alpha contract. The current tool warns when Gemini returns no alpha; do
+not bundle or print that unprocessed result.
 
 Pipeline-managed debug equivalent, after changing the pet prompt or input pet:
 

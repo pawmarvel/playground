@@ -448,10 +448,10 @@ the old omitted-`layout.model` convention an acceptable production contract.
 Before FE integration, `bundle.json.runtime` must identify `provider` and
 `model` explicitly from an allowlist. Preview and print must pin the same bundle
 revision and transformed-pet lineage. OpenAI provides a native transparent
-background control. Gemini transparency is prompt-driven, uses native
-aspect-ratio/resolution tiers, and requires output normalization and alpha QA;
-those semantics must be named in runtime policy rather than hidden behind a
-missing field.
+background control. Gemini does not guarantee transparent-background output;
+it uses native aspect-ratio/resolution tiers and requires output normalization,
+background removal/matting when alpha is absent, and alpha QA. Those semantics
+must be named in runtime policy rather than hidden behind a missing field.
 
 Prompt filenames are provider-qualified:
 `art-template-{gpt|gemini}.md` and

@@ -118,8 +118,10 @@ Design-specific prompts are treated like source code. For pet transformation,
 design for pose, expression, crop, and style with either provider. Gemini uses
 native aspect-ratio/resolution tiers; its response is fitted without cropping
 onto the exact requested CLI canvas. Gemini transparency is prompt-driven and
-must be inspected because its API has no equivalent of OpenAI's native
-`background=transparent` control. Working directories and
+cannot be guaranteed because its image model does not support transparent
+background output. A Gemini result that uses its permitted flat-white fallback
+requires a separate background-removal/matting step before it satisfies the
+bundle alpha contract. Working directories and
 published bundles do not carry customer source data. Each bundle carries its
 selected `art-template-{gpt|gemini}.md` and
 `pet-transform-{gpt|gemini}.md` contract files without removing their provider
