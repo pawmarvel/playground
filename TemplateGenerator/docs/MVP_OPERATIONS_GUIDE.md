@@ -346,6 +346,13 @@ Do not overwrite a decision to change a winner. Create a new review ID. The
 earlier review packet remains the audit trail. The review directories passed to
 the final `graduate` command identify the current winners.
 
+In the walkthrough, every winner block separates **operator inputs** from
+**derived downstream parameters**. Enter the review ID, selected experiment ID,
+and—where applicable—selected attempt ID once. Capture the path printed by
+`record-decision` in a `PAWMARVEL_*_DECISION` variable, then derive the review,
+experiment, and attempt paths from those values. Later commands must reuse
+these variables instead of reconstructing paths by hand.
+
 | Development step | New durable artifacts | What remains reusable |
 | --- | --- | --- |
 | Art prompt/art iteration | Art experiment, attempts, evaluation, and art decision | Reference and product profile source files |
@@ -510,26 +517,41 @@ This comparison is meaningful only when prompt, model, references, and attempt
 count are held constant. Compare median latency and failure rate together with
 the visual result; do not assume `high` wins automatically.
 
-Select the art attempt only in shell variables for the next development step:
+After reviewing the comparison, enter the winning review, experiment, and
+attempt once. The block records the immutable decision and derives every art
+parameter used by later sections; do not separately type an art-attempt path.
+If the quality comparison wins instead, change the three IDs to that review's
+actual winner before running the block.
 
 ```bash
-# This walkthrough assumes v02/attempt-0001 won the cross-experiment review.
-PAWMARVEL_ART_EXPERIMENT="$PAWMARVEL_ART_EXPERIMENT_V02"
-PAWMARVEL_ART_ATTEMPT="$PAWMARVEL_ART_EXPERIMENT/attempts/attempt-0001"
+# Operator selection inputs: edit only these three values.
+PAWMARVEL_ART_REVIEW_ID="art-prompt-v01-v02"
+PAWMARVEL_ART_SELECTED_EXPERIMENT_ID="art-gpt-v02"
+PAWMARVEL_ART_SELECTED_ATTEMPT_ID="attempt-0001"
 
-PAWMARVEL_ART_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/art/art-prompt-v01-v02"
+PAWMARVEL_ART_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/art/$PAWMARVEL_ART_REVIEW_ID"
 
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
+PAWMARVEL_ART_DECISION="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
   --review "$PAWMARVEL_ART_REVIEW" \
-  --selected-experiment art-gpt-v02 \
-  --selected-attempt attempt-0001 \
+  --selected-experiment "$PAWMARVEL_ART_SELECTED_EXPERIMENT_ID" \
+  --selected-attempt "$PAWMARVEL_ART_SELECTED_ATTEMPT_ID" \
   --selected-by application-owner \
-  --notes "Best fixed-art fidelity and acceptable run stability"
+  --notes "Best fixed-art fidelity and acceptable run stability")"
+
+# Derived downstream parameters: do not edit these independently.
+PAWMARVEL_ART_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/art/$PAWMARVEL_ART_SELECTED_EXPERIMENT_ID"
+PAWMARVEL_ART_ATTEMPT="$PAWMARVEL_ART_EXPERIMENT/attempts/$PAWMARVEL_ART_SELECTED_ATTEMPT_ID"
+
+test "$PAWMARVEL_ART_DECISION" = "$PAWMARVEL_ART_REVIEW/decision.json"
+test -f "$PAWMARVEL_ART_ATTEMPT/run.json"
+printf 'art decision: %s\nart attempt:  %s\n' "$PAWMARVEL_ART_DECISION" "$PAWMARVEL_ART_ATTEMPT"
 ```
 
 This records the shortlist immediately. It is not yet a production bundle
-selection. If later art work changes the winner, create a new review; keep this
-packet so the earlier evaluation and decision remain traceable together.
+selection. The decision command validates that both selected IDs occur in the
+review and passed its hard gates. If later art work changes the winner, create
+a new review and rerun the block with its new IDs; keep the earlier packet so
+the prior decision remains traceable.
 
 ## 6. Iterate the transformed-pet prompt and model
 
@@ -583,18 +605,33 @@ and median; treat p95 as meaningful only with at least 20 successful calls.
 `--attempt-prefix benchmark-` excludes one-off smoke tests. Do not select the
 experiment until every fixture has a successful hard-gate-passing result.
 
-Use a representative succeeded attempt for layout and print QA:
+After reviewing the pet comparison, enter the winning review and runtime
+experiment once. Also choose one successful attempt from that experiment as
+the representative layout fixture. The pet decision intentionally selects the
+reusable runtime experiment rather than one stochastic output; the layout
+experiment will snapshot the representative attempt separately.
 
 ```bash
-PAWMARVEL_PET_ATTEMPT="$PAWMARVEL_PET_EXPERIMENT/attempts/benchmark-sausage-dog-0001"
+# Operator selection inputs: edit only these three values.
+PAWMARVEL_PET_REVIEW_ID="pet-gpt-baseline"
+PAWMARVEL_PET_SELECTED_EXPERIMENT_ID="pet-gpt-v01"
+PAWMARVEL_PET_LAYOUT_ATTEMPT_ID="benchmark-sausage-dog-0001"
 
-PAWMARVEL_PET_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/pet/pet-gpt-baseline"
+PAWMARVEL_PET_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/pet/$PAWMARVEL_PET_REVIEW_ID"
 
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
+PAWMARVEL_PET_DECISION="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
   --review "$PAWMARVEL_PET_REVIEW" \
-  --selected-experiment pet-gpt-v01 \
+  --selected-experiment "$PAWMARVEL_PET_SELECTED_EXPERIMENT_ID" \
   --selected-by application-owner \
-  --notes "GPT baseline passed identity, style, alpha, and latency review"
+  --notes "GPT baseline passed identity, style, alpha, and latency review")"
+
+# Derived downstream parameters: do not edit these independently.
+PAWMARVEL_PET_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/pet/$PAWMARVEL_PET_SELECTED_EXPERIMENT_ID"
+PAWMARVEL_PET_ATTEMPT="$PAWMARVEL_PET_EXPERIMENT/attempts/$PAWMARVEL_PET_LAYOUT_ATTEMPT_ID"
+
+test "$PAWMARVEL_PET_DECISION" = "$PAWMARVEL_PET_REVIEW/decision.json"
+test -f "$PAWMARVEL_PET_ATTEMPT/run.json"
+printf 'pet decision: %s\npet fixture:  %s\n' "$PAWMARVEL_PET_DECISION" "$PAWMARVEL_PET_ATTEMPT"
 ```
 
 The bundle selects the pet experiment's runtime contract, not this one pet's
@@ -758,18 +795,45 @@ temporary GUI pet switching does not.
   --experiment layout-v01 \
   --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
   --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
+```
 
-PAWMARVEL_LAYOUT_ATTEMPT="$PAWMARVEL_LAYOUT_EXPERIMENT/attempts/attempt-0001"
+Inspect
+`reviews/layout/layout-fixture/artifacts/layout-comparison.png`. It labels the
+experiment, pet name, font, and name-box dimensions. Confirm that pet placement
+and nominal-size/shrink-only name fitting work for both the SAUSAGE and
+MARSHMALLOW fixtures.
 
-PAWMARVEL_LAYOUT_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/layout/layout-fixture"
+After review, enter the winning review, experiment, and attempt once. The block
+records the layout decision and derives the exact paths used by assembly, print
+preparation, and graduation.
 
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
+```bash
+# Operator selection inputs: edit only these three values.
+PAWMARVEL_LAYOUT_REVIEW_ID="layout-fixture"
+PAWMARVEL_LAYOUT_SELECTED_EXPERIMENT_ID="layout-v01"
+PAWMARVEL_LAYOUT_SELECTED_ATTEMPT_ID="attempt-0001"
+
+PAWMARVEL_LAYOUT_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/layout/$PAWMARVEL_LAYOUT_REVIEW_ID"
+
+PAWMARVEL_LAYOUT_DECISION="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
   --review "$PAWMARVEL_LAYOUT_REVIEW" \
-  --selected-experiment "$(basename "$PAWMARVEL_LAYOUT_EXPERIMENT")" \
-  --selected-attempt "$(basename "$PAWMARVEL_LAYOUT_ATTEMPT")" \
+  --selected-experiment "$PAWMARVEL_LAYOUT_SELECTED_EXPERIMENT_ID" \
+  --selected-attempt "$PAWMARVEL_LAYOUT_SELECTED_ATTEMPT_ID" \
   --selected-by application-owner \
-  --notes "Accepted placement, fixed nominal text size, and OFL font"
+  --notes "Accepted placement, fixed nominal text size, and OFL font")"
 
+# Derived downstream parameters: do not edit these independently.
+PAWMARVEL_LAYOUT_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/layout/$PAWMARVEL_LAYOUT_SELECTED_EXPERIMENT_ID"
+PAWMARVEL_LAYOUT_ATTEMPT="$PAWMARVEL_LAYOUT_EXPERIMENT/attempts/$PAWMARVEL_LAYOUT_SELECTED_ATTEMPT_ID"
+
+test "$PAWMARVEL_LAYOUT_DECISION" = "$PAWMARVEL_LAYOUT_REVIEW/decision.json"
+test -f "$PAWMARVEL_LAYOUT_ATTEMPT/run.json"
+printf 'layout decision: %s\nlayout attempt:  %s\n' "$PAWMARVEL_LAYOUT_DECISION" "$PAWMARVEL_LAYOUT_ATTEMPT"
+```
+
+Create the assembly review from the derived stage winners:
+
+```bash
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
   --kind assembly \
   --review-id assembly-baseline \
@@ -792,25 +856,24 @@ the exact name saved by the layout UI and recorded by
 identical text inputs. To preserve a second named comparison, save another
 layout attempt after changing **Preview pet name**.
 
-Inspect
-`reviews/layout/layout-fixture/artifacts/layout-comparison.png`. It labels
-the experiment, pet name, font, and name-box dimensions. Confirm that pet
-placement and nominal-size/shrink-only name fitting work for both the SAUSAGE and MARSHMALLOW
-fixtures. The walkthrough selects `layout-v01/attempt-0001`; if another
-candidate wins, update `PAWMARVEL_LAYOUT_EXPERIMENT` and
-`PAWMARVEL_LAYOUT_ATTEMPT`, then create a new assembly review ID for that
-exact combination.
+The walkthrough selects `layout-v01/attempt-0001`. If another candidate wins,
+create a new layout review ID, run its selection block, and create a new
+assembly review ID for that derived combination.
 
 After accepting the complete assembly, record that decision before preparing
 print output:
 
 ```bash
-PAWMARVEL_ASSEMBLY_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/assembly/assembly-baseline"
+PAWMARVEL_ASSEMBLY_REVIEW_ID="assembly-baseline"
+PAWMARVEL_ASSEMBLY_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/assembly/$PAWMARVEL_ASSEMBLY_REVIEW_ID"
 
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
+PAWMARVEL_ASSEMBLY_DECISION="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
   --review "$PAWMARVEL_ASSEMBLY_REVIEW" \
   --selected-by application-owner \
-  --notes "Selected art, pet runtime, and layout render correctly together"
+  --notes "Selected art, pet runtime, and layout render correctly together")"
+
+test "$PAWMARVEL_ASSEMBLY_DECISION" = "$PAWMARVEL_ASSEMBLY_REVIEW/decision.json"
+printf 'assembly decision: %s\n' "$PAWMARVEL_ASSEMBLY_DECISION"
 ```
 
 Assembly decisions infer the single evaluated combination, so they do not take
@@ -825,16 +888,24 @@ variables from accidentally mixing candidates. This operation creates a
 hash-bound candidate and does not publish anything.
 
 ```bash
-PAWMARVEL_PRINT_FINALIST="$PAWMARVEL_AUTHORING_PRODUCT/print-candidates/print-finalist-0001"
+# The decision files are the shell source of truth. Derive the review packets
+# required by prepare-print rather than retyping their paths.
+PAWMARVEL_ART_REVIEW="$(dirname "$PAWMARVEL_ART_DECISION")"
+PAWMARVEL_PET_REVIEW="$(dirname "$PAWMARVEL_PET_DECISION")"
+PAWMARVEL_LAYOUT_REVIEW="$(dirname "$PAWMARVEL_LAYOUT_DECISION")"
+PAWMARVEL_PRINT_CANDIDATE_ID="print-finalist-0001"
 
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" prepare-print \
-  --candidate-id print-finalist-0001 \
+PAWMARVEL_PRINT_FINALIST="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" prepare-print \
+  --candidate-id "$PAWMARVEL_PRINT_CANDIDATE_ID" \
   --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT" \
   --art-review "$PAWMARVEL_ART_REVIEW" \
   --pet-review "$PAWMARVEL_PET_REVIEW" \
   --layout-review "$PAWMARVEL_LAYOUT_REVIEW" \
   --pet-name "$PAWMARVEL_PET_NAME" \
-  --backend "$PAWMARVEL_UPSCALE_BACKEND"
+  --backend "$PAWMARVEL_UPSCALE_BACKEND")"
+
+test "$PAWMARVEL_PRINT_FINALIST" = "$PAWMARVEL_AUTHORING_PRODUCT/print-candidates/$PAWMARVEL_PRINT_CANDIDATE_ID"
+printf 'print finalist: %s\n' "$PAWMARVEL_PRINT_FINALIST"
 ```
 
 Inspect:
@@ -887,8 +958,11 @@ paths, and records the reviewer directly in `selection.json`. There is no
 separate reusable approval file.
 
 ```bash
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" graduate \
-  --graduation-id life-is-good-blanket-king-v01 \
+PAWMARVEL_GRADUATION_ID="life-is-good-blanket-king-v01"
+PAWMARVEL_ASSEMBLY_REVIEW="$(dirname "$PAWMARVEL_ASSEMBLY_DECISION")"
+
+PAWMARVEL_SELECTION="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" graduate \
+  --graduation-id "$PAWMARVEL_GRADUATION_ID" \
   --print-candidate "$PAWMARVEL_PRINT_FINALIST" \
   --art-review "$PAWMARVEL_ART_REVIEW" \
   --pet-review "$PAWMARVEL_PET_REVIEW" \
@@ -896,10 +970,11 @@ separate reusable approval file.
   --assembly-review "$PAWMARVEL_ASSEMBLY_REVIEW" \
   --selected-by application-owner \
   --notes "Accepted art, pet runtime, layout/font, latency, and print finalist" \
-  --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
+  --authoring-root "$PAWMARVEL_AUTHORING_ROOT")"
 
-PAWMARVEL_GRADUATION="$PAWMARVEL_AUTHORING_PRODUCT/graduations/life-is-good-blanket-king-v01"
-PAWMARVEL_SELECTION="$PAWMARVEL_GRADUATION/selection.json"
+PAWMARVEL_GRADUATION="$(dirname "$PAWMARVEL_SELECTION")"
+test "$PAWMARVEL_SELECTION" = "$PAWMARVEL_AUTHORING_PRODUCT/graduations/$PAWMARVEL_GRADUATION_ID/selection.json"
+printf 'graduated selection: %s\n' "$PAWMARVEL_SELECTION"
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" trace \
   --graduation "$PAWMARVEL_GRADUATION"
@@ -910,9 +985,11 @@ the exact selected combination and a new print candidate. Do not edit an old
 review, finalist, or graduation. For example:
 
 ```bash
+PAWMARVEL_ASSEMBLY_REVIEW_ID="assembly-winner-v01"
+
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
   --kind assembly \
-  --review-id assembly-winner-v01 \
+  --review-id "$PAWMARVEL_ASSEMBLY_REVIEW_ID" \
   --art-attempt "$PAWMARVEL_ART_ATTEMPT" \
   --pet-experiment "$PAWMARVEL_PET_EXPERIMENT" \
   --layout-attempt "$PAWMARVEL_LAYOUT_ATTEMPT" \
@@ -925,26 +1002,27 @@ Review the newly rendered compatibility preview, record it, create a matching
 print finalist, and repeat `graduate` with the new review path:
 
 ```bash
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
-  --review "$PAWMARVEL_AUTHORING_PRODUCT/reviews/assembly/assembly-winner-v01" \
+PAWMARVEL_ASSEMBLY_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/assembly/$PAWMARVEL_ASSEMBLY_REVIEW_ID"
+PAWMARVEL_ASSEMBLY_DECISION="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
+  --review "$PAWMARVEL_ASSEMBLY_REVIEW" \
   --selected-by application-owner \
-  --notes "Accepted updated winning assembly"
+  --notes "Accepted updated winning assembly")"
 ```
 
 The print candidate must report those exact three product-relative sources. If
 it does not, rerun `prepare-print` with a new candidate ID before graduating.
 
-Build and validate revision 1:
+Build and validate the next immutable bundle revision:
 
 ```bash
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-bundle" \
+PAWMARVEL_BUNDLE="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-bundle" \
   --selection "$PAWMARVEL_SELECTION" \
   --qa-input-pet "$PAWMARVEL_PET" \
   --bundle-revision next \
   --pet-name-max-length "$PAWMARVEL_PET_NAME_MAX_LENGTH" \
-  --output-dir "$PAWMARVEL_EXCHANGE/bundles"
+  --output-dir "$PAWMARVEL_EXCHANGE/bundles")"
 
-PAWMARVEL_BUNDLE="$PAWMARVEL_EXCHANGE/bundles/life-is-good--blanket-king-9375x12375/v000001"
+printf 'bundle revision: %s\n' "$PAWMARVEL_BUNDLE"
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-catalog" validate \
   --bundle "$PAWMARVEL_BUNDLE"
@@ -966,12 +1044,13 @@ Create and validate a release catalog. Repeat `--bundle` to include other
 design-product revisions in the same FE handoff.
 
 ```bash
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-catalog" build-release \
+PAWMARVEL_RELEASE="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-catalog" build-release \
   --release-id "$PAWMARVEL_RELEASE_ID" \
   --bundle "$PAWMARVEL_BUNDLE" \
-  --exchange-root "$PAWMARVEL_EXCHANGE"
+  --exchange-root "$PAWMARVEL_EXCHANGE")"
 
 test -f "$PAWMARVEL_RELEASE"
+printf 'release catalog: %s\n' "$PAWMARVEL_RELEASE"
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-catalog" validate \
   --release-catalog "$PAWMARVEL_RELEASE" \
