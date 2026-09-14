@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -73,6 +74,7 @@ def discover_font_catalog(
 
     primary = primary_font.expanduser().resolve() if primary_font else None
     paths = [primary] if primary is not None else []
+    catalog_labels: dict[Path, str] = {}
     for font in additional_fonts:
         candidate = font.expanduser().resolve()
         if candidate.is_file():
@@ -81,6 +83,29 @@ def discover_font_catalog(
         root = root_value.expanduser().resolve()
         if not root.is_dir():
             raise FontCatalogError(f"font catalog is not a directory: {root}")
+        manifest_path = root / "catalog.json"
+        if manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                entries = manifest["fonts"]
+            except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                raise FontCatalogError(
+                    f"font catalog manifest is invalid: {manifest_path}: {exc}"
+                ) from exc
+            for entry in entries:
+                try:
+                    font_path = (root / entry["font"]).resolve()
+                    family = str(entry["family"]).strip()
+                    style = str(entry.get("style", "Regular")).strip()
+                except (KeyError, TypeError) as exc:
+                    raise FontCatalogError(
+                        f"font catalog manifest entry is invalid: {manifest_path}: {entry!r}"
+                    ) from exc
+                catalog_labels[font_path] = (
+                    family
+                    if not style or style.lower() == "regular"
+                    else f"{family} {style}"
+                )
         paths.extend(sorted(root.rglob("*.ttf"), key=lambda path: path.as_posix().lower()))
 
     candidates: list[FontCandidate] = []
@@ -110,7 +135,7 @@ def discover_font_catalog(
         candidates.append(
             FontCandidate(
                 candidate_id=f"font-{digest[:16]}",
-                label=_font_label(path),
+                label=catalog_labels.get(path, _font_label(path)),
                 font=path,
                 license=license_path,
                 sha256=digest,

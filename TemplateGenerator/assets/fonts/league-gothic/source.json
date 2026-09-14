@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "leaguegothic",
+  "family": "League Gothic",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/leaguegothic",
+  "font_filename": "LeagueGothic-wdth.ttf",
+  "font_sha256": "3b0e998c9a0034222394ffecdd383e6948259ad037b95555b139a217629ce1d0",
+  "license_sha256": "44778c339892f79188c60b7471485dd5af92c59351c7f9629a00fc625c6cae5d",
+  "metadata_sha256": "8467a67a8db6d205d59d580db7c2c95d13992e48520b48c90f5cbbcd6db732e1"
+}

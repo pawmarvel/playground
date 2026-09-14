@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "pirataone",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/pirataone",
+  "font_filename": "PirataOne-Regular.ttf",
+  "font_sha256": "5347a2e155589ecf667d4b766613c8ee003edde9f83717fd24c09599a4b1ecc0",
+  "license_filename": "OFL.txt",
+  "license_sha256": "e8ad3f3de5baeff6bac6e711d8c406e0a6b8a61d2944741532d8965d893a2681",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "215590938e7a4835384dc9da315b63909473554bcae4c1fab414b2599534c1e6"
+}

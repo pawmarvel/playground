@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "bagelfatone",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/bagelfatone",
+  "font_filename": "BagelFatOne-Regular.ttf",
+  "font_sha256": "9286944032c5a9b20ad70940105417beae14013e0b4f5fc292425afdc4330245",
+  "license_filename": "OFL.txt",
+  "license_sha256": "4f40ab196ccf674056fed8b0e6d4f918eea183a149be8a67bff1239413ebada9",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "2bbf68a2d5fd6b67cc68a9ffec0a883ec4f538b2b2b8a70fcd999d63fd365d29"
+}

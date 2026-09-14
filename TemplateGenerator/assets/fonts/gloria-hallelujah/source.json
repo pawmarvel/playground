@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "gloriahallelujah",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/gloriahallelujah",
+  "font_filename": "GloriaHallelujah.ttf",
+  "font_sha256": "eb59f2762ce8785a292bebb2af3b3e6aa21454913d791f5f25441d1d57ead9fc",
+  "license_filename": "OFL.txt",
+  "license_sha256": "0e441ae9f18ad0c294cc5b6ae3974c2db1614cab220598578b1b58c4cc334485",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "1a7e9bcdb25e0a07ed02900c92b9cc1d607f0a456a8e14fb889dcde6a6a9198b"
+}

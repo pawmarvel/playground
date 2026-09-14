@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "alumnisans",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/alumnisans",
+  "font_filename": "AlumniSans-wght.ttf",
+  "font_sha256": "9255d5201c7aba5bf1bde1e8521f0fee691f0588b83f40db228a5f9bbaacfbc4",
+  "license_filename": "OFL.txt",
+  "license_sha256": "08e1c6fa00b198f9cf90fd8c7f540ce400892063234d5a3b38dcae9f659c977f",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "e34c2747f3e89d2541b29bb4b857039adac75cb147da52b2a5f0a566014d79b0"
+}

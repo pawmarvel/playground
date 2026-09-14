@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "quicksand",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/quicksand",
+  "font_filename": "Quicksand-wght.ttf",
+  "font_sha256": "39c9b64223561f56aaff6062a6f04063c4fc86809ad6768722c06614d977e1cc",
+  "license_filename": "OFL.txt",
+  "license_sha256": "14d28541780d90f6577bb7abcc6f005bf6969614294e75c82abb8758a696ad46",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "a7be039657fe31e5526ad7cbe288bf9ed45a823ed25143e8a8a3b671ffebcfc8"
+}

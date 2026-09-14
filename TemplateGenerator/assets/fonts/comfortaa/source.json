@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "comfortaa",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/comfortaa",
+  "font_filename": "Comfortaa-wght.ttf",
+  "font_sha256": "0fc3f45dc48b614db9c39181502544b37217ecbf8bee2fb35886992bc96c5bd3",
+  "license_filename": "OFL.txt",
+  "license_sha256": "bc85bae0b512b799bbfb2b916e4d0a34cfd963d09778cd783e248b479e67760a",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "70de3bdcdbe33269ad4e584eaa8514ff5e3359307edd534addfdbc199262a539"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "gochihand",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/gochihand",
+  "font_filename": "GochiHand-Regular.ttf",
+  "font_sha256": "c46b029ab4846b2935e301af0b2cf85a1d74d2858e6a33636a3e64cf3cc4696b",
+  "license_filename": "OFL.txt",
+  "license_sha256": "b36cb03d6ddc163452d9935ce6f325741434272d3889acf42cc23584f31a85bf",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "a9e76b4d7374a387e7f1fbb4f9abe0966aa497caaac61b3f74e64574f728e8b4"
+}

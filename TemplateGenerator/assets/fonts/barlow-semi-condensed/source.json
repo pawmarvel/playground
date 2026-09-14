@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "barlowsemicondensed",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/barlowsemicondensed",
+  "font_filename": "BarlowSemiCondensed-Regular.ttf",
+  "font_sha256": "e8c7242f612b13d026e18a94b63b0fd079e91a3faf009d1b6981dbb5f16d1153",
+  "license_filename": "OFL.txt",
+  "license_sha256": "186d750eb496a4c17a76385f82be6aea2ac1cf2de074a811d63786cf374ea73f",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "abbe4d1729c6e47b6f49f1d55a28b4661e8831c85f95a2efbf1318555904028f"
+}

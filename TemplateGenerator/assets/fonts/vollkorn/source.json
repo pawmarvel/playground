@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "vollkorn",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/vollkorn",
+  "font_filename": "Vollkorn-wght.ttf",
+  "font_sha256": "4ebef434f76f80286204840354a84db79a0dc3c87deeeb791e015b70b2ade49d",
+  "license_filename": "OFL.txt",
+  "license_sha256": "53f9c99fa3d47f7d632a42ee7bab4a834a60a744f6026d676c3a223cef2b2ef3",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "294801991089df499d7b9a35db0d899c5777a04531cb87c0ac507694fe56ca02"
+}

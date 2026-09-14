@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "robotocondensed",
+  "family": "Roboto Condensed",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/robotocondensed",
+  "font_filename": "RobotoCondensed-wght.ttf",
+  "font_sha256": "dace262afcee68a5276f200d8026c57221735c0118ab5fda8c2c0d3dc409a8d0",
+  "license_sha256": "0e4cc6ece88573545be2ed25835363662a6182ba4a4c1b5c8feda52add30e8a6",
+  "metadata_sha256": "2661545ea47047600f634d2b2485b9794758c1088b2dac15024ebc6c20fc1f47"
+}

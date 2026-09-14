@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "alegreya",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/alegreya",
+  "font_filename": "Alegreya-wght.ttf",
+  "font_sha256": "ba5564634b93a8f8ba57b48cd4f1ae7417d2b4656fbac779028679b00de3cf12",
+  "license_filename": "OFL.txt",
+  "license_sha256": "f6f60d5d4cf4f4b1fc4e41353c897a2f5a16e6396c0cd8fa8bdfd2f4586a9a68",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "9bff810f5954762cad87d175c60b4bd7a5dbd1c6deb2540c56dfaf1186d5f5fc"
+}

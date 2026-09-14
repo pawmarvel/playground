@@ -27,5 +27,7 @@ button { cursor: pointer; background: #f0cf71; color: #17191d; font-weight: 700;
 .font-select-label { display: grid; gap: .4rem; }
 #font-recommendations { width: 100%; background: #17191d; color: #f4f2eb; }
 .font-specimen { overflow: hidden; margin-top: .75rem; padding: .75rem; font-size: 2rem; font-weight: 400; line-height: 1.15; white-space: nowrap; background: #17191d; border: 1px solid #414650; border-radius: 5px; }
+.font-search { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: .5rem; align-items: end; margin: .9rem 0; padding: .75rem; border: 1px solid #414650; border-radius: 5px; }
+.font-search select, .font-search .font-help { grid-column: 1 / -1; }
 .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
 #status { min-height: 1.5em; color: #b9c8db; }

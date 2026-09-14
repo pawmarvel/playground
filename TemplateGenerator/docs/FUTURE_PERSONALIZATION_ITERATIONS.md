@@ -33,7 +33,7 @@ The current baseline already provides:
 - bundle-v1, release-catalog-v2, layout-v2, and product-profile-v1 validation;
 - an OpenAI `gpt-image-2` production pet-runtime contract;
 - private OpenAI/Gemini authoring experiments;
-- a local catalog of 40 print-oriented OFL fonts; and
+- a local catalog of 109 print-oriented OFL fonts; and
 - immutable S3 bundle and release publication with local receipts.
 
 The limited MVP trial should establish a baseline across representative designs,
@@ -206,11 +206,12 @@ effect/layer with deterministic ordering and preview/print derivation. Until
 then, this example may omit or approximate its shadow and is not evidence of
 automated shadow support.
 
-#### Wider OFL font discovery
+#### OFL discovery beyond the MVP Google Fonts source
 
-Use the local 40-face catalog first. Enter broader discovery only after an
-operator rejects local results or calibrated confidence shows no adequate match.
-The future flow should:
+The MVP now uses the local 109-face catalog first and supports explicit,
+session-scoped discovery from the official Google Fonts OFL tree. Broader
+discovery should be considered only after an operator rejects both tiers or
+calibrated confidence shows no adequate match. A future flow should:
 
 - distinguish missing typefaces from tracking, outlines, shadows, width
   changes, curved baselines, or distressing;
@@ -221,10 +222,17 @@ The future flow should:
   FontBakery-style quality; and
 - pin font, license, source revision, and hashes before local-catalog promotion.
 
-Possible sources include Google Fonts, Fontsource, and reputable OFL foundries.
+Additional sources include Fontsource and reputable OFL foundries.
 Identification services may provide clues but cannot bypass validation. If no
 suitable OFL font exists, require an explicit decision rather than silently
 using a proprietary font.
+
+Schoolbell, Coming Soon, Homemade Apple, Rock Salt, Just Another Hand, Smokum,
+and Special Elite are concrete license-policy checkpoints: Google Fonts
+distributes them from the Apache collection rather than `ofl/`. Supporting
+them would require a reviewed Apache-2.0 font contract, generic bundled-license
+paths, validator and FE import changes, and redistribution QA. Keep them out of
+the OFL-only MVP until that cross-team contract is approved.
 
 #### Generated pet-name artwork
 

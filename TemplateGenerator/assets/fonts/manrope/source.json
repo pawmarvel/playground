@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "manrope",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/manrope",
+  "font_filename": "Manrope-wght.ttf",
+  "font_sha256": "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40",
+  "license_filename": "OFL.txt",
+  "license_sha256": "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "368beda3aa55b0afe90edc142d67cf37e743258c76481d520172afbc148c6cca"
+}

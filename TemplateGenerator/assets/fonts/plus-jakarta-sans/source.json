@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "plusjakartasans",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/plusjakartasans",
+  "font_filename": "PlusJakartaSans-wght.ttf",
+  "font_sha256": "89b3fb38aa0d275d7a731d0d817a4f1622b316b4d7fbdedcf02ee9099ff68bc8",
+  "license_filename": "OFL.txt",
+  "license_sha256": "995c7199cab65954f545996326755daee7b63cc6b42b06c13da1f9502ab08a99",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "e7953d66e52a1e09235d75fc7aef7139c2733c0b5507afcf6e9afbe0fcef1de6"
+}

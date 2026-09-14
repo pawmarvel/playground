@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "dosis",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/dosis",
+  "font_filename": "Dosis-wght.ttf",
+  "font_sha256": "b2238eef0b3464904fed097ef274c704bc63d21407369b7d7a5be7b0821a0e82",
+  "license_filename": "OFL.txt",
+  "license_sha256": "6dfa3951f0c829518b284608fcc1acb196cba1536b1ae1713a49deccde1ccc53",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "ffc413458a352a77b216eb19d72bc40776ac22cd26021c4b2881f37abcb9b0a6"
+}

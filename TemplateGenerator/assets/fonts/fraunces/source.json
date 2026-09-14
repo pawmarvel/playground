@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "fraunces",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/fraunces",
+  "font_filename": "Fraunces-SOFT-WONK-opsz-wght.ttf",
+  "font_sha256": "177ff6c0f14e5550a3c624247cd1189611d4eb65d000b14944c63d967958abbb",
+  "license_filename": "OFL.txt",
+  "license_sha256": "bdf4c22802eaf804f998195871c6b8938aac2ac14b2d78a8bd66a6f1eced833b",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "812aeaea90af8021a306b8fbb5490e0a861c27a5291d2253b403d9fc9f37afd5"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "figtree",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/figtree",
+  "font_filename": "Figtree-wght.ttf",
+  "font_sha256": "26ad3db9b31ff7dde67a91ff515d022d2f495cd506590699cf264f0bfe6fb714",
+  "license_filename": "OFL.txt",
+  "license_sha256": "140d37233e7f3ce7313798befa9600893bcceaf41a55fa0fa5ad52f7f657a268",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "0f70233b05de662ffa31a5dc3d310cb4eb047dc3b776046f937219179d79d905"
+}

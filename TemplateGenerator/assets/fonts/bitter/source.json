@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "bitter",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/bitter",
+  "font_filename": "Bitter-wght.ttf",
+  "font_sha256": "ef2b9a711fb02f1e5823b34da1b7450e0fc76793b7d733a8b41006e24916d4a7",
+  "license_filename": "OFL.txt",
+  "license_sha256": "152a1e283e23b42c4940da4c72f2f5bebaa17969cb77c76d7af05903846006f1",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "15a488064d44b2405c6a35befff3ba87ceb002db947793f99c6fd509b2a19c39"
+}

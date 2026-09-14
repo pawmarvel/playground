@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "zillaslab",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/zillaslab",
+  "font_filename": "ZillaSlab-Regular.ttf",
+  "font_sha256": "41a4626844da9216b031308d4423045c765fe4231d99862d85d7d74509d37703",
+  "license_filename": "OFL.txt",
+  "license_sha256": "240b385d3ec8c8d5c1d4af2bbba6ac72bac0309a80c1a8ff112c168643cc6811",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "64803c0ee0bb3515b13a45ed8d3f806b85b9eb76416b4fa82a5e11ddbda2a590"
+}

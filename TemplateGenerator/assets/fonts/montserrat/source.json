@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "montserrat",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/montserrat",
+  "font_filename": "Montserrat-wght.ttf",
+  "font_sha256": "0f7b311b2f3279e4eef9b2f968bcdbab6e28f4daeb1f049f4f278a902bcd82f7",
+  "license_filename": "OFL.txt",
+  "license_sha256": "8b7141c03fa4f8d44e6345d5d4931709290f0f67875e452e95ac1fd3a027802e",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "c48dbcaee013b8f6a33e7e6a79191adbf098a36839367d9750598594ff664e5f"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "cherrybombone",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/cherrybombone",
+  "font_filename": "CherryBombOne-Regular.ttf",
+  "font_sha256": "9596c6793eb0335057d655b13751ce7ccb50ef0cd15cb52c58465fb62de2bb8f",
+  "license_filename": "OFL.txt",
+  "license_sha256": "0e04cbdaa14fc3e98b6ad1c9156b04d952cbdd0d31845766bae4cb543a71bcba",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "514f2719d6f5a91327d30b2ea3a694deebe098f3198bd8159ecdac13bf238ea2"
+}

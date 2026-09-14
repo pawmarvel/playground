@@ -280,4 +280,5 @@ def media_type(path: Path) -> str:
         ".md": "text/markdown",
         ".ttf": "font/ttf",
         ".txt": "text/plain",
+        ".pb": "text/plain",
     }.get(path.suffix.lower(), "application/octet-stream")

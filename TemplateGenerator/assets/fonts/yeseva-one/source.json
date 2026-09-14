@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "yesevaone",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/yesevaone",
+  "font_filename": "YesevaOne-Regular.ttf",
+  "font_sha256": "88362b33820f0011e163e67b1d570fecd442aa8c05eaac89d5162f9c40d9dac3",
+  "license_filename": "OFL.txt",
+  "license_sha256": "ab592d1abca19428b89d851706fa7815ec25139c6affb45d366577ca63fb91b7",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "405967b7e007d961366e28ebaaa29c5bb8e26ab5af6dd447dbb292c45c44aab9"
+}

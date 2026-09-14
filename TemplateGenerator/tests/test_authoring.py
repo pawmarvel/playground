@@ -722,7 +722,25 @@ class AuthoringLifecycleTests(unittest.TestCase):
         pet_attempt = self._fake_attempt(pet_exp, "attempt-0001", "transformed-pet.png", (816, 816))
         catalog = self.root / "fonts"
         catalog.mkdir()
-        copy_font(catalog)
+        catalog_font = copy_font(catalog)
+        catalog_metadata = catalog / "METADATA.pb"
+        catalog_metadata.write_text(
+            'name: "Test Font"\nlicense: "OFL"\n', encoding="utf-8"
+        )
+        atomic_json(
+            catalog / "source.json",
+            {
+                "schema_version": 1,
+                "source": "google-fonts-ofl",
+                "family_id": "testfont",
+                "family": "Test Font",
+                "source_url": "https://github.com/google/fonts/tree/main/ofl/testfont",
+                "font_filename": catalog_font.name,
+                "font_sha256": sha256(catalog_font),
+                "license_sha256": sha256(catalog / "OFL.txt"),
+                "metadata_sha256": sha256(catalog_metadata),
+            },
+        )
         font_reference = self.root / "font-reference.json"
         atomic_json(
             font_reference,
@@ -757,6 +775,8 @@ class AuthoringLifecycleTests(unittest.TestCase):
         self.assertTrue((snapshot / "catalog.snapshot.json").is_file())
         self.assertEqual(len(list(snapshot.rglob("*.ttf"))), 1)
         self.assertEqual(len(list(snapshot.rglob("OFL.txt"))), 1)
+        self.assertEqual(len(list(snapshot.rglob("METADATA.pb"))), 1)
+        self.assertEqual(len(list(snapshot.rglob("source.json"))), 1)
         snapshotted_reference = layout_exp / "inputs" / "font-reference.json"
         self.assertTrue(snapshotted_reference.is_file())
         self.assertEqual(

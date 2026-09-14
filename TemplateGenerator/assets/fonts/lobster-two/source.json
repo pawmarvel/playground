@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "lobstertwo",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/lobstertwo",
+  "font_filename": "LobsterTwo-Regular.ttf",
+  "font_sha256": "be3d8ce18188bc559de37e4355f5f902b4960a7b65a99efb78c03bb65bb782e6",
+  "license_filename": "OFL.txt",
+  "license_sha256": "f46c3ea04f38ea73c0731d73dfba3d7361d4b38970feb31a3558bd1b75e0656a",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "e5efebaff1e83f70ab52443381a6333669c640ecd4a2d28eee0400a37271e16c"
+}

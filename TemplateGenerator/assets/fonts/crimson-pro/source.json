@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "crimsonpro",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/crimsonpro",
+  "font_filename": "CrimsonPro-wght.ttf",
+  "font_sha256": "16aa9fb7300a93637da51fac03a071b2ff08b6bbf65f99c794c25f040b58af6a",
+  "license_filename": "OFL.txt",
+  "license_sha256": "1820869bd5baa1c2d88fa87c89eea532cf9442d841008acab720654b7f82823d",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "42f83557902cb373ca1a966289a9ada6ca479e746ea64ac2f07f2498d3f65fde"
+}

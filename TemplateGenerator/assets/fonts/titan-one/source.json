@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "titanone",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/titanone",
+  "font_filename": "TitanOne-Regular.ttf",
+  "font_sha256": "563ff6de179bbd44bcd7d2a6c448d6dc3bf935834237cf1250e506e65cd86ff1",
+  "license_filename": "OFL.txt",
+  "license_sha256": "61be7c29f4835e2be7243db12213d75d53ff028f29f4b493212a1688b1d3a1ba",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "70fa5c62d261a7f375c265f590312e7d9fdb0cc5894df5d81411e8f3026bec99"
+}

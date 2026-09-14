@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import json
 import io
+import hashlib
 import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, ImageDraw, ImageFont
 
 from helpers import copy_font, layout_data, make_image
-from pawmarvel_generator.font_catalog import discover_font_catalog
+from pawmarvel_generator.font_catalog import FontCandidate, discover_font_catalog
 from pawmarvel_generator.font_match import (
     recommend_font_size,
     recommend_min_font_size_for_capacity,
@@ -21,6 +23,7 @@ from pawmarvel_generator.font_reference import font_reference_from_editor
 from pawmarvel_generator.layout_cli import build_parser
 from pawmarvel_generator.layout_reference import layout_reference_from_editor
 from pawmarvel_generator.layout_server import ConfigError, EditorConfig, create_server
+from pawmarvel_generator.remote_fonts import ImportedFontFamily, RemoteFontFamily
 from pawmarvel_generator.renderer import render_preview
 
 
@@ -147,6 +150,8 @@ class LayoutServerTests(unittest.TestCase):
             self.assertIn(b"/rank-fonts", script)
             self.assertIn(b"/calibrate-font-size", script)
             self.assertIn(b"/preview-pet", script)
+            self.assertIn(b"/search-fonts", script)
+            self.assertIn(b"/import-font", script)
             self.assertIn(b"scaleNameTypography", script)
             self.assertIn(b"applyReferenceGeometry", script)
             self.assertIn(b"layout_reference", script)
@@ -156,6 +161,83 @@ class LayoutServerTests(unittest.TestCase):
 
         with self.post("/heartbeat", {}) as response:
             self.assertEqual(response.status, 204)
+
+    def test_remote_ofl_font_can_be_explored_and_saved(self) -> None:
+        family = RemoteFontFamily("remotetest", "Remote Test")
+
+        def imported(_family_id: str, destination: Path) -> ImportedFontFamily:
+            family_root = destination / "remotetest"
+            family_root.mkdir()
+            font = copy_font(family_root, "Remote-Regular.ttf")
+            metadata = family_root / "METADATA.pb"
+            metadata.write_text(
+                'name: "Remote Test"\nlicense: "OFL"\n', encoding="utf-8"
+            )
+            digest = hashlib.sha256(font.read_bytes()).hexdigest()
+            candidates = (
+                FontCandidate(
+                    candidate_id="font-remote-test",
+                    label="Remote Test",
+                    font=font,
+                    license=family_root / "OFL.txt",
+                    sha256=digest,
+                ),
+            )
+            return ImportedFontFamily(
+                family=family,
+                candidates=candidates,
+                license=family_root / "OFL.txt",
+                metadata=metadata,
+                source_url="https://github.com/google/fonts/tree/main/ofl/remotetest",
+            )
+
+        with (
+            patch(
+                "pawmarvel_generator.layout_server.search_google_ofl",
+                return_value=(family,),
+            ),
+            patch(
+                "pawmarvel_generator.layout_server.import_google_ofl_family",
+                side_effect=imported,
+            ),
+        ):
+            with self.post("/search-fonts", {"query": "Remote Test"}) as response:
+                search = json.loads(response.read())
+            self.assertEqual(search["remote"][0]["family_id"], "remotetest")
+
+            with self.post("/import-font", {"family_id": "remotetest"}) as response:
+                result = json.loads(response.read())
+            selected = result["candidates"][0]
+
+            with urllib.request.urlopen(
+                f"{self.base}/fonts/{selected['id']}"
+            ) as response:
+                self.assertEqual(response.headers.get_content_type(), "font/ttf")
+
+            payload = {"layout": layout_data(), "font_id": selected["id"]}
+            with self.post("/preview", payload), self.post("/save", payload):
+                pass
+
+        saved = json.loads(self.output.read_text(encoding="utf-8"))
+        self.assertEqual(saved["name"]["font"], "fonts/Remote-Regular.ttf")
+        self.assertTrue((self.root / "fonts" / "Remote-Regular.ttf").is_file())
+        self.assertTrue((self.root / "fonts" / "OFL.txt").is_file())
+        self.assertTrue((self.root / "fonts" / "METADATA.pb").is_file())
+        source = json.loads(
+            (self.root / "fonts" / "source.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(source["source"], "google-fonts-ofl")
+        self.assertEqual(source["family_id"], "remotetest")
+
+    def test_exact_local_font_avoids_remote_lookup(self) -> None:
+        with patch(
+            "pawmarvel_generator.layout_server.search_google_ofl"
+        ) as remote_search:
+            with self.post("/search-fonts", {"query": "TestFont"}) as response:
+                result = json.loads(response.read())
+        self.assertTrue(result["local"])
+        self.assertEqual(result["remote"], [])
+        remote_search.assert_not_called()
 
     def test_preview_and_save_use_shared_renderer(self) -> None:
         payload = {"layout": layout_data()}
@@ -493,7 +575,7 @@ class LayoutServerTests(unittest.TestCase):
             encoded = html.split(prefix, 1)[1].split(";</script>", 1)[0]
             bootstrap = json.loads(encoded)
             candidates = bootstrap["fontCandidates"]
-            self.assertEqual(len(candidates), 40)
+            self.assertEqual(len(candidates), len(self.font_candidates))
             self.assertTrue(bootstrap["autoFont"])
             ranking = bootstrap["fontRanking"]
             self.assertIsNotNone(ranking)
@@ -550,7 +632,9 @@ class LayoutServerTests(unittest.TestCase):
             )
             with urllib.request.urlopen(request) as response:
                 ranking = json.loads(response.read())
-            self.assertEqual(len(ranking["ranked_options"]), 40)
+            self.assertEqual(
+                len(ranking["ranked_options"]), len(self.font_candidates)
+            )
             self.assertIn(
                 ranking["recommendation"]["confidence_level"],
                 {"low", "medium", "high"},

@@ -60,7 +60,7 @@ class FontMatchTests(unittest.TestCase):
         self.assertGreater(matches[0].confidence, 0)
         self.assertIn(matches[0].confidence_level, {"low", "medium", "high"})
         self.assertGreaterEqual(matches[0].confidence, 0)
-        self.assertEqual(len(matches), 40)
+        self.assertEqual(len(matches), len(candidates))
         self.assertEqual(
             [match.score for match in matches],
             sorted((match.score for match in matches), reverse=True),
@@ -86,7 +86,7 @@ class FontMatchTests(unittest.TestCase):
                 candidates,
             )
 
-        self.assertEqual(len(matches), 40)
+        self.assertEqual(len(matches), len(candidates))
         self.assertTrue(all(match.confidence == 0 for match in matches))
 
     def test_life_is_good_confirmed_region_does_not_recommend_script(self) -> None:
@@ -102,8 +102,8 @@ class FontMatchTests(unittest.TestCase):
 
         matches = rank_fonts(reference, font_reference, candidates)
 
-        self.assertEqual(matches[0].candidate.font.name, "Anton-Regular.ttf")
-        self.assertEqual(matches[0].confidence_level, "low")
+        self.assertEqual(matches[0].candidate.font.name, "LeagueGothic-wdth.ttf")
+        self.assertEqual(matches[0].confidence_level, "high")
         self.assertNotIn(
             "Pacifico-Regular.ttf",
             {match.candidate.font.name for match in matches[:15]},
@@ -116,8 +116,8 @@ class FontMatchTests(unittest.TestCase):
             box_height=215,
             padding=0,
         )
-        self.assertGreaterEqual(scale.font_size_px, 200)
-        self.assertLessEqual(scale.font_size_px, 225)
+        self.assertGreaterEqual(scale.font_size_px, 270)
+        self.assertLessEqual(scale.font_size_px, 285)
         self.assertGreater(scale.horizontal_fill, 0.8)
 
 

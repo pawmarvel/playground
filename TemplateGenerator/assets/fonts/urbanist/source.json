@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "urbanist",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/urbanist",
+  "font_filename": "Urbanist-wght.ttf",
+  "font_sha256": "748362d51eb276840e9f0023cd2d98299bf709a95fb3a5ae4ffcb624c638ebb9",
+  "license_filename": "OFL.txt",
+  "license_sha256": "ee1221b1c2d08920e5f9ca764eb228dafa5c8090df9cf665373c2287b9cb8f49",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "14f7a612b0fc6a2c6106e591c14ea2e8415a5837cf88e9872ca9b8a51c44e55e"
+}

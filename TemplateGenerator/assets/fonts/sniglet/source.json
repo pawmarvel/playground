@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "sniglet",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/sniglet",
+  "font_filename": "Sniglet-Regular.ttf",
+  "font_sha256": "2856a975b9c0ac0402e8402ac4bd126cd97d6c90490435b6198d77e6384ae4f0",
+  "license_filename": "OFL.txt",
+  "license_sha256": "89418a3c7b5726c3f8828a7b7c3f1cad661cf5b7a1be3d2bd9ea243f8d9890c8",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "cd4ed068ecf646e816497d1352d639fd94d74272dd9c6853cd2fdeedafa90ea5"
+}

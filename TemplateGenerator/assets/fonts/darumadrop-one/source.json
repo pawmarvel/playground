@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "darumadropone",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/darumadropone",
+  "font_filename": "DarumadropOne-Regular.ttf",
+  "font_sha256": "beef6d9031918823176ea0f9f729cb811a5f250598d7c8c684b3dee333810689",
+  "license_filename": "OFL.txt",
+  "license_sha256": "bd898c86fb555f060ee9e5d318d631bbdcd196b98ae8019e0077421f46da132f",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "6af17f835106ec8c11b5e4148ccc87ddeb8d76e77e23c3f08821558a0bca8ef5"
+}

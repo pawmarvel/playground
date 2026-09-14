@@ -18,6 +18,11 @@ const selectPetRegionButton = document.querySelector("#select-pet-region");
 const selectNameRegionButton = document.querySelector("#select-name-region");
 const applyReferenceLayoutButton = document.querySelector("#apply-reference-layout");
 const referenceRegionMode = document.querySelector("#reference-region-mode");
+const fontSearchQuery = document.querySelector("#font-search-query");
+const fontSearchButton = document.querySelector("#font-search-button");
+const fontSearchResults = document.querySelector("#font-search-results");
+const fontImportButton = document.querySelector("#font-import-button");
+const fontSearchStatus = document.querySelector("#font-search-status");
 const saveButtons = [document.querySelector("#save"), document.querySelector("#complete")];
 
 petNameInput.value = boot.petName;
@@ -43,6 +48,7 @@ let fontSelect = null;
 let fontHelp = null;
 let fontSelectionConfirmed = boot.fontSelectionConfirmed;
 let fontRanking = boot.fontRanking || null;
+let fontFaceStyle = null;
 let fontReferenceRevision = 0;
 let rankedReferenceRevision = fontRanking ? 0 : -1;
 let rankTimer = null;
@@ -209,11 +215,11 @@ function selectFont(candidateId, confirmed = true) {
 
 function buildFontCatalog() {
   const host = document.querySelector("#font-catalog");
-  const style = document.createElement("style");
+  fontFaceStyle = document.createElement("style");
   for (const candidate of boot.fontCandidates) {
-    style.textContent += `@font-face { font-family: "${candidate.id}"; src: url("/fonts/${candidate.id}") format("truetype"); }\n`;
+    addFontFace(candidate);
   }
-  document.head.append(style);
+  document.head.append(fontFaceStyle);
 
   fontHelp = document.createElement("p");
   fontHelp.className = "font-help";
@@ -237,6 +243,110 @@ function buildFontCatalog() {
   if (current) fontSpecimen.style.fontFamily = `"${current.id}"`;
   host.append(fontHelp, label, fontSpecimen);
   renderFontOptions();
+}
+
+function addFontFace(candidate) {
+  if (!fontFaceStyle) return;
+  fontFaceStyle.textContent +=
+    `@font-face { font-family: "${candidate.id}"; src: url("/fonts/${candidate.id}") format("truetype"); }\n`;
+}
+
+async function searchFonts() {
+  const query = fontSearchQuery.value.trim();
+  if (!query) {
+    fontSearchStatus.textContent = "Enter a font family name first.";
+    return;
+  }
+  fontSearchButton.disabled = true;
+  fontImportButton.hidden = true;
+  fontSearchResults.hidden = true;
+  fontSearchStatus.textContent = "Searching the local catalog…";
+  try {
+    const response = await fetch("/search-fonts", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({query}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || response.statusText);
+    fontSearchResults.replaceChildren();
+    const matches = [...result.local, ...result.remote];
+    for (const match of matches) {
+      const option = document.createElement("option");
+      option.value = match.source === "local" ? match.font_id : match.family_id;
+      option.dataset.source = match.source;
+      option.textContent = match.source === "local"
+        ? `${match.label} — already local`
+        : `${match.label} — Google Fonts OFL`;
+      fontSearchResults.append(option);
+    }
+    if (!matches.length) {
+      fontSearchStatus.textContent =
+        "No matching OFL family was found. Check the family spelling.";
+      return;
+    }
+    fontSearchResults.hidden = false;
+    fontImportButton.hidden = false;
+    fontImportButton.textContent = "Use or download selected font";
+    fontSearchStatus.textContent = result.remote.length
+      ? "Local suggestions and official Google Fonts OFL matches are shown."
+      : "The requested family is already available locally.";
+  } catch (error) {
+    fontSearchStatus.textContent = `Font search failed: ${error.message}`;
+  } finally {
+    fontSearchButton.disabled = editorLocked;
+  }
+}
+
+async function importOrSelectFont() {
+  const option = fontSearchResults.selectedOptions[0];
+  if (!option) return;
+  if (option.dataset.source === "local") {
+    selectFont(option.value, true);
+    renderFontOptions();
+    fontSearchStatus.textContent =
+      `Using local font ${candidateById(option.value)?.label || option.textContent}.`;
+    return;
+  }
+  fontImportButton.disabled = true;
+  fontSearchStatus.textContent = "Downloading and validating OFL artifacts…";
+  try {
+    const response = await fetch("/import-font", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({family_id: option.value}),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || response.statusText);
+    for (const candidate of result.candidates) {
+      if (!candidateById(candidate.id)) {
+        boot.fontCandidates.push(candidate);
+        addFontFace(candidate);
+      }
+    }
+    const selected = result.candidates[0];
+    if (!selected) throw new Error("downloaded family contains no usable TTF font");
+    if (currentFontReference()) {
+      await requestFontRanking({preserveSelection: true});
+    }
+    selectFont(selected.id, true);
+    renderFontOptions();
+    fontSearchResults.replaceChildren();
+    for (const candidate of result.candidates) {
+      const styleOption = document.createElement("option");
+      styleOption.value = candidate.id;
+      styleOption.dataset.source = "local";
+      styleOption.textContent = `${candidate.label} — downloaded this session`;
+      fontSearchResults.append(styleOption);
+    }
+    fontImportButton.textContent = "Use selected imported font";
+    fontSearchStatus.textContent =
+      `Downloaded ${result.family}. The selected style is now active; choose another family style here if needed.`;
+  } catch (error) {
+    fontSearchStatus.textContent = `Font download failed: ${error.message}`;
+  } finally {
+    fontImportButton.disabled = editorLocked;
+  }
 }
 
 function renderFontOptions() {
@@ -640,7 +750,7 @@ applyReferenceLayoutButton.addEventListener("click", applyReferenceGeometry);
 setReferenceSelectionMode(referenceSelectionMode);
 setApplyReferenceEnabled();
 
-async function requestFontRanking() {
+async function requestFontRanking(options = {}) {
   clearTimeout(rankTimer);
   const fontReference = currentFontReference();
   if (!fontReference || !fontReference.text.trim()) {
@@ -666,7 +776,7 @@ async function requestFontRanking() {
     fontRanking = result;
     rankedReferenceRevision = requestedRevision;
     const recommendation = result.recommendation;
-    if (boot.autoFont) {
+    if (boot.autoFont && options.preserveSelection !== true) {
       selectFont(recommendation.font_id, recommendation.auto_select);
       if (!recommendation.auto_select) calibrateFontSize();
     }
@@ -737,8 +847,16 @@ function scheduleFontRanking() {
   rankTimer = setTimeout(requestFontRanking, 300);
 }
 
-document.querySelector("#rank-fonts").addEventListener("click", requestFontRanking);
+document.querySelector("#rank-fonts").addEventListener("click", () => requestFontRanking());
 matchReferenceScaleButton.addEventListener("click", calibrateFontSize);
+fontSearchButton.addEventListener("click", searchFonts);
+fontImportButton.addEventListener("click", importOrSelectFont);
+fontSearchQuery.addEventListener("keydown", event => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    searchFonts();
+  }
+});
 
 async function requestPreview() {
   clearTimeout(previewTimer);

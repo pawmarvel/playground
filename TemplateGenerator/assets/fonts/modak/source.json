@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "modak",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/modak",
+  "font_filename": "Modak-Regular.ttf",
+  "font_sha256": "9a96ba056ddcbb7d0c937c52f744ff5d71004a97689b1fd2cdbd678f314db245",
+  "license_filename": "OFL.txt",
+  "license_sha256": "5fb0694694dc307d1eb0121689395e634b6329ff545acc53f55ad66a716b3cf1",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "ab93073936072cf959b72f220499bb42053e5971e924c541ff383c033aecb50f"
+}

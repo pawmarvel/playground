@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "raleway",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/raleway",
+  "font_filename": "Raleway-wght.ttf",
+  "font_sha256": "8bbcc3eb8275c388f4bcd998832f8a4b943eadbaf6a595205312774b5951aefb",
+  "license_filename": "OFL.txt",
+  "license_sha256": "7e946cf1171784d1015279e7dc35f827957a6b5d1f1f659ae0c98e5f5e37ed9b",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "206017b9829b8f0a9aa3d2af2e8118520d8bff4930b4c834a52f057fc5965c9f"
+}

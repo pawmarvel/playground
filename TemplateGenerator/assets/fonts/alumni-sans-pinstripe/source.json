@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "alumnisanspinstripe",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/alumnisanspinstripe",
+  "font_filename": "AlumniSansPinstripe-Regular.ttf",
+  "font_sha256": "c00bc8d641f2ddc444bbb9a07125f4eb1e6eda0384a896196ad0c7be0a9cfeea",
+  "license_filename": "OFL.txt",
+  "license_sha256": "855c8e5b459dfa20361af32b393bab0c18f67f888ee7bd69d54318cbefcaa7fe",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "f428ac4c25e98e15a61f56c34bded46a80621fc91402ed90f979633bfe475f8d"
+}

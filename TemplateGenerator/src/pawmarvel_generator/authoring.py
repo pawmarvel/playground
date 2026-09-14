@@ -120,13 +120,45 @@ def _copy_font_catalog(source: Path, target: Path, experiment_stage: Path) -> di
         license_file = family / "OFL.txt"
         shutil.copyfile(candidate.font, font)
         shutil.copyfile(candidate.license, license_file)
+        copied = [font, license_file]
+        source_metadata = candidate.font.parent / "source.json"
+        family_metadata = candidate.font.parent / "METADATA.pb"
+        if source_metadata.exists() != family_metadata.exists():
+            raise AuthoringError(
+                f"font provenance requires both source.json and METADATA.pb: "
+                f"{candidate.font.parent}"
+            )
+        if source_metadata.is_file() and family_metadata.is_file():
+            source_record = _json(source_metadata)
+            expected_source = {
+                "font_filename": candidate.font.name,
+                "font_sha256": candidate.sha256,
+                "license_sha256": sha256(candidate.license),
+                "metadata_sha256": sha256(family_metadata),
+            }
+            actual_source = {
+                key: source_record.get(key) for key in expected_source
+            }
+            if actual_source != expected_source:
+                raise AuthoringError(
+                    mismatch(
+                        f"font provenance for {candidate.font}",
+                        expected=expected_source,
+                        actual=actual_source,
+                    )
+                )
+            copied_source = family / "source.json"
+            copied_metadata = family / "METADATA.pb"
+            shutil.copyfile(source_metadata, copied_source)
+            shutil.copyfile(family_metadata, copied_metadata)
+            copied.extend((copied_source, copied_metadata))
         files.extend(
             {
                 "path": path.relative_to(experiment_stage).as_posix(),
                 "sha256": sha256(path),
                 "bytes": path.stat().st_size,
             }
-            for path in (font, license_file)
+            for path in copied
         )
     manifest = target / "catalog.snapshot.json"
     atomic_json(manifest, {"schema_version": 1, "fonts": files})
@@ -471,6 +503,16 @@ def _run_layout(
         fonts.mkdir()
         shutil.copyfile(source_layout.font_path, fonts / source_layout.font_path.name)
         shutil.copyfile(resolve_ofl_license(source_layout.font_path), fonts / "OFL.txt")
+        source_metadata = source_layout.font_path.parent / "source.json"
+        family_metadata = source_layout.font_path.parent / "METADATA.pb"
+        if source_metadata.exists() != family_metadata.exists():
+            raise AuthoringError(
+                "imported layout font requires both fonts/source.json and "
+                "fonts/METADATA.pb"
+            )
+        if source_metadata.is_file() and family_metadata.is_file():
+            shutil.copyfile(source_metadata, fonts / "source.json")
+            shutil.copyfile(family_metadata, fonts / "METADATA.pb")
         value["art"] = "art.png"
         value["name"]["font"] = f"fonts/{source_layout.font_path.name}"
         parse_layout(value, outputs)

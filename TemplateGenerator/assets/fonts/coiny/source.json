@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "coiny",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/coiny",
+  "font_filename": "Coiny-Regular.ttf",
+  "font_sha256": "ef02d723a54abe4819bea54ea8b2ecf72d77d258010bb336cd4862a37705eac7",
+  "license_filename": "OFL.txt",
+  "license_sha256": "5c289da4a19f054ace8e31a144a6a254601898cd7faf9eaa301141afda0adbbe",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "43d5ad89ca673e71f7fb071950fa1db9688e9e178ca41ad6e12a7adcbdf2dab4"
+}

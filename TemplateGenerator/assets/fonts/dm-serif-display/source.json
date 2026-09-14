@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "dmserifdisplay",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/dmserifdisplay",
+  "font_filename": "DMSerifDisplay-Regular.ttf",
+  "font_sha256": "8cc3643535edf039aa5d95440a8542735e9197e4f4b8d9303e980fefbf5ab616",
+  "license_filename": "OFL.txt",
+  "license_sha256": "a3e5cdd67d4571dd0a24fcc968de0efde7ae97ef752daf0906e4767619dd7231",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "3014380ddec81e774af2ab07a903542367573ce4e4d19ca8c01b928e970c1268"
+}

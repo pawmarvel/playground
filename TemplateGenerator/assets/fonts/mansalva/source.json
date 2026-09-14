@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "mansalva",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/mansalva",
+  "font_filename": "Mansalva-Regular.ttf",
+  "font_sha256": "613ca294f0a364fd282a06d5e8a65db5d8f2bb8b834f8b21437a53cf70dafb8a",
+  "license_filename": "OFL.txt",
+  "license_sha256": "14ac0a5413a923c9ad11b6f541df17207fb7a0e0725e43eb29c88eb04c3ea2aa",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "3ed769609c1ae60c6d1221af7cef0aa6a95fa08118032a0b562e89fc186404cc"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "sancreek",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/sancreek",
+  "font_filename": "Sancreek-Regular.ttf",
+  "font_sha256": "8f87c42f6e6ba97125cd975c3d7d48902fc227d805948e678d5293a300e3fe55",
+  "license_filename": "OFL.txt",
+  "license_sha256": "69f01b79c1be37a734736a94a12c55cb28d09ee93e4febc9db109cec608f9ae7",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "93be019e18f97bac78d85d5db4e9981b1cbf275ef8d7edce31f3ef602ac70786"
+}

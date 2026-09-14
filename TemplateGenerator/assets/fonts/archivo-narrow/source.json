@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "archivonarrow",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/archivonarrow",
+  "font_filename": "ArchivoNarrow-wght.ttf",
+  "font_sha256": "adbe027f625c8393ae0f6e174e32e233dda485bc3eda5153ce428275394ef97f",
+  "license_filename": "OFL.txt",
+  "license_sha256": "b2087ef3fb91248e346600d19021249152a9688efea72905aa1996bb16a4c8de",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "eeca06bbbe7843f4b9567220574958fb966cb737eb50540baffe7ea8c21532e6"
+}

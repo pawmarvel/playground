@@ -61,6 +61,16 @@
           </label>
           <p class="font-help">Change this QA-only value to compare short and long names. It is not saved in layout.json.</p>
           <div id="font-catalog"></div>
+          <div class="font-search">
+            <label>
+              Explore another OFL font family
+              <input id="font-search-query" type="search" maxlength="80" autocomplete="off" placeholder="Example: Amatic SC">
+            </label>
+            <button id="font-search-button" type="button">Find font</button>
+            <select id="font-search-results" aria-label="Font search results" hidden></select>
+            <button id="font-import-button" type="button" hidden>Download selected family</button>
+            <p id="font-search-status" class="font-help" role="status">Local fonts are searched first. Missing families are looked up in the official Google Fonts OFL repository.</p>
+          </div>
           <button id="match-reference-scale" type="button" disabled>Match reference text scale</button>
           <p class="font-help">This sets one fixed nominal font size from the reference lettering's fill. It does not grow each customer name independently.</p>
           <div id="name-controls" class="grid"></div>

@@ -180,16 +180,23 @@ selected `art-template-{gpt|gemini}.md` and the MVP production
 category; `bundle.json` identifies both paths, exact runtime request fields, and
 an operator-reviewed, non-customer QA replay input/output pair.
 
-The layout editor compares the checked-in 40-face OFL catalog with lettering in
+The layout editor compares the checked-in curated OFL catalog with lettering in
 the reference. The catalog is the default when neither `--font` nor
-`--font-catalog` is supplied. The matcher uses an operator-confirmed screenshot
+`--font-catalog` is supplied. An operator may also enter a family name in the
+editor: local matches are offered first, then missing families can be explored
+from the official Google Fonts OFL repository. Remote files remain in a
+temporary session cache until Save. If a downloaded face is selected, the
+layout attempt retains that TTF, `OFL.txt`, `METADATA.pb`, and a hashed
+`source.json`; bundle generation publishes those four artifacts. Unselected
+downloads are deleted when the editor closes. The matcher uses an operator-confirmed screenshot
 region and its exact visible text, normalizes glyph silhouettes, and displays
 the 15 best matches. The initial preview uses rank one and its calibrated
 nominal/minimum font sizes. A high-confidence winner can be accepted
 automatically; medium/low confidence requires explicit selection before Save
 even though rank one is previewed. The source region and
 ranking remain private authoring evidence. The operator's final selection is
-saved in `layout.json`, and only that TTF and its `OFL.txt` are published.
+saved in `layout.json`, and only that face and its required license/provenance
+artifacts are published.
 The editor can also calibrate one fixed nominal size from the reference text's
 visible fill and preserves that typography scale when its name box is resized.
 An optional hash-bound `layout-reference-v1` artifact records the reference pet

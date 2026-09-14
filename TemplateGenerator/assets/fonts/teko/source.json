@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "teko",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/teko",
+  "font_filename": "Teko-wght.ttf",
+  "font_sha256": "d1321889f262bbbff632e7976349853399cd097b6f382d4b19790c915c13c1ae",
+  "license_filename": "OFL.txt",
+  "license_sha256": "4a193c54e911c1e8194d4db657423f2527f54a1239f24cb67ecb09128dc9f065",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "a36da6184a194ca40c7b50f42f9975bb2e20437662344abaa3f5a6118bfc0a7b"
+}

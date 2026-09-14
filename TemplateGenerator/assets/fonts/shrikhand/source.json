@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "shrikhand",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/shrikhand",
+  "font_filename": "Shrikhand-Regular.ttf",
+  "font_sha256": "8ba32f6d6a96fb8dbc92fc1acfbc4d2123d5348063d89b2c3dd784e7afcb81af",
+  "license_filename": "OFL.txt",
+  "license_sha256": "325e890b8b26fe0a683c3ba24c506d902bdd7034d9c47bd7fa2bb72b5433b9c9",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "af3d1b5a427ac116b9d28fc672d5a5ed7e6e7c10f50c6ea3615396143435cb4b"
+}

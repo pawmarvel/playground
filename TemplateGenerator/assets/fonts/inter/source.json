@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "inter",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/inter",
+  "font_filename": "Inter-opsz-wght.ttf",
+  "font_sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+  "license_filename": "OFL.txt",
+  "license_sha256": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "79e4721ef4f72251c6080a40dfd9efb6728b4df1fc690f0c70eb4b1b5303a5b0"
+}

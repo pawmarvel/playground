@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "playfairdisplay",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/playfairdisplay",
+  "font_filename": "PlayfairDisplay-wght.ttf",
+  "font_sha256": "c40f2293766a503bc70cce9e512ef844a4ccb7cbcde792fe2ea31d191917d8d6",
+  "license_filename": "OFL.txt",
+  "license_sha256": "566be814f8e96e93dfa16101331557eb6b5467e9e03f627c0910fe93ca12300e",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "c9e6a996754f710fb7ff2ba36f8dd807244318d561d63d247a22199ea1a5e94a"
+}

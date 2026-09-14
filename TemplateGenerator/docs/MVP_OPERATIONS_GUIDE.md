@@ -725,6 +725,22 @@ expected LifeIsGood behavior because distressed screenshot lettering is noisy.
 Changing the reference region or reference text invalidates the ranking and
 reruns it.
 
+If the catalog has no acceptable match, enter an exact family name under
+**Explore another OFL font** and select **Search**. The editor offers matching
+local faces first. Only when no exact local family/file match exists does it
+query the official Google Fonts `ofl/` collection; fuzzy local suggestions
+remain visible alongside the remote results. Select a family, download it, and
+compare its available TTF faces with the authoritative Pillow preview. This is
+a bounded OFL-only lookup, not a general web-font search. It requires network
+access; `GITHUB_TOKEN` may be set in the shared private environment if
+unauthenticated GitHub API requests are rate-limited.
+
+Downloaded families live only in the editor's temporary session cache. Saving
+a downloaded face copies the selected TTF, its `OFL.txt`, `METADATA.pb`, and
+hashed `source.json` into the immutable layout attempt. Other downloaded faces
+are removed when the editor closes. A later bundle includes the same four
+selected artifacts, so FE never searches for or downloads a font at runtime.
+
 After selecting a font, the editor applies the reference lettering's ink-fill
 ratio to the current name box and sets one fixed nominal font size. Use **Match
 reference text scale** again after materially changing the name box. Resizing
@@ -768,6 +784,8 @@ shows whether the configured nominal size was used or the name was shrunk. The
 attempt owns its `layout.json`, selected font/OFL license, exact calibration
 preview, `qa/layout-reference.json`, `qa/font-reference.json`,
 `qa/font-recommendation.json`, preview, and debug preview.
+For a remotely explored selected face, `fonts/METADATA.pb` and
+`fonts/source.json` are also owned by the attempt.
 
 Validate the same draft against a second pet and longer name before saving. The
 selected pet-runtime benchmark already produced the alternate fixture:
@@ -830,6 +848,83 @@ test "$PAWMARVEL_LAYOUT_DECISION" = "$PAWMARVEL_LAYOUT_REVIEW/decision.json"
 test -f "$PAWMARVEL_LAYOUT_ATTEMPT/run.json"
 printf 'layout decision: %s\nlayout attempt:  %s\n' "$PAWMARVEL_LAYOUT_DECISION" "$PAWMARVEL_LAYOUT_ATTEMPT"
 ```
+
+### Optionally promote the selected font to the repository catalog
+
+Do this only after the layout font has been selected and reviewed. Promotion is
+repository maintenance for future authoring runs; it is not required for the
+current attempt or bundle. Start from the immutable attempt output, never from
+the temporary browser cache:
+
+```bash
+PAWMARVEL_SAVED_FONT_DIR="$PAWMARVEL_LAYOUT_ATTEMPT/outputs/fonts"
+test -f "$PAWMARVEL_SAVED_FONT_DIR/source.json"
+test -f "$PAWMARVEL_SAVED_FONT_DIR/METADATA.pb"
+test -f "$PAWMARVEL_SAVED_FONT_DIR/OFL.txt"
+
+PAWMARVEL_PROMOTED_FAMILY_ID="$($PAWMARVEL_PROJECT/.venv/bin/python -c \
+  'import json,sys; print(json.load(open(sys.argv[1]))["family_id"])' \
+  "$PAWMARVEL_SAVED_FONT_DIR/source.json")"
+PAWMARVEL_PROMOTED_FONT_NAME="$($PAWMARVEL_PROJECT/.venv/bin/python -c \
+  'import json,sys; print(json.load(open(sys.argv[1]))["font_filename"])' \
+  "$PAWMARVEL_SAVED_FONT_DIR/source.json")"
+PAWMARVEL_PROMOTED_FONT_DIR="$PAWMARVEL_PROJECT/assets/fonts/$PAWMARVEL_PROMOTED_FAMILY_ID"
+
+test ! -e "$PAWMARVEL_PROMOTED_FONT_DIR"
+mkdir "$PAWMARVEL_PROMOTED_FONT_DIR"
+cp "$PAWMARVEL_SAVED_FONT_DIR/$PAWMARVEL_PROMOTED_FONT_NAME" "$PAWMARVEL_PROMOTED_FONT_DIR/"
+cp "$PAWMARVEL_SAVED_FONT_DIR/OFL.txt" "$PAWMARVEL_PROMOTED_FONT_DIR/"
+cp "$PAWMARVEL_SAVED_FONT_DIR/METADATA.pb" "$PAWMARVEL_PROMOTED_FONT_DIR/"
+cp "$PAWMARVEL_SAVED_FONT_DIR/source.json" "$PAWMARVEL_PROMOTED_FONT_DIR/"
+```
+
+Review `source.json` and `OFL.txt`, and reject the promotion if the source is not
+`google-fonts-ofl`, the license is ambiguous, or the selected file is unsuitable
+for deterministic preview and print rendering. Then append one face entry to
+`assets/fonts/catalog.json`, keep the `fonts` array ordered by family/style, and
+increment `selection.face_count`. Use the existing entries as the schema:
+
+```json
+{
+  "family": "<family name from METADATA.pb>",
+  "style": "<selected face style>",
+  "role": "<bold-condensed|rounded-playful|handwritten|script|slab-western|retro-decorative>",
+  "font": "<family-id>/<selected-font>.ttf",
+  "license": "<family-id>/OFL.txt",
+  "font_sha256": "<shasum -a 256 of the TTF>",
+  "license_sha256": "<shasum -a 256 of OFL.txt>",
+  "font_bytes": 12345
+}
+```
+
+Calculate the inventory values and validate that the manifest exactly matches
+the renderable local catalog:
+
+```bash
+shasum -a 256 "$PAWMARVEL_PROMOTED_FONT_DIR/$PAWMARVEL_PROMOTED_FONT_NAME"
+shasum -a 256 "$PAWMARVEL_PROMOTED_FONT_DIR/OFL.txt"
+wc -c "$PAWMARVEL_PROMOTED_FONT_DIR/$PAWMARVEL_PROMOTED_FONT_NAME"
+
+"$PAWMARVEL_PROJECT/.venv/bin/python" -m unittest discover \
+  -s "$PAWMARVEL_PROJECT/tests" \
+  -p 'test_font_catalog.py' \
+  -v
+```
+
+Finally inspect and stage only the promoted family and catalog inventory. Do
+not stage `work/`:
+
+```bash
+git diff -- "$PAWMARVEL_PROJECT/assets/fonts/catalog.json"
+git status --short -- "$PAWMARVEL_PROMOTED_FONT_DIR" "$PAWMARVEL_PROJECT/assets/fonts/catalog.json"
+git add "$PAWMARVEL_PROMOTED_FONT_DIR" "$PAWMARVEL_PROJECT/assets/fonts/catalog.json"
+git diff --cached --check
+git diff --cached --stat
+```
+
+New layout experiments snapshot the expanded catalog automatically. Existing
+experiments remain immutable and continue using their original catalog
+snapshot.
 
 Create the assembly review from the derived stage winners:
 
@@ -1134,6 +1229,8 @@ s3://alphapaw-pod-designer-prod/Template/MVP-test/
         fonts/
           <selected-font>.ttf
           OFL.txt
+          METADATA.pb                       # only for a remotely explored font
+          source.json                       # only for a remotely explored font
         qa/
           input-pet.png
           transformed-pet.png
@@ -1389,6 +1486,8 @@ work/scratch/life-is-good/blanket-king-9375x12375/
     layout.json
     fonts/<selected-font>.ttf
     fonts/OFL.txt
+    fonts/METADATA.pb              # only for a remotely explored font
+    fonts/source.json              # only for a remotely explored font
   runs/sausage-dog-puppy/
     input-pet.png
     transformed-pet.png

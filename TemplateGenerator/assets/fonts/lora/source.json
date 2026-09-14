@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "lora",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/lora",
+  "font_filename": "Lora-wght.ttf",
+  "font_sha256": "822a6621ccbe8d97d20ac88c1c41f5615c9c2c202eaa75f272cd452aac6475a7",
+  "license_filename": "OFL.txt",
+  "license_sha256": "1d9a970809ac804b582a6ce7f0ebc4e7fefcbfd7ff6299cad35ee656a21be716",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "6d9e38cc8926e903359a1c4c358fd2e71864f422aae9550d0d9a2ae0c62ddb8d"
+}

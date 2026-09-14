@@ -663,6 +663,55 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         "qa/golden-preview.png",
         "qa/golden-preview-debug.png",
     }
+    font_source = root / "fonts" / "source.json"
+    font_metadata = root / "fonts" / "METADATA.pb"
+    if font_source.exists() != font_metadata.exists():
+        raise BundleError(
+            "remote font provenance requires both fonts/source.json and fonts/METADATA.pb"
+        )
+    if font_source.is_file() and font_metadata.is_file():
+        source = _json(font_source)
+        expected_source = {
+            "schema_version",
+            "source",
+            "family_id",
+            "family",
+            "source_url",
+            "font_filename",
+            "font_sha256",
+            "license_sha256",
+            "metadata_sha256",
+        }
+        if set(source) != expected_source or source.get("source") != "google-fonts-ofl":
+            raise BundleError("fonts/source.json has an unsupported contract")
+        family_id = source.get("family_id")
+        expected_source_url = (
+            f"https://github.com/google/fonts/tree/main/ofl/{family_id}"
+        )
+        if (
+            not isinstance(family_id, str)
+            or re.fullmatch(r"[a-z0-9]{2,80}", family_id) is None
+            or source.get("source_url") != expected_source_url
+            or source.get("font_filename") != preview.font_path.name
+        ):
+            raise BundleError(
+                "fonts/source.json does not identify the selected Google Fonts OFL asset"
+            )
+        expected_hashes = {
+            "font_sha256": sha256(preview.font_path),
+            "license_sha256": sha256(root / "fonts" / "OFL.txt"),
+            "metadata_sha256": sha256(font_metadata),
+        }
+        actual_hashes = {key: source.get(key) for key in expected_hashes}
+        if actual_hashes != expected_hashes:
+            raise BundleError(
+                mismatch(
+                    "remote font provenance hashes",
+                    expected=expected_hashes,
+                    actual=actual_hashes,
+                )
+            )
+        required_assets.update({"fonts/source.json", "fonts/METADATA.pb"})
     if seen != required_assets:
         raise BundleError(
             mismatch(
@@ -1314,6 +1363,16 @@ def build_from_selection(
             partial / "fonts" / preview_layout.font_path.name,
         )
         shutil.copyfile(font_license, partial / "fonts" / "OFL.txt")
+        source_font_dir = preview_layout.font_path.parent
+        remote_source = source_font_dir / "source.json"
+        remote_metadata = source_font_dir / "METADATA.pb"
+        if remote_source.exists() != remote_metadata.exists():
+            raise BundleError(
+                "selected remote font requires both source.json and METADATA.pb"
+            )
+        if remote_source.is_file() and remote_metadata.is_file():
+            shutil.copyfile(remote_source, partial / "fonts" / "source.json")
+            shutil.copyfile(remote_metadata, partial / "fonts" / "METADATA.pb")
         for source, relative in zip(references, refs, strict=True):
             target = partial / relative
             target.parent.mkdir(parents=True, exist_ok=True)

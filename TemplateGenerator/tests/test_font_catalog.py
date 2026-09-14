@@ -53,16 +53,19 @@ class FontCatalogTests(unittest.TestCase):
                 primary, catalog_roots=(self.root / "catalog",)
             )
 
-    def test_repository_catalog_has_40_distinct_eligible_candidates(self) -> None:
+    def test_repository_catalog_matches_manifest_and_has_distinct_candidates(self) -> None:
         repository = Path(__file__).resolve().parents[1]
         catalog = repository / "assets" / "fonts"
+        manifest = json.loads((catalog / "catalog.json").read_text(encoding="utf-8"))
         candidates = discover_font_catalog(
             catalog / "anton" / "Anton-Regular.ttf",
             catalog_roots=(catalog,),
         )
 
-        self.assertEqual(len(candidates), 40)
-        self.assertEqual(len({candidate.sha256 for candidate in candidates}), 40)
+        expected_count = manifest["selection"]["face_count"]
+        self.assertGreaterEqual(expected_count, 40)
+        self.assertEqual(len(candidates), expected_count)
+        self.assertEqual(len({candidate.sha256 for candidate in candidates}), expected_count)
         self.assertTrue(
             {
                 "Anton",
@@ -73,10 +76,57 @@ class FontCatalogTests(unittest.TestCase):
                 "Bungee",
             }.issubset({candidate.label for candidate in candidates})
         )
+        manifest_families = {entry["family"] for entry in manifest["fonts"]}
+        priority_families = {
+            family
+            for families in manifest["selection"]["priority_groups"].values()
+            for family in families
+        }
+        self.assertEqual(
+            {key: len(value) for key, value in manifest["selection"]["priority_groups"].items()},
+            {
+                "condensed_display": 13,
+                "general_sans": 16,
+                "rounded_playful": 16,
+                "handwritten_casual": 9,
+                "retro_vintage": 15,
+                "classic_premium_serif": 9,
+                "western_americana_outdoors": 6,
+            },
+        )
+        self.assertEqual(len(priority_families), 84)
+        self.assertTrue(priority_families.issubset(manifest_families))
+        self.assertTrue(
+            {
+                "Bebas Neue",
+                "Alumni Sans Pinstripe",
+                "Inter",
+                "M PLUS Rounded 1c",
+                "Cherry Bomb One",
+                "Patrick Hand SC",
+                "Fraunces",
+                "Cormorant Garamond",
+                "Pirata One",
+            }.issubset(manifest_families)
+        )
+        excluded = manifest["selection"]["excluded_requested_families"]
+        self.assertEqual(
+            set(excluded),
+            {
+                "Alumni Sans Condensed",
+                "Schoolbell",
+                "Coming Soon",
+                "Homemade Apple",
+                "Rock Salt",
+                "Just Another Hand",
+                "Smokum",
+                "Special Elite",
+            },
+        )
+        self.assertTrue(set(excluded).isdisjoint(manifest_families))
+        self.assertIn("M PLUS Rounded 1c", {candidate.label for candidate in candidates})
 
-        manifest = json.loads((catalog / "catalog.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["selection"]["face_count"], 40)
-        self.assertEqual(len(manifest["fonts"]), 40)
+        self.assertEqual(len(manifest["fonts"]), expected_count)
         for entry in manifest["fonts"]:
             font = catalog / entry["font"]
             license_path = catalog / entry["license"]
@@ -88,6 +138,21 @@ class FontCatalogTests(unittest.TestCase):
                 hashlib.sha256(license_path.read_bytes()).hexdigest(),
                 entry["license_sha256"],
             )
+            source_path = font.parent / "source.json"
+            metadata_path = font.parent / "METADATA.pb"
+            self.assertEqual(source_path.exists(), metadata_path.exists())
+            if source_path.is_file():
+                source = json.loads(source_path.read_text(encoding="utf-8"))
+                self.assertEqual(source["source"], "google-fonts-ofl")
+                self.assertEqual(source["font_filename"], font.name)
+                self.assertEqual(source["font_sha256"], entry["font_sha256"])
+                self.assertEqual(
+                    source["license_sha256"], entry["license_sha256"]
+                )
+                self.assertEqual(
+                    source["metadata_sha256"],
+                    hashlib.sha256(metadata_path.read_bytes()).hexdigest(),
+                )
             rendered = ImageFont.truetype(str(font), 32)
             required = (
                 "ABCDEFGHIJKLMNOPQRSTUVWXYZ"

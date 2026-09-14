@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "lexend",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/lexend",
+  "font_filename": "Lexend-wght.ttf",
+  "font_sha256": "3add53e641fbc81da64da4bb254285e2831b52b029527bc0714e2b9610832ee6",
+  "license_filename": "OFL.txt",
+  "license_sha256": "5da8505887d0fa7fe963445fd58852707fda34adfeb65af25c99d152bab285bd",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "b49d2fc75e302d8961616bb2005309a8bd76c32787f0769fcb910a8b0f10fcb0"
+}

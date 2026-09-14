@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "newsreader",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/newsreader",
+  "font_filename": "Newsreader-opsz-wght.ttf",
+  "font_sha256": "8a08d13f8a6c0d51be379a60af84f945f65369a67e509ee3c3bdcc421254d7c1",
+  "license_filename": "OFL.txt",
+  "license_sha256": "fdfad38143ec470553cae82a1e45320bdd1b9ec70415d37bd0171051d8a4ded8",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "dc0bcb264c09d663c9a4f559e4f5392fd7d9f62139ad9cbba39253ec43aa315b"
+}

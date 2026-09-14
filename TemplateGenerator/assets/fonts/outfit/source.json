@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "outfit",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/outfit",
+  "font_filename": "Outfit-wght.ttf",
+  "font_sha256": "fc7287273e66929776e2ba54f144fe699080bec29f61bf649d70d871468aeade",
+  "license_filename": "OFL.txt",
+  "license_sha256": "c676351bf8576b9aba743cd5eaa8c0e7ee0d51f805d720447b4df4ddb6a2e416",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "4cd9d2154f15495ca97de561060d535eaba9f7007be4a87e40f3b58ea8111cf2"
+}

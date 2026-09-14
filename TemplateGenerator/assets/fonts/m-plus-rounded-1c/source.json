@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "mplusrounded1c",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/mplusrounded1c",
+  "font_filename": "MPLUSRounded1c-Regular.ttf",
+  "font_sha256": "b75708b53e45b06d17d470aeeca5b766e3d1b3999f03f13ec4eb863ca846c14c",
+  "license_filename": "OFL.txt",
+  "license_sha256": "04971e3fcee60b247395150d93b3616f6a0b092572332c96187b472976553abc",
+  "license_source_url": "https://raw.githubusercontent.com/coz-m/MPLUS_FONTS/eb604901d6f04b6f7f2a84b0378c58df84a9dba6/OFL.txt",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "2d18325f7c495995984d2ad3158244a2896a4f80095fd71cfc08a3bfd750c732"
+}

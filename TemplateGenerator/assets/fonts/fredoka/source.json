@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "fredoka",
+  "family": "Fredoka",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/fredoka",
+  "font_filename": "Fredoka-wdth-wght.ttf",
+  "font_sha256": "2ba02e68b152868aef9ba28e24b3648c7d457fe6f25c761f2c2c53fb61a73fc8",
+  "license_sha256": "5c9e7eee5c6b25f4b05b8d53b2e470ea4962f9ced742d044a98f7d95d1375bab",
+  "metadata_sha256": "17f260d0faf7c588c9331a9a1b720b55c2b871563423f42704c8cbb0953a574a"
+}

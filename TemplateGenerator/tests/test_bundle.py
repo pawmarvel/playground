@@ -264,6 +264,42 @@ class BundleContractTests(unittest.TestCase):
         self.assertEqual(manifest["template_id"], "life-is-good--test-blanket")
         self.assertEqual(manifest["runtime"]["input_image_order"][0], "user_pet")
 
+    def test_validates_optional_remote_font_provenance(self) -> None:
+        metadata = self.bundle / "fonts" / "METADATA.pb"
+        metadata.write_text(
+            'name: "Test Font"\nlicense: "OFL"\n', encoding="utf-8"
+        )
+        font = self.bundle / "fonts" / "TestFont.ttf"
+        license_path = self.bundle / "fonts" / "OFL.txt"
+        source = {
+            "schema_version": 1,
+            "source": "google-fonts-ofl",
+            "family_id": "testfont",
+            "family": "Test Font",
+            "source_url": "https://github.com/google/fonts/tree/main/ofl/testfont",
+            "font_filename": font.name,
+            "font_sha256": _sha256(font),
+            "license_sha256": _sha256(license_path),
+            "metadata_sha256": _sha256(metadata),
+        }
+        (self.bundle / "fonts" / "source.json").write_text(
+            json.dumps(source, indent=2) + "\n", encoding="utf-8"
+        )
+        self._refresh_assets()
+        manifest = validate_production_bundle(self.bundle)
+        _validate_schema(manifest, "bundle-v1.schema.json")
+        self.assertIn(
+            "fonts/source.json", {asset["path"] for asset in manifest["assets"]}
+        )
+
+        source["font_filename"] = "Other.ttf"
+        (self.bundle / "fonts" / "source.json").write_text(
+            json.dumps(source, indent=2) + "\n", encoding="utf-8"
+        )
+        self._refresh_assets()
+        with self.assertRaisesRegex(BundleError, "selected Google Fonts OFL asset"):
+            validate_production_bundle(self.bundle)
+
     def test_catalog_cli_validates_bundle(self) -> None:
         self.assertEqual(
             catalog_cli_main(["validate", "--bundle", str(self.bundle)]), 0

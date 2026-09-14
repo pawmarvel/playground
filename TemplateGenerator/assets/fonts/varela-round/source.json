@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "varelaround",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/varelaround",
+  "font_filename": "VarelaRound-Regular.ttf",
+  "font_sha256": "e1e47eb66dbc2ddc106661338e712d9176c9e83c669a82fde155324823d03aa2",
+  "license_filename": "OFL.txt",
+  "license_sha256": "45446732635812510428bf1bad902a8b133f3c7348ad8593ecca90895595b278",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "2dd4b0efbc6d83931c11438bef6b615b97a92e4162bc86a0bf499c309ea0c1ca"
+}

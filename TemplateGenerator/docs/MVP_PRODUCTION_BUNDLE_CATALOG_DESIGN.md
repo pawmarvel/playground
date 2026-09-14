@@ -95,6 +95,8 @@ s3://<bucket>/<environment-prefix>/
     pet-transform-gpt.md                  # MVP production pet-transform prompt
     fonts/<selected-font>.ttf
     fonts/OFL.txt
+    fonts/METADATA.pb                      # optional remote-font provenance
+    fonts/source.json                      # optional remote-font source + hashes
     qa/input-pet.png                     # operator-reviewed non-customer replay fixture
     qa/transformed-pet.png               # representative QA only
     qa/golden-preview.png                 # human conformance aid only
@@ -175,6 +177,22 @@ artifact: the exact reference-image text rectangle, its visible characters,
 and the reference SHA-256. It exists solely to make offline OFL ranking
 reproducible. It is not a bundle asset, and FE must neither consume nor recreate
 it; production receives only the selected font, license, and layout.
+
+The authoring editor searches the immutable local catalog first. When no local
+family matches an operator-entered name, it may query and download from the
+official Google Fonts `ofl/` tree into a session-only cache. This is the sole
+MVP remote source: arbitrary URLs, proprietary fonts, and runtime FE downloads
+are rejected. Save promotes only the selected TTF plus `OFL.txt`,
+`METADATA.pb`, and `source.json` with family/source identifiers and content
+hashes. Bundle validation rechecks those hashes and inventories the optional
+provenance pair. FE consumes the bundled bytes and does not depend on Google
+Fonts availability.
+
+After a downloaded face wins review, an operator may separately promote its
+TTF, OFL license, metadata, and source record into `assets/fonts/` and update
+the checked-in catalog inventory. This changes only future authoring inputs;
+existing experiment snapshots and published bundles remain immutable. Catalog
+promotion is never an automatic side effect of saving a layout.
 
 It may also snapshot `layout-reference-v1`, containing operator-confirmed pet
 and personalized-name regions bound to the reference SHA-256. This evidence
@@ -617,6 +635,8 @@ s3://<bucket>/<environment-prefix>/
         art-template-{gpt|gemini}.md
         fonts/<font>.ttf
         fonts/OFL.txt
+        fonts/METADATA.pb                 # optional remote-font provenance
+        fonts/source.json                 # optional remote-font source + hashes
         qa/input-pet.png
         qa/transformed-pet.png
         qa/golden-preview.png
@@ -1476,7 +1496,9 @@ roles/order, and renderer/name semantics.
 - Keep the browser layout editor and Pillow reference renderer.
 - Keep design-specific prompts and ordered references.
 - Keep preview and print layouts as separate files.
-- Keep the local 40-font OFL catalog and publish only the selected font.
+- Keep the local curated OFL catalog as the first tier. Permit an explicit,
+  bounded Google Fonts OFL lookup when local candidates are inadequate, and
+  publish only the selected face with its license and provenance.
 - Keep deterministic upscale for flow testing and optional Bria experiments.
 - Do not add a web authoring app, relational catalog database, or shared asset
   service.

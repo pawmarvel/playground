@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "caveat",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/caveat",
+  "font_filename": "Caveat-wght.ttf",
+  "font_sha256": "0bdb6b660482d31531b3945849fba5916b3ef8695da7024a9e6b9ee3c4157988",
+  "license_filename": "OFL.txt",
+  "license_sha256": "1f9d81d094273d82f3898a1ee8b598a717d050ecbf5ff7bede105b704880157b",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "038342ea08d3f09e11b7f08cfd1e1d556b4f56a48269b0909395aa6fecd4c4f7"
+}

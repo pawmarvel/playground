@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "spacegrotesk",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/spacegrotesk",
+  "font_filename": "SpaceGrotesk-wght.ttf",
+  "font_sha256": "acad6de1fc93436f5c0f1f4137751ef04f1aea3063e7036535970ffcfbd79f72",
+  "license_filename": "OFL.txt",
+  "license_sha256": "564ce565c371c5e5bbf286006565a7c9aa55a9f56e7ca58d56e05d649dd61a72",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "3713adf5c1a21affdbede103b6bb23f551d4195771fa8bc1b91ce813bd1623ee"
+}

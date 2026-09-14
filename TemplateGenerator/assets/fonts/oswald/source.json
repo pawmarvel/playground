@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "oswald",
+  "family": "Oswald",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/oswald",
+  "font_filename": "Oswald-wght.ttf",
+  "font_sha256": "5b38c246e255a12f5712d640d56bcced0472466fc68983d2d0410ec0457c2817",
+  "license_sha256": "0fd731a904b729a4e02eaf5e8ebd06783edd9abe400e8882760160230675b652",
+  "metadata_sha256": "3d5119d2e99a15e7c2973937d10a77e7aa1fc6a28fe173b02e059485aa596097"
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "cormorantgaramond",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/cormorantgaramond",
+  "font_filename": "CormorantGaramond-wght.ttf",
+  "font_sha256": "b20b7d9626dd956b2c5e558692ad328b1f19e3275e2782db4fa07670d83f35e0",
+  "license_filename": "OFL.txt",
+  "license_sha256": "60700d351cac4650c51f3f9db318d2a420f8b45052dba2715eb5fec41f0f6956",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "faa16a5e79613ca7cadd599ada1f4cf6891f3cb6731631fbed2a0b18a342e556"
+}

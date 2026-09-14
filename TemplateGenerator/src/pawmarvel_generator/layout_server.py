@@ -4,7 +4,9 @@ import base64
 import hashlib
 import json
 import mimetypes
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -49,17 +51,41 @@ from .personalization import (
     validate_pet_name,
 )
 from .renderer import RenderError, render_composition
+from .remote_fonts import (
+    RemoteFontError,
+    import_google_ofl_family,
+    normalize_google_font_family,
+    search_google_ofl,
+)
 
 
 MAX_REQUEST_BYTES = 1024 * 1024
 MAX_PREVIEW_PET_BYTES = 25 * 1024 * 1024
 MAX_PREVIEW_PETS = 12
+MAX_FONT_QUERY_LENGTH = 80
 FONT_RECOMMENDATION_LIMIT = 15
 STATIC_FILES = {
     "layout.js": "application/javascript; charset=utf-8",
     "layout.css": "text/css; charset=utf-8",
 }
 HEARTBEAT_TIMEOUT_SECONDS = 15.0
+
+
+class _LayoutHTTPServer(ThreadingHTTPServer):
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        handler: type[BaseHTTPRequestHandler],
+        remote_font_temp: tempfile.TemporaryDirectory[str],
+    ) -> None:
+        self._remote_font_temp = remote_font_temp
+        super().__init__(server_address, handler)
+
+    def server_close(self) -> None:
+        try:
+            super().server_close()
+        finally:
+            self._remote_font_temp.cleanup()
 
 
 class _EditorLifecycle:
@@ -512,6 +538,7 @@ def _make_handler(
     config: EditorConfig,
     candidates: tuple[FontCandidate, ...],
     lifecycle: _EditorLifecycle,
+    remote_font_root: Path,
 ) -> type[BaseHTTPRequestHandler]:
     with Image.open(config.art) as art_image:
         canvas = {"width": art_image.width, "height": art_image.height}
@@ -621,6 +648,36 @@ def _make_handler(
     candidates_by_id = {
         candidate.candidate_id: candidate for candidate in candidates
     }
+    remote_font_sources: dict[str, dict[str, Any]] = {}
+    font_candidates_lock = threading.Lock()
+
+    for candidate in candidates:
+        source_path = candidate.font.parent / "source.json"
+        metadata_path = candidate.font.parent / "METADATA.pb"
+        if not source_path.is_file() or not metadata_path.is_file():
+            continue
+        try:
+            source = json.loads(source_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            isinstance(source, dict)
+            and source.get("source") == "google-fonts-ofl"
+            and source.get("font_filename") == candidate.font.name
+            and source.get("font_sha256") == candidate.sha256
+            and source.get("license_sha256")
+            == hashlib.sha256(candidate.license.read_bytes()).hexdigest()
+            and source.get("metadata_sha256")
+            == hashlib.sha256(metadata_path.read_bytes()).hexdigest()
+        ):
+            remote_font_sources[candidate.candidate_id] = {
+                **source,
+                "metadata_path": str(metadata_path),
+            }
+
+    def candidate_snapshot() -> tuple[FontCandidate, ...]:
+        with font_candidates_lock:
+            return tuple(candidates_by_id.values())
     previewed_revisions: dict[int, str] = {}
     preview_lock = threading.Lock()
     pinned_pet_sha256 = hashlib.sha256(config.pet.read_bytes()).hexdigest()
@@ -713,7 +770,8 @@ def _make_handler(
             if self.path.startswith(font_prefix):
                 lifecycle.touch()
                 candidate_id = self.path[len(font_prefix) :]
-                candidate = candidates_by_id.get(candidate_id)
+                with font_candidates_lock:
+                    candidate = candidates_by_id.get(candidate_id)
                 if candidate is not None:
                     self._send(HTTPStatus.OK, "font/ttf", candidate.font.read_bytes())
                     return
@@ -803,6 +861,125 @@ def _make_handler(
                 except (ConfigError, UnidentifiedImageError, OSError) as exc:
                     self._json_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
+            if self.path == "/search-fonts":
+                try:
+                    lifecycle.touch()
+                    payload = self._read_payload()
+                    query = payload.get("query")
+                    if not isinstance(query, str) or not query.strip():
+                        raise ConfigError("font search query must not be empty")
+                    query = query.strip()
+                    if len(query) > MAX_FONT_QUERY_LENGTH:
+                        raise ConfigError(
+                            f"font search query must not exceed {MAX_FONT_QUERY_LENGTH} characters"
+                        )
+                    normalized = "".join(
+                        character for character in query.lower() if character.isalnum()
+                    )
+                    local = []
+                    exact_local = False
+                    for candidate in candidate_snapshot():
+                        searchable = {
+                            "".join(
+                                character
+                                for character in value.lower()
+                                if character.isalnum()
+                            )
+                            for value in (
+                                candidate.label,
+                                candidate.font.stem,
+                                candidate.font.parent.name,
+                            )
+                        }
+                        if any(normalized in value for value in searchable):
+                            local.append(
+                                {
+                                    "source": "local",
+                                    "font_id": candidate.candidate_id,
+                                    "label": candidate.label,
+                                }
+                            )
+                        exact_local = exact_local or normalized in searchable
+                    local = local[:12]
+                    remote = (
+                        []
+                        if exact_local
+                        else [
+                            family.to_dict() for family in search_google_ofl(query)
+                        ]
+                    )
+                    self._send(
+                        HTTPStatus.OK,
+                        "application/json; charset=utf-8",
+                        json.dumps(
+                            {"query": query, "local": local, "remote": remote}
+                        ).encode("utf-8"),
+                    )
+                except (ConfigError, RemoteFontError) as exc:
+                    self._json_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            if self.path == "/import-font":
+                try:
+                    lifecycle.touch()
+                    payload = self._read_payload()
+                    family_id = payload.get("family_id")
+                    if not isinstance(family_id, str):
+                        raise ConfigError("font import requires family_id")
+                    family_id = normalize_google_font_family(family_id)
+                    family_dir = remote_font_root / family_id
+                    if family_dir.exists():
+                        raise ConfigError(
+                            "font family is already imported in this editor session"
+                        )
+                    imported = import_google_ofl_family(family_id, remote_font_root)
+                    added = []
+                    with font_candidates_lock:
+                        for candidate in imported.candidates:
+                            existing = candidates_by_id.get(candidate.candidate_id)
+                            if existing is None:
+                                candidates_by_id[candidate.candidate_id] = candidate
+                                remote_font_sources[candidate.candidate_id] = {
+                                    "schema_version": 1,
+                                    "source": "google-fonts-ofl",
+                                    "family_id": imported.family.family_id,
+                                    "family": imported.family.label,
+                                    "source_url": imported.source_url,
+                                    "font_filename": candidate.font.name,
+                                    "font_sha256": candidate.sha256,
+                                    "license_sha256": hashlib.sha256(
+                                        candidate.license.read_bytes()
+                                    ).hexdigest(),
+                                    "metadata_sha256": hashlib.sha256(
+                                        imported.metadata.read_bytes()
+                                    ).hexdigest(),
+                                    "metadata_path": str(imported.metadata),
+                                }
+                                existing = candidate
+                            added.append(
+                                {
+                                    "id": existing.candidate_id,
+                                    "label": existing.label,
+                                    "relativeName": existing.relative_name,
+                                    "sha256": existing.sha256,
+                                    "source": "google-fonts-ofl",
+                                }
+                            )
+                    self._send(
+                        HTTPStatus.OK,
+                        "application/json; charset=utf-8",
+                        json.dumps(
+                            {
+                                "family_id": imported.family.family_id,
+                                "family": imported.family.label,
+                                "candidates": added,
+                            }
+                        ).encode("utf-8"),
+                    )
+                except (ConfigError, FontCatalogError, RemoteFontError, OSError) as exc:
+                    if 'family_dir' in locals() and family_dir.exists():
+                        shutil.rmtree(family_dir, ignore_errors=True)
+                    self._json_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
             if self.path not in {
                 "/preview",
                 "/save",
@@ -819,7 +996,7 @@ def _make_handler(
                         payload, config.reference
                     )
                     matches = rank_fonts(
-                        config.reference, font_reference, candidates
+                        config.reference, font_reference, candidate_snapshot()
                     )
                     ranking = _ranking_response(font_reference, matches)
                     with ranking_lock:
@@ -839,7 +1016,7 @@ def _make_handler(
                         payload, config.reference
                     )
                     layout, selected_font = _draft_layout(
-                        config, candidates, payload
+                        config, candidate_snapshot(), payload
                     )
                     recommendation = recommend_font_size(
                         config.reference,
@@ -873,7 +1050,9 @@ def _make_handler(
                     return
                 revision = _request_revision(payload)
                 pet_name = _request_pet_name(payload)
-                layout, selected_font = _draft_layout(config, candidates, payload)
+                layout, selected_font = _draft_layout(
+                    config, candidate_snapshot(), payload
+                )
                 preview_pet, preview_pet_descriptor = selected_preview_pet(payload)
                 fingerprint = _preview_fingerprint(
                     layout,
@@ -992,6 +1171,27 @@ def _make_handler(
                     _atomic_write_bytes(
                         bundled_license, selected_font.license.read_bytes()
                     )
+                with font_candidates_lock:
+                    remote_source = remote_font_sources.get(
+                        selected_font.candidate_id
+                    )
+                source_output = config.template_dir / "fonts" / "source.json"
+                metadata_output = config.template_dir / "fonts" / "METADATA.pb"
+                if remote_source is not None:
+                    metadata_path = Path(str(remote_source["metadata_path"]))
+                    public_source = {
+                        key: value
+                        for key, value in remote_source.items()
+                        if key != "metadata_path"
+                    }
+                    _atomic_write_bytes(
+                        source_output,
+                        (json.dumps(public_source, indent=2) + "\n").encode("utf-8"),
+                    )
+                    _atomic_write_bytes(metadata_output, metadata_path.read_bytes())
+                else:
+                    source_output.unlink(missing_ok=True)
+                    metadata_output.unlink(missing_ok=True)
                 saved_layout = parse_layout(
                     layout.to_dict(),
                     config.template_dir,
@@ -1123,9 +1323,22 @@ def create_server(
 ) -> ThreadingHTTPServer:
     config, candidates = _validate_editor_config(config)
     lifecycle = _EditorLifecycle()
-    server = ThreadingHTTPServer(
-        (host, port), _make_handler(config, candidates, lifecycle)
+    remote_font_temp = tempfile.TemporaryDirectory(
+        prefix="pawmarvel-layout-fonts-"
     )
+    try:
+        handler = _make_handler(
+            config,
+            candidates,
+            lifecycle,
+            Path(remote_font_temp.name),
+        )
+        server = _LayoutHTTPServer(
+            (host, port), handler, remote_font_temp
+        )
+    except Exception:
+        remote_font_temp.cleanup()
+        raise
     setattr(server, "pawmarvel_lifecycle", lifecycle)
     return server
 

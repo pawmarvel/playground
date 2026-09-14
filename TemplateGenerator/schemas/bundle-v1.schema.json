@@ -103,7 +103,7 @@
     "assets": {
       "type": "array",
       "minItems": 14,
-      "maxItems": 17,
+      "maxItems": 19,
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/asset"}
     }

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "google-fonts-ofl",
+  "family_id": "bigshouldersdisplay",
+  "source_url": "https://github.com/google/fonts/tree/main/ofl/bigshouldersdisplay",
+  "font_filename": "BigShouldersDisplay-wght.ttf",
+  "font_sha256": "60e208dc276a1c35fc5b62e94f9fb959c40c11783a9eb7548175c14b1fbeb720",
+  "license_filename": "OFL.txt",
+  "license_sha256": "338f9c050f19daeda1d597243faf79f3a3d437c338af58cb7047617d0ce08771",
+  "metadata_filename": "METADATA.pb",
+  "metadata_sha256": "2bf43c679310a21884a68170af4dcad7b3dcf8e4018a8102ec2ea5293df4bfa1"
+}
