@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import mimetypes
 import sys
@@ -15,19 +16,45 @@ from importlib import resources
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import unquote
 
-from PIL import Image, ImageFont, UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError
 
 from .cli import _atomic_write_bytes
 from .config import ConfigError, Layout, load_layout, parse_layout, write_layout
 from .font_catalog import FontCandidate, FontCatalogError, discover_font_catalog
-from .expanded_font_catalog import ExpandedFontCatalogError, materialize_expanded_fonts
 from .font_license import resolve_ofl_license
-from .font_match import rank_fonts
-from .renderer import RenderError, render_with_layout
+from .font_match import (
+    rank_fonts,
+    recommend_font_size,
+    recommend_min_font_size_for_capacity,
+)
+from .font_reference import (
+    FontReference,
+    FontReferenceError,
+    font_reference_from_editor,
+    load_font_reference,
+)
+from .layout_reference import (
+    LayoutReference,
+    LayoutReferenceError,
+    layout_reference_from_editor,
+    load_layout_reference,
+    map_reference_box,
+)
+from .personalization import (
+    DEFAULT_MAX_NAME_CODE_POINTS,
+    PersonalizationError,
+    pet_name_policy,
+    validate_pet_name,
+)
+from .renderer import RenderError, render_composition
 
 
 MAX_REQUEST_BYTES = 1024 * 1024
+MAX_PREVIEW_PET_BYTES = 25 * 1024 * 1024
+MAX_PREVIEW_PETS = 12
+FONT_RECOMMENDATION_LIMIT = 15
 STATIC_FILES = {
     "layout.js": "application/javascript; charset=utf-8",
     "layout.css": "text/css; charset=utf-8",
@@ -59,19 +86,16 @@ class EditorConfig:
     art: Path
     reference: Path
     pet: Path
-    pet_name: str
     font: Path | None
     output: Path
+    pet_name: str = "PET"
     font_license: Path | None = None
     font_catalogs: tuple[Path, ...] = ()
-    runtime_model: str | None = "gpt-image-2"
+    font_reference: Path | None = None
+    layout_reference: Path | None = None
+    reference_text: str | None = None
     force: bool = False
     auto_font: bool = False
-    font_catalog_mode: str = "local"
-    font_index: Path | None = None
-    font_cache: Path | None = None
-    font_shortlist_limit: int = 24
-    font_offline: bool = False
 
     @property
     def template_dir(self) -> Path:
@@ -80,6 +104,19 @@ class EditorConfig:
     @property
     def calibration_output(self) -> Path:
         return self.template_dir / "qa" / "calibration-preview.png"
+
+    @property
+    def calibration_fixture_output(self) -> Path:
+        return self.template_dir / "qa" / "calibration-fixture.json"
+
+    @property
+    def font_reference_output(self) -> Path:
+        return self.template_dir / "qa" / "font-reference.json"
+
+    @property
+    def layout_reference_output(self) -> Path:
+        return self.template_dir / "qa" / "layout-reference.json"
+
 
 def _validate_editor_config(
     config: EditorConfig,
@@ -91,21 +128,26 @@ def _validate_editor_config(
         art=config.art.expanduser().resolve(),
         reference=config.reference.expanduser().resolve(),
         pet=config.pet.expanduser().resolve(),
-        pet_name=config.pet_name.strip(),
+        pet_name=config.pet_name.strip() or "PET",
         font=font,
         output=config.output.expanduser().resolve(),
         font_license=font_license,
         font_catalogs=tuple(
             path.expanduser().resolve() for path in config.font_catalogs
         ),
-        runtime_model=config.runtime_model,
+        font_reference=(
+            config.font_reference.expanduser().resolve()
+            if config.font_reference
+            else None
+        ),
+        layout_reference=(
+            config.layout_reference.expanduser().resolve()
+            if config.layout_reference
+            else None
+        ),
+        reference_text=(config.reference_text or "").strip() or None,
         force=config.force,
         auto_font=auto_font,
-        font_catalog_mode=config.font_catalog_mode,
-        font_index=config.font_index.expanduser().resolve() if config.font_index else None,
-        font_cache=config.font_cache.expanduser().resolve() if config.font_cache else None,
-        font_shortlist_limit=config.font_shortlist_limit,
-        font_offline=config.font_offline,
     )
     for path, label in (
         (resolved.art, "art"),
@@ -114,10 +156,30 @@ def _validate_editor_config(
     ):
         if not path.is_file():
             raise ConfigError(f"{label} does not exist: {path}")
-    if not resolved.pet_name:
-        raise ConfigError("pet name must not be empty")
     if resolved.output.name != "layout.json":
         raise ConfigError("--output must end with layout.json")
+    if resolved.reference_text is not None and len(resolved.reference_text) > 64:
+        raise ConfigError("reference text must not exceed 64 characters")
+    if resolved.font_reference is not None:
+        try:
+            load_font_reference(resolved.font_reference, resolved.reference)
+        except FontReferenceError as exc:
+            raise ConfigError(str(exc)) from exc
+    if resolved.layout_reference is not None:
+        try:
+            layout_reference = load_layout_reference(
+                resolved.layout_reference, resolved.reference
+            )
+        except LayoutReferenceError as exc:
+            raise ConfigError(str(exc)) from exc
+        if resolved.font_reference is not None:
+            font_reference = load_font_reference(
+                resolved.font_reference, resolved.reference
+            )
+            if layout_reference.name_region.to_dict() != font_reference.region.to_dict():
+                raise ConfigError(
+                    "layout reference name_region must match font reference region"
+                )
     try:
         resolved.art.relative_to(resolved.template_dir)
     except ValueError as exc:
@@ -137,29 +199,12 @@ def _validate_editor_config(
             )
         except ConfigError:
             pass
-    expanded_fonts: tuple[Path, ...] = ()
-    if resolved.font_catalog_mode not in {"local", "expanded"}:
-        raise ConfigError("font catalog mode must be local or expanded")
-    if resolved.font_catalog_mode == "expanded":
-        if resolved.font_index is None or resolved.font_cache is None:
-            raise ConfigError("expanded font mode requires --font-index and --font-cache")
-        try:
-            expanded_fonts = materialize_expanded_fonts(
-                resolved.font_index,
-                resolved.font_cache,
-                limit=resolved.font_shortlist_limit,
-                offline=resolved.font_offline,
-            )
-        except ExpandedFontCatalogError as exc:
-            if not resolved.font_catalogs and resolved.font is None:
-                raise ConfigError(str(exc)) from exc
-            print(f"Font catalog warning: {exc}; using local OFL catalog.", file=sys.stderr)
     try:
         candidates = discover_font_catalog(
             resolved.font,
             resolved.font_license,
             catalog_roots=resolved.font_catalogs,
-            additional_fonts=(*additional_fonts, *expanded_fonts),
+            additional_fonts=additional_fonts,
         )
     except FontCatalogError as exc:
         raise ConfigError(str(exc)) from exc
@@ -172,59 +217,116 @@ def _relative(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
-def _default_layout(config: EditorConfig) -> dict[str, Any]:
+def _default_layout(
+    config: EditorConfig,
+    font_reference: FontReference | None,
+    layout_reference: LayoutReference | None,
+) -> dict[str, Any]:
     with Image.open(config.art) as art:
         width, height = art.size
-    result = {
-        "schema_version": 1,
-        "art": _relative(config.art, config.template_dir),
-        "pet": {
-            "box": {
-                "x": round(width * 0.2),
-                "y": round(height * 0.18),
-                "width": round(width * 0.6),
-                "height": round(height * 0.56),
-            },
-            "rotation_degrees": 0,
-        },
-        "name": {
-            "box": {
+    with Image.open(config.reference) as reference:
+        reference_size = reference.size
+    if layout_reference is not None:
+        pet_box = map_reference_box(
+            layout_reference.pet_region,
+            reference_size=reference_size,
+            canvas_size=(width, height),
+        ).to_dict()
+        name_box = map_reference_box(
+            layout_reference.name_region,
+            reference_size=reference_size,
+            canvas_size=(width, height),
+        ).to_dict()
+    else:
+        pet_box = {
+            "x": round(width * 0.2),
+            "y": round(height * 0.18),
+            "width": round(width * 0.6),
+            "height": round(height * 0.56),
+        }
+        if font_reference is not None:
+            name_box = map_reference_box(
+                font_reference.region,
+                reference_size=reference_size,
+                canvas_size=(width, height),
+            ).to_dict()
+        else:
+            name_box = {
                 "x": round(width * 0.1),
                 "y": round(height * 0.76),
                 "width": round(width * 0.8),
                 "height": round(height * 0.14),
-            },
+            }
+    name_height = name_box["height"]
+    name_padding = min(4, max(0, (name_height - 1) // 2))
+    assert config.font is not None
+    minimum_font_size = recommend_min_font_size_for_capacity(
+        config.font,
+        box_width=name_box["width"],
+        box_height=name_height,
+        padding=name_padding,
+        character_count=DEFAULT_MAX_NAME_CODE_POINTS,
+    )
+    result = {
+        "schema_version": 2,
+        "art": _relative(config.art, config.template_dir),
+        "pet": {
+            "box": pet_box,
+        },
+        "name": {
+            "box": name_box,
             "font": f"fonts/{config.font.name}",
-            "font_size_px": max(12, round(height * 0.08)),
-            "min_font_size_px": max(8, round(height * 0.03)),
+            "font_size_px": name_height,
+            "min_font_size_px": min(name_height, minimum_font_size),
+            "fit": "shrink_only",
+            "padding_px": name_padding,
             "color": "#F7E7C6FF",
             "horizontal_align": "center",
-            "vertical_align": "middle",
         },
     }
-    if config.runtime_model is not None:
-        result["model"] = config.runtime_model
     return result
 
 
-def _initial_layout(config: EditorConfig) -> dict[str, Any]:
+def _initial_layout(
+    config: EditorConfig,
+    font_reference: FontReference | None,
+    layout_reference: LayoutReference | None,
+) -> dict[str, Any]:
     if config.output.is_file():
         try:
-            data = load_layout(config.template_dir, config.output).to_dict()
-        except ConfigError:
-            data = json.loads(config.output.read_text(encoding="utf-8"))
-            data = parse_layout(
-                data,
-                config.template_dir,
-                art_override=config.art,
-                font_override=config.font,
-            ).to_dict()
-        if config.runtime_model is None:
-            data.pop("model", None)
-        else:
-            data["model"] = config.runtime_model
-        return data
-    return _default_layout(config)
+            return load_layout(config.template_dir, config.output).to_dict()
+        except ConfigError as exc:
+            if config.force:
+                return _default_layout(config, font_reference, layout_reference)
+            raise ConfigError(
+                f"existing layout cannot be reopened: {config.output}; {exc}. "
+                "Fix the file or pass --force to start a new layout."
+            ) from exc
+    return _default_layout(config, font_reference, layout_reference)
+
+
+def _initial_font_reference(config: EditorConfig) -> FontReference | None:
+    source = config.font_reference
+    if source is None and config.font_reference_output.is_file():
+        source = config.font_reference_output
+    if source is None:
+        return None
+    try:
+        return load_font_reference(source, config.reference)
+    except FontReferenceError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
+def _initial_layout_reference(config: EditorConfig) -> LayoutReference | None:
+    source = config.layout_reference
+    if source is None and config.layout_reference_output.is_file():
+        source = config.layout_reference_output
+    if source is None:
+        return None
+    try:
+        return load_layout_reference(source, config.reference)
+    except LayoutReferenceError as exc:
+        raise ConfigError(str(exc)) from exc
 
 
 def _data_url(path: Path) -> str:
@@ -236,6 +338,112 @@ def _png_bytes(image: Image.Image) -> bytes:
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _request_revision(payload: Mapping[str, Any]) -> int:
+    value = payload.get("revision")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigError("request revision must be a non-negative integer")
+    return value
+
+
+def _request_pet_name(payload: Mapping[str, Any]) -> str:
+    try:
+        return validate_pet_name(payload.get("pet_name"), pet_name_policy(64))
+    except PersonalizationError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
+def _request_font_reference(
+    payload: Mapping[str, Any], reference: Path
+) -> FontReference:
+    value = payload.get("font_reference")
+    if not isinstance(value, Mapping):
+        raise ConfigError("request must contain a font_reference object")
+    try:
+        return font_reference_from_editor(
+            reference=reference,
+            region=value.get("region"),
+            text=value.get("text"),
+        )
+    except FontReferenceError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
+def _request_layout_reference(
+    payload: Mapping[str, Any], reference: Path
+) -> LayoutReference:
+    value = payload.get("layout_reference")
+    if not isinstance(value, Mapping):
+        raise ConfigError("request must contain a layout_reference object")
+    try:
+        return layout_reference_from_editor(
+            reference=reference,
+            pet_region=value.get("pet_region"),
+            name_region=value.get("name_region"),
+        )
+    except LayoutReferenceError as exc:
+        raise ConfigError(str(exc)) from exc
+
+
+def _font_reference_fingerprint(font_reference: FontReference) -> str:
+    canonical = json.dumps(
+        font_reference.to_dict(),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _ranking_response(
+    font_reference: FontReference,
+    matches: tuple[Any, ...],
+) -> dict[str, Any]:
+    top = matches[0]
+    return {
+        "schema_version": 1,
+        "method": "confirmed-reference-silhouette-v3",
+        "font_reference": font_reference.to_dict(),
+        "recommendation": {
+            "font_id": top.candidate.candidate_id,
+            "font": top.candidate.relative_name,
+            "similarity_score": top.score,
+            "confidence_score": top.confidence,
+            "confidence_level": top.confidence_level,
+            "auto_select": top.confidence_level == "high",
+        },
+        "ranked_options": [
+            {
+                "rank": rank,
+                "font_id": match.candidate.candidate_id,
+                "label": match.candidate.label,
+                "font": match.candidate.relative_name,
+                "similarity_score": match.score,
+                "confidence_score": match.confidence,
+                "confidence_level": match.confidence_level,
+            }
+            for rank, match in enumerate(matches, 1)
+        ],
+    }
+
+
+def _preview_fingerprint(
+    layout: Layout, selected_font: FontCandidate, pet_name: str,
+    pet_sha256: str,
+) -> str:
+    canonical = json.dumps(
+        {
+            "layout": layout.to_dict(),
+            "font_id": selected_font.candidate_id,
+            "pet_name": pet_name,
+            "pet_sha256": pet_sha256,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _candidate_for_layout(
@@ -261,10 +469,8 @@ def _draft_layout(
         raise ConfigError("request must contain a layout object")
     draft = deepcopy(dict(raw))
     draft["art"] = _relative(config.art, config.template_dir)
-    if config.runtime_model is None:
-        draft.pop("model", None)
-    else:
-        draft["model"] = config.runtime_model
+    draft.pop("model", None)
+    draft["schema_version"] = 2
     name = draft.get("name")
     if not isinstance(name, dict):
         raise ConfigError("layout.name must be an object")
@@ -309,29 +515,98 @@ def _make_handler(
 ) -> type[BaseHTTPRequestHandler]:
     with Image.open(config.art) as art_image:
         canvas = {"width": art_image.width, "height": art_image.height}
-    initial_layout = _initial_layout(config)
-    matches = rank_fonts(
-        config.reference,
-        initial_layout["name"]["box"],
-        (canvas["width"], canvas["height"]),
-        config.pet_name,
-        candidates,
+    with Image.open(config.reference) as reference_image:
+        reference_canvas = {
+            "width": reference_image.width,
+            "height": reference_image.height,
+        }
+    initial_font_reference = _initial_font_reference(config)
+    initial_layout_reference = _initial_layout_reference(config)
+    initial_layout = _initial_layout(
+        config, initial_font_reference, initial_layout_reference
     )
-    # An explicit --font is an override. Without it, the best visual match is
-    # preselected even when an older layout contains a different font.
-    selected_candidate = matches[0].candidate if config.auto_font else _candidate_for_layout(candidates, initial_layout)
-    initial_layout["name"]["font"] = selected_candidate.relative_name
-    top_matches = matches[:5]
-    visible_matches = list(top_matches)
-    if selected_candidate not in {match.candidate for match in top_matches}:
-        visible_matches.append(
-            next(match for match in matches if match.candidate == selected_candidate)
+    selected_candidate = _candidate_for_layout(candidates, initial_layout)
+    initial_ranking: dict[str, Any] | None = None
+    if initial_font_reference is not None:
+        try:
+            matches = rank_fonts(
+                config.reference, initial_font_reference, candidates
+            )
+            initial_ranking = _ranking_response(initial_font_reference, matches)
+        except ValueError:
+            # Keep the editor available so the operator can correct an invalid
+            # or visually ambiguous reference region in the browser.
+            initial_ranking = None
+    if (
+        config.auto_font
+        and not config.output.is_file()
+        and initial_ranking
+        and initial_ranking["recommendation"]["confidence_score"] > 0
+    ):
+        selected_candidate = next(
+            candidate
+            for candidate in candidates
+            if candidate.candidate_id
+            == initial_ranking["recommendation"]["font_id"]
         )
+        name = initial_layout["name"]
+        box = name["box"]
+        try:
+            scale = recommend_font_size(
+                config.reference,
+                initial_font_reference,
+                selected_candidate.font,
+                box_width=box["width"],
+                box_height=box["height"],
+                padding=name["padding_px"],
+            )
+        except ValueError:
+            # A blank/ambiguous reference region must not prevent the operator
+            # from opening the editor and redrawing it.
+            initial_ranking = None
+        else:
+            name["font_size_px"] = scale.font_size_px
+            name["min_font_size_px"] = min(
+                scale.font_size_px,
+                recommend_min_font_size_for_capacity(
+                    selected_candidate.font,
+                    box_width=box["width"],
+                    box_height=box["height"],
+                    padding=name["padding_px"],
+                    character_count=DEFAULT_MAX_NAME_CODE_POINTS,
+                ),
+            )
+    initial_layout["name"]["font"] = selected_candidate.relative_name
+    initial_font_confirmed = (
+        not config.auto_font
+        or config.output.is_file()
+        or bool(
+            initial_ranking
+            and initial_ranking["recommendation"]["auto_select"]
+        )
+    )
     bootstrap = {
         "layout": initial_layout,
         "canvas": canvas,
         "petName": config.pet_name,
         "referenceDataUrl": _data_url(config.reference),
+        "referenceCanvas": reference_canvas,
+        "fontReference": (
+            initial_font_reference.to_dict() if initial_font_reference else None
+        ),
+        "layoutReference": (
+            initial_layout_reference.to_dict()
+            if initial_layout_reference
+            else None
+        ),
+        "referenceText": (
+            initial_font_reference.text
+            if initial_font_reference
+            else config.reference_text or ""
+        ),
+        "autoFont": config.auto_font,
+        "fontSelectionConfirmed": initial_font_confirmed,
+        "fontRanking": initial_ranking,
         "selectedFontId": selected_candidate.candidate_id,
         "fontCandidates": [
             {
@@ -339,33 +614,49 @@ def _make_handler(
                 "label": candidate.label,
                 "relativeName": candidate.relative_name,
                 "sha256": candidate.sha256,
-                "matchScore": next(
-                    match.score for match in matches if match.candidate == candidate
-                ),
-                "confidence": next(
-                    match.confidence
-                    for match in matches
-                    if match.candidate == candidate
-                ),
-                "recommended": candidate == matches[0].candidate,
-                "rank": next(
-                    index
-                    for index, match in enumerate(matches, 1)
-                    if match.candidate == candidate
-                ),
             }
-            for candidate in (match.candidate for match in visible_matches)
+            for candidate in candidates
         ],
-        "fontRecommendation": {
-            "method": "normalized_reference_visual_match_v2",
-            "confidence": matches[0].confidence,
-            "fontId": matches[0].candidate.candidate_id,
-            "rankedFontIds": [match.candidate.candidate_id for match in matches],
-        },
     }
     candidates_by_id = {
         candidate.candidate_id: candidate for candidate in candidates
     }
+    previewed_revisions: dict[int, str] = {}
+    preview_lock = threading.Lock()
+    pinned_pet_sha256 = hashlib.sha256(config.pet.read_bytes()).hexdigest()
+    uploaded_preview_pets: dict[str, tuple[bytes, dict[str, Any]]] = {}
+    tested_preview_pets: dict[str, dict[str, Any]] = {}
+    preview_pet_lock = threading.Lock()
+    font_rankings: dict[str, dict[str, Any]] = {}
+    if initial_font_reference is not None and initial_ranking is not None:
+        font_rankings[
+            _font_reference_fingerprint(initial_font_reference)
+        ] = initial_ranking
+    ranking_lock = threading.Lock()
+
+    def selected_preview_pet(
+        payload: Mapping[str, Any],
+    ) -> tuple[Path | BytesIO, dict[str, Any]]:
+        pet_id = payload.get("preview_pet_id", "pinned")
+        if pet_id == "pinned":
+            return config.pet, {
+                "id": "pinned",
+                "label": config.pet.name,
+                "sha256": pinned_pet_sha256,
+                "source": "layout-experiment",
+            }
+        with preview_pet_lock:
+            selected = (
+                uploaded_preview_pets.get(pet_id)
+                if isinstance(pet_id, str)
+                else None
+            )
+        if selected is None:
+            raise ConfigError(
+                "selected preview pet is unavailable; choose the pinned pet or upload it again"
+            )
+        content, descriptor = selected
+        return BytesIO(content), descriptor
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "PawMarvelLayout/0.1"
@@ -373,19 +664,33 @@ def _make_handler(
         def log_message(self, format: str, *args: Any) -> None:
             print(f"layout editor: {format % args}", file=sys.stderr)
 
-        def _send(self, status: int, content_type: str, body: bytes) -> None:
+        def _send(
+            self,
+            status: int,
+            content_type: str,
+            body: bytes,
+            *,
+            headers: Mapping[str, str] | None = None,
+        ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
 
-        def _json_error(self, status: int, message: str) -> None:
+        def _json_error(
+            self, status: int, message: str, *, code: str | None = None
+        ) -> None:
+            payload = {"error": message}
+            if code is not None:
+                payload["code"] = code
             self._send(
                 status,
                 "application/json; charset=utf-8",
-                json.dumps({"error": message}).encode("utf-8"),
+                json.dumps(payload).encode("utf-8"),
             )
 
         def do_GET(self) -> None:  # noqa: N802
@@ -443,34 +748,239 @@ def _make_handler(
                 )
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return
-            if self.path not in {"/preview", "/save"}:
+            if self.path == "/preview-pet":
+                try:
+                    lifecycle.touch()
+                    try:
+                        length = int(self.headers.get("Content-Length", "0"))
+                    except ValueError as exc:
+                        raise ConfigError("invalid preview-pet Content-Length") from exc
+                    if length <= 0 or length > MAX_PREVIEW_PET_BYTES:
+                        raise ConfigError(
+                            f"preview pet must be between 1 byte and "
+                            f"{MAX_PREVIEW_PET_BYTES} bytes"
+                        )
+                    raw = self.rfile.read(length)
+                    with Image.open(BytesIO(raw)) as source:
+                        source.load()
+                        rgba = source.convert("RGBA")
+                    alpha_min, alpha_max = rgba.getchannel("A").getextrema()
+                    if alpha_max == 0:
+                        raise ConfigError("preview pet is fully transparent")
+                    if alpha_min == 255:
+                        raise ConfigError(
+                            "preview pet must contain transparency; upload a transformed pet-only image"
+                        )
+                    normalized = BytesIO()
+                    rgba.save(normalized, format="PNG")
+                    content = normalized.getvalue()
+                    digest = hashlib.sha256(content).hexdigest()
+                    pet_id = f"upload-{digest}"
+                    uploaded_label = unquote(
+                        self.headers.get("X-PawMarvel-Pet-Name", "")
+                    ).strip()
+                    if (
+                        not uploaded_label
+                        or len(uploaded_label) > 255
+                        or any(ord(character) < 32 for character in uploaded_label)
+                    ):
+                        uploaded_label = f"Uploaded pet {len(uploaded_preview_pets) + 1}"
+                    with preview_pet_lock:
+                        descriptor = {
+                            "id": pet_id,
+                            "label": uploaded_label,
+                            "sha256": digest,
+                            "source": "browser-upload",
+                        }
+                        uploaded_preview_pets[pet_id] = (content, descriptor)
+                        while len(uploaded_preview_pets) > MAX_PREVIEW_PETS:
+                            uploaded_preview_pets.pop(next(iter(uploaded_preview_pets)))
+                    self._send(
+                        HTTPStatus.OK,
+                        "application/json; charset=utf-8",
+                        json.dumps(descriptor).encode("utf-8"),
+                    )
+                except (ConfigError, UnidentifiedImageError, OSError) as exc:
+                    self._json_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            if self.path not in {
+                "/preview",
+                "/save",
+                "/rank-fonts",
+                "/calibrate-font-size",
+            }:
                 self._json_error(HTTPStatus.NOT_FOUND, "not found")
                 return
             try:
                 lifecycle.touch()
                 payload = self._read_payload()
-                layout, selected_font = _draft_layout(config, candidates, payload)
-                if self.path == "/preview":
-                    preview = render_with_layout(
-                        layout,
-                        config.pet,
-                        config.pet_name,
+                if self.path == "/rank-fonts":
+                    font_reference = _request_font_reference(
+                        payload, config.reference
                     )
-                    self._send(HTTPStatus.OK, "image/png", _png_bytes(preview))
+                    matches = rank_fonts(
+                        config.reference, font_reference, candidates
+                    )
+                    ranking = _ranking_response(font_reference, matches)
+                    with ranking_lock:
+                        font_rankings[
+                            _font_reference_fingerprint(font_reference)
+                        ] = ranking
+                        while len(font_rankings) > 20:
+                            font_rankings.pop(next(iter(font_rankings)))
+                    self._send(
+                        HTTPStatus.OK,
+                        "application/json; charset=utf-8",
+                        json.dumps(ranking).encode("utf-8"),
+                    )
+                    return
+                if self.path == "/calibrate-font-size":
+                    font_reference = _request_font_reference(
+                        payload, config.reference
+                    )
+                    layout, selected_font = _draft_layout(
+                        config, candidates, payload
+                    )
+                    recommendation = recommend_font_size(
+                        config.reference,
+                        font_reference,
+                        selected_font.font,
+                        box_width=layout.name_box.width,
+                        box_height=layout.name_box.height,
+                        padding=layout.name_padding_px,
+                    )
+                    recommended_minimum = min(
+                        recommendation.font_size_px,
+                        recommend_min_font_size_for_capacity(
+                            selected_font.font,
+                            box_width=layout.name_box.width,
+                            box_height=layout.name_box.height,
+                            padding=layout.name_padding_px,
+                            character_count=DEFAULT_MAX_NAME_CODE_POINTS,
+                        ),
+                    )
+                    self._send(
+                        HTTPStatus.OK,
+                        "application/json; charset=utf-8",
+                        json.dumps(
+                            {
+                                **recommendation.to_dict(),
+                                "min_font_size_px": recommended_minimum,
+                                "font_id": selected_font.candidate_id,
+                            }
+                        ).encode("utf-8"),
+                    )
+                    return
+                revision = _request_revision(payload)
+                pet_name = _request_pet_name(payload)
+                layout, selected_font = _draft_layout(config, candidates, payload)
+                preview_pet, preview_pet_descriptor = selected_preview_pet(payload)
+                fingerprint = _preview_fingerprint(
+                    layout,
+                    selected_font,
+                    pet_name,
+                    str(preview_pet_descriptor["sha256"]),
+                )
+                if self.path == "/preview":
+                    preview = render_composition(
+                        layout,
+                        preview_pet,
+                        pet_name,
+                    )
+                    with preview_pet_lock:
+                        tested_preview_pets[
+                            str(preview_pet_descriptor["sha256"])
+                        ] = preview_pet_descriptor
+                    with preview_lock:
+                        previewed_revisions[revision] = fingerprint
+                        while len(previewed_revisions) > 20:
+                            previewed_revisions.pop(next(iter(previewed_revisions)))
+                    self._send(
+                        HTTPStatus.OK,
+                        "image/png",
+                        _png_bytes(preview.image),
+                        headers={
+                            "X-PawMarvel-Preview-Revision": str(revision),
+                            "X-PawMarvel-Applied-Font-Size": str(
+                                preview.text.applied_font_size_px
+                            ),
+                            "X-PawMarvel-Text-Fit": preview.text.fit,
+                        },
+                    )
                     return
 
+                with preview_lock:
+                    preview_matches = previewed_revisions.get(revision) == fingerprint
+                if not preview_matches:
+                    self._json_error(
+                        HTTPStatus.CONFLICT,
+                        "current layout, pet name, and transformed pet must be previewed before saving",
+                        code="preview_required",
+                    )
+                    return
+
+                requested_font_reference = payload.get("font_reference")
+                font_reference = None
+                ranking = None
+                if requested_font_reference is not None:
+                    font_reference = _request_font_reference(
+                        payload, config.reference
+                    )
+                    with ranking_lock:
+                        ranking = font_rankings.get(
+                            _font_reference_fingerprint(font_reference)
+                        )
+                requested_layout_reference = payload.get("layout_reference")
+                layout_reference = None
+                if requested_layout_reference is not None:
+                    layout_reference = _request_layout_reference(
+                        payload, config.reference
+                    )
+                    if (
+                        font_reference is not None
+                        and layout_reference.name_region.to_dict()
+                        != font_reference.region.to_dict()
+                    ):
+                        raise ConfigError(
+                            "layout reference name_region must match font reference region"
+                        )
+                if config.auto_font:
+                    if payload.get("font_selection_confirmed") is not True:
+                        raise ConfigError(
+                            "select a ranked font before saving the layout"
+                        )
+                    if font_reference is None or ranking is None:
+                        self._json_error(
+                            HTTPStatus.CONFLICT,
+                            "rank the confirmed reference text region before saving",
+                            code="font_ranking_required",
+                        )
+                        return
+
                 overwrite = config.force or payload.get("overwrite") is True
-                if (config.output.exists() or config.calibration_output.exists()) and not overwrite:
+                if (
+                    config.output.exists()
+                    or config.calibration_output.exists()
+                    or config.calibration_fixture_output.exists()
+                    or (
+                        font_reference is not None
+                        and config.font_reference_output.exists()
+                    )
+                    or (
+                        layout_reference is not None
+                        and config.layout_reference_output.exists()
+                    )
+                ) and not overwrite:
                     self._json_error(
                         HTTPStatus.CONFLICT,
                         "layout or calibration output exists; confirm overwrite",
+                        code="overwrite_required",
                     )
                     return
-                calibration = render_with_layout(
+                calibration = render_composition(
                     layout,
-                    config.pet,
-                    config.pet_name,
-                    debug=True,
+                    preview_pet,
+                    pet_name,
                 )
                 bundled_font = config.template_dir / selected_font.relative_name
                 bundled_license = config.template_dir / "fonts" / "OFL.txt"
@@ -489,39 +999,113 @@ def _make_handler(
                     font_override=bundled_font,
                 )
                 write_layout(config.output, saved_layout)
-                _atomic_write_bytes(config.calibration_output, _png_bytes(calibration))
-                recommendation_output = config.template_dir / "qa" / "font-recommendation.json"
-                recommendation = {
-                    "method": "normalized_reference_visual_match_v2",
-                    "recommended_font": matches[0].candidate.relative_name,
-                    "confidence": matches[0].confidence,
-                    "selected_font": selected_font.relative_name,
-                    "confirmed": True,
-                    "ranked_options": [
-                        {
-                            "rank": rank,
-                            "font_id": match.candidate.candidate_id,
-                            "label": match.candidate.label,
-                            "font": match.candidate.relative_name,
-                            "score": match.score,
-                            "confidence": match.confidence,
-                        }
-                        for rank, match in enumerate(matches[:5], 1)
-                    ],
+                _atomic_write_bytes(
+                    config.calibration_output, _png_bytes(calibration.image)
+                )
+                with preview_pet_lock:
+                    tested_pet_descriptors = list(tested_preview_pets.values())
+                fixture = {
+                    "schema_version": 1,
+                    "pet_name": pet_name,
+                    "revision": revision,
+                    "applied_font_size_px": calibration.text.applied_font_size_px,
+                    "text_fit": calibration.text.fit,
+                    "layout_sha256": hashlib.sha256(
+                        config.output.read_bytes()
+                    ).hexdigest(),
+                    "transformed_pet_sha256": preview_pet_descriptor["sha256"],
+                    "transformed_pet": preview_pet_descriptor,
+                    "tested_transformed_pets": tested_pet_descriptors,
                 }
                 _atomic_write_bytes(
-                    recommendation_output,
-                    (json.dumps(recommendation, indent=2) + "\n").encode("utf-8"),
+                    config.calibration_fixture_output,
+                    (json.dumps(fixture, indent=2) + "\n").encode("utf-8"),
                 )
+                recommendation_output = None
+                if layout_reference is not None:
+                    _atomic_write_bytes(
+                        config.layout_reference_output,
+                        (
+                            json.dumps(layout_reference.to_dict(), indent=2) + "\n"
+                        ).encode("utf-8"),
+                    )
+                if font_reference is not None and ranking is not None:
+                    _atomic_write_bytes(
+                        config.font_reference_output,
+                        (
+                            json.dumps(font_reference.to_dict(), indent=2) + "\n"
+                        ).encode("utf-8"),
+                    )
+                    recommendation_output = (
+                        config.template_dir / "qa" / "font-recommendation.json"
+                    )
+                    try:
+                        scale = recommend_font_size(
+                            config.reference,
+                            font_reference,
+                            selected_font.font,
+                            box_width=layout.name_box.width,
+                            box_height=layout.name_box.height,
+                            padding=layout.name_padding_px,
+                        )
+                        reference_scale: dict[str, Any] = {
+                            "status": "available",
+                            **scale.to_dict(),
+                            "selected_font_size_px": layout.font_size_px,
+                            "selected_matches_recommendation": (
+                                layout.font_size_px == scale.font_size_px
+                            ),
+                        }
+                    except (OSError, ValueError) as exc:
+                        reference_scale = {
+                            "status": "unavailable",
+                            "reason": str(exc),
+                            "selected_font_size_px": layout.font_size_px,
+                        }
+                    recommendation = {
+                        **ranking,
+                        "selected_font": selected_font.relative_name,
+                        "selected_font_id": selected_font.candidate_id,
+                        "selection_confirmed": True,
+                        "reference_scale": reference_scale,
+                        "ranked_options": ranking["ranked_options"][
+                            :FONT_RECOMMENDATION_LIMIT
+                        ],
+                    }
+                    _atomic_write_bytes(
+                        recommendation_output,
+                        (json.dumps(recommendation, indent=2) + "\n").encode(
+                            "utf-8"
+                        ),
+                    )
                 lifecycle.saved.set()
                 response = {
                     "layout": str(config.output),
                     "calibration": str(config.calibration_output),
+                    "calibration_fixture": str(config.calibration_fixture_output),
+                    "revision": revision,
+                    "layout_sha256": fixture["layout_sha256"],
+                    "pet_name": pet_name,
+                    "text_metrics": calibration.text.to_dict(),
                     "font": str(bundled_font),
                     "font_license": str(bundled_license),
                     "font_id": selected_font.candidate_id,
                     "font_label": selected_font.label,
-                    "font_recommendation": str(recommendation_output),
+                    "font_reference": (
+                        str(config.font_reference_output)
+                        if font_reference is not None and ranking is not None
+                        else None
+                    ),
+                    "layout_reference": (
+                        str(config.layout_reference_output)
+                        if layout_reference is not None
+                        else None
+                    ),
+                    "font_recommendation": (
+                        str(recommendation_output)
+                        if recommendation_output is not None
+                        else None
+                    ),
                 }
                 self._send(
                     HTTPStatus.OK,

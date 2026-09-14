@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["openai>=2.48.0,<3", "Pillow"]
 
+[project.optional-dependencies]
+test = ["jsonschema>=4.23,<5"]
+
 [project.scripts]
 pawmarvel-generate = "pawmarvel_generator.cli:main"
 pawmarvel-layout-config = "pawmarvel_generator.layout_cli:main"
@@ -21,6 +24,8 @@ pawmarvel-upscale-template = "pawmarvel_generator.upscale_template_cli:main"
 pawmarvel-upscale-pet = "pawmarvel_generator.upscale_pet_cli:main"
 pawmarvel-product-profile = "pawmarvel_generator.profile_cli:main"
 pawmarvel-bundle = "pawmarvel_generator.bundle_cli:main"
+pawmarvel-author = "pawmarvel_generator.authoring_cli:main"
+pawmarvel-catalog = "pawmarvel_generator.catalog_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

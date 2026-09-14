@@ -1,26 +1,32 @@
+"""Shared validation primitives for the immutable production bundle contract."""
+
 from __future__ import annotations
 
-import json
-import os
 import re
-import shutil
-import tempfile
-from collections.abc import Sequence
+import warnings
+from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-from .config import ConfigError, Layout, Rect, load_layout, parse_layout
-from .font_license import FontLicenseError, resolve_ofl_license
-from .product_profile import ProductProfile, ProductProfileError, load_product_profile
+from .artifact_io import mismatch
+from .config import Layout, Rect
+from .geometry import round_half_up
 
 
-TEMPLATE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
-PROMPT_MAX_BYTES = 1024 * 1024
-CATALOG_FILENAME = "catalog.json"
-SUPPORTING_REFERENCES_DIR = "reference-designs"
+IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PROMPT_FILENAME_PATTERN = re.compile(
     r"^(art-template|pet-transform)-(gpt|gemini)\.md$"
+)
+AUTHORING_PROMPT_FILENAME_PATTERN = re.compile(
+    r"^(art-template|pet-transform)-(gpt|gemini)"
+    r"(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?\.md$"
+)
+PROMPT_MAX_BYTES = 1024 * 1024
+MAX_RUNTIME_REFERENCES = 4
+SUPPORTING_REFERENCES_DIR = "reference-designs"
+UTC_TIMESTAMP_PATTERN = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
 )
 
 
@@ -28,644 +34,250 @@ class BundleError(ValueError):
     """A template bundle violates the production consumer contract."""
 
 
+def validate_utc_timestamp(value: object, label: str) -> str:
+    if not isinstance(value, str) or UTC_TIMESTAMP_PATTERN.fullmatch(value) is None:
+        raise BundleError(f"{label} must be a UTC timestamp in YYYY-MM-DDTHH:MM:SSZ form")
+    try:
+        datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise BundleError(f"{label} is not a valid timestamp") from exc
+    return value
+
+
 def catalog_template_id(design_id: str, product_profile_id: str) -> str:
-    if not TEMPLATE_ID_PATTERN.fullmatch(design_id):
+    if not 3 <= len(design_id) <= 64 or not IDENTIFIER_PATTERN.fullmatch(design_id):
         raise BundleError(
             "design id must be 3-64 lowercase letters, numbers, or internal hyphens"
         )
+    if not 1 <= len(product_profile_id) <= 64 or not IDENTIFIER_PATTERN.fullmatch(
+        product_profile_id
+    ):
+        raise BundleError(
+            "product profile id must use lowercase letters, numbers, or internal hyphens"
+        )
     value = f"{design_id}--{product_profile_id}"
-    if len(value) > 127 or not re.fullmatch(r"[a-z0-9][a-z0-9-]*[a-z0-9]", value):
+    if len(value) > 127 or not re.fullmatch(
+        r"[a-z0-9][a-z0-9-]*[a-z0-9]", value
+    ):
         raise BundleError("design and product profile IDs form an invalid template id")
     return value
 
 
-def _catalog_entry(
-    *,
-    design_id: str,
-    profile: ProductProfile,
-    layout: Layout,
-    print_layout: Layout,
-    runtime_model: str | None,
-    reference_count: int,
-    art_prompt_name: str,
-    pet_prompt_name: str,
-) -> dict[str, object]:
-    template_id = catalog_template_id(design_id, profile.profile_id)
-    return {
-        "template_id": template_id,
-        "design_id": design_id,
-        "product_profile_id": profile.profile_id,
-        "design": {"id": design_id},
-        "product_profile": profile.to_dict(),
-        "bundle": template_id,
-        "runtime_model": runtime_model or "gemini",
-        "prompts": {
-            "art_template": art_prompt_name,
-            "pet_transform": pet_prompt_name,
-        },
-        "reference_designs": ["reference-design.png"]
-        + [
-            f"{SUPPORTING_REFERENCES_DIR}/reference-design-{index:04d}.png"
-            for index in range(2, reference_count + 1)
-        ],
-        "preview": {
-            "canvas": {
-                "width": layout.canvas_width,
-                "height": layout.canvas_height,
-            },
-            "transformed_pet": profile.preview_pet_size.to_dict(),
-        },
-        "print": {
-            "canvas": {
-                "width": print_layout.canvas_width,
-                "height": print_layout.canvas_height,
-            },
-            "delivery_status": profile.print_spec["delivery_status"],
-        },
-    }
-
-
-def _prompt_contract(path: Path, kind: str) -> tuple[str, str]:
-    match = PROMPT_FILENAME_PATTERN.fullmatch(path.name)
-    if match is None or match.group(1) != kind:
-        expected = f"{kind}-{{gpt|gemini}}.md"
-        raise BundleError(f"{kind} prompt filename must match {expected}: {path.name}")
-    return path.name, match.group(2)
-
-
-def _bundle_prompt_name(root: Path, kind: str) -> tuple[str, str]:
-    matches = [
-        path.name
-        for path in root.iterdir()
-        if path.is_file()
-        and (match := PROMPT_FILENAME_PATTERN.fullmatch(path.name)) is not None
-        and match.group(1) == kind
-    ]
-    if len(matches) != 1:
-        raise BundleError(
-            f"bundle must contain exactly one {kind}-{{gpt|gemini}}.md prompt"
-        )
-    match = PROMPT_FILENAME_PATTERN.fullmatch(matches[0])
-    assert match is not None
-    return matches[0], match.group(2)
-
-
-def load_catalog(root: Path, *, validate_bundles: bool = True) -> dict[str, object]:
-    root = root.expanduser().resolve()
-    path = root / CATALOG_FILENAME
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise BundleError(f"template catalog is not readable JSON: {path}") from exc
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
-        raise BundleError("template catalog schema_version must be 1")
-    entries = value.get("templates")
-    if not isinstance(entries, list):
-        raise BundleError("template catalog templates must be an array")
-    seen: set[str] = set()
-    for entry in entries:
-        if not isinstance(entry, dict):
-            raise BundleError("template catalog entries must be objects")
-        template_id = entry.get("template_id")
-        design_id = entry.get("design_id")
-        profile_id = entry.get("product_profile_id")
-        identity = (template_id, design_id, profile_id)
-        if not all(isinstance(item, str) for item in identity):
-            raise BundleError("catalog identity fields must be strings")
-        assert isinstance(template_id, str)
-        assert isinstance(design_id, str)
-        assert isinstance(profile_id, str)
-        if template_id != catalog_template_id(design_id, profile_id):
-            raise BundleError(
-                "catalog template_id does not match its design/profile pair"
-            )
-        if entry.get("bundle") != template_id:
-            raise BundleError("catalog bundle must equal the relative template_id path")
-        if entry.get("design") != {"id": design_id}:
-            raise BundleError("catalog design metadata does not match design_id")
-        product_profile = entry.get("product_profile")
-        if (
-            not isinstance(product_profile, dict)
-            or product_profile.get("profile_id") != profile_id
-        ):
-            raise BundleError(
-                "catalog product_profile metadata does not match product_profile_id"
-            )
-        preview = entry.get("preview")
-        print_data = entry.get("print")
-        profile_preview = product_profile.get("preview")
-        profile_print = product_profile.get("print")
-        if not all(
-            isinstance(item, dict)
-            for item in (preview, print_data, profile_preview, profile_print)
-        ):
-            raise BundleError("catalog preview/print metadata must be objects")
-        assert isinstance(preview, dict)
-        assert isinstance(print_data, dict)
-        assert isinstance(profile_preview, dict)
-        assert isinstance(profile_print, dict)
-        if (
-            preview.get("canvas") != profile_preview.get("art")
-            or preview.get("transformed_pet")
-            != profile_preview.get("transformed_pet")
-            or print_data.get("canvas") != profile_print.get("canvas")
-            or print_data.get("delivery_status")
-            != profile_print.get("delivery_status")
-        ):
-            raise BundleError(
-                "catalog summary dimensions do not match product_profile metadata"
-            )
-        if not isinstance(entry.get("runtime_model"), str):
-            raise BundleError("catalog runtime_model must be a string")
-        runtime_model = entry["runtime_model"]
-        prompts = entry.get("prompts")
-        if not isinstance(prompts, dict) or set(prompts) != {
-            "art_template",
-            "pet_transform",
-        }:
-            raise BundleError("catalog prompts must identify art and pet prompt paths")
-        art_prompt_value = prompts.get("art_template")
-        pet_prompt_value = prompts.get("pet_transform")
-        if not isinstance(art_prompt_value, str) or not isinstance(
-            pet_prompt_value, str
-        ):
-            raise BundleError("catalog prompt paths must be strings")
-        _prompt_contract(Path(art_prompt_value), "art-template")
-        _, pet_prompt_category = _prompt_contract(
-            Path(pet_prompt_value), "pet-transform"
-        )
-        expected_pet_category = "gpt" if runtime_model == "gpt-image-2" else "gemini"
-        if pet_prompt_category != expected_pet_category:
-            raise BundleError("catalog pet prompt category does not match runtime_model")
-        reference_designs = entry.get(
-            "reference_designs", ["reference-design.png"]
-        )
-        if (
-            not isinstance(reference_designs, list)
-            or not reference_designs
-            or not all(isinstance(path, str) for path in reference_designs)
-            or reference_designs[0] != "reference-design.png"
-        ):
-            raise BundleError(
-                "catalog reference_designs must begin with reference-design.png"
-            )
-        expected_references = ["reference-design.png"] + [
-            f"{SUPPORTING_REFERENCES_DIR}/reference-design-{index:04d}.png"
-            for index in range(2, len(reference_designs) + 1)
-        ]
-        if reference_designs != expected_references:
-            raise BundleError(
-                "catalog reference_designs must use consecutive ordered bundle paths"
-            )
-        if template_id in seen:
-            raise BundleError(f"catalog contains duplicate template id: {template_id}")
-        seen.add(template_id)
-        if validate_bundles:
-            bundle_root = root / template_id
-            validate_bundle(bundle_root)
-            actual_art_prompt, _ = _bundle_prompt_name(bundle_root, "art-template")
-            actual_pet_prompt, _ = _bundle_prompt_name(bundle_root, "pet-transform")
-            if prompts != {
-                "art_template": actual_art_prompt,
-                "pet_transform": actual_pet_prompt,
-            }:
-                raise BundleError("catalog prompt paths do not match the published bundle")
-            actual_references = ["reference-design.png"] + [
-                path.relative_to(bundle_root).as_posix()
-                for path in _validate_supporting_references(bundle_root)
-            ]
-            if actual_references != reference_designs:
-                raise BundleError(
-                    "catalog reference_designs do not match the published bundle"
-                )
-    return value
-
-
-def _write_catalog(root: Path, entry: dict[str, object]) -> None:
-    path = root / CATALOG_FILENAME
-    if path.exists():
-        catalog = load_catalog(root)
-        entries = catalog["templates"]
-        assert isinstance(entries, list)
-    else:
-        entries = []
-    template_id = entry["template_id"]
-    updated = [
-        item
-        for item in entries
-        if isinstance(item, dict) and item.get("template_id") != template_id
-    ]
-    updated.append(entry)
-    updated.sort(key=lambda item: str(item["template_id"]))
-    contents = (
-        json.dumps({"schema_version": 1, "templates": updated}, indent=2) + "\n"
-    ).encode()
-    temporary: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            prefix=".catalog-",
-            suffix=".tmp",
-            dir=root,
-            delete=False,
-        ) as output:
-            output.write(contents)
-            output.flush()
-            os.fsync(output.fileno())
-            temporary = output.name
-        os.replace(temporary, path)
-        temporary = None
-    finally:
-        if temporary:
-            Path(temporary).unlink(missing_ok=True)
-
-
-def _validate_png_alpha(path: Path, label: str) -> None:
-    try:
-        with Image.open(path) as image:
-            image.load()
-            if image.format != "PNG":
-                raise BundleError(f"{label} must be a PNG: {path}")
-            if "A" not in image.getbands() and "transparency" not in image.info:
-                raise BundleError(f"{label} must contain an alpha channel: {path}")
-            alpha = (
-                image.getchannel("A")
-                if "A" in image.getbands()
-                else image.convert("RGBA").getchannel("A")
-            )
-            low, high = alpha.getextrema()
-            if high == 0:
-                raise BundleError(f"{label} is fully transparent: {path}")
-            if low == 255:
-                raise BundleError(f"{label} has no transparent pixels: {path}")
-    except BundleError:
-        raise
-    except (FileNotFoundError, UnidentifiedImageError, OSError) as exc:
-        raise BundleError(f"{label} is not a readable image: {path}") from exc
-
-
-def _validate_reference(path: Path, label: str) -> None:
-    if path.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
-        raise BundleError(f"{label} must be PNG or JPEG: {path}")
-    try:
-        with Image.open(path) as image:
-            image.load()
-            if image.width <= 0 or image.height <= 0:
-                raise BundleError(f"{label} has invalid dimensions: {path}")
-    except BundleError:
-        raise
-    except (FileNotFoundError, UnidentifiedImageError, OSError) as exc:
-        raise BundleError(f"{label} is not a readable image: {path}") from exc
-
-
-def _ordered_reference_designs(
-    value: Path | Sequence[Path],
-) -> tuple[Path, ...]:
-    candidates = [value] if isinstance(value, Path) else list(value)
-    if not candidates:
-        raise BundleError("at least one finished reference design is required")
-    references = tuple(path.expanduser().resolve() for path in candidates)
-    for index, reference in enumerate(references, 1):
-        _validate_reference(reference, f"finished reference design {index}")
-    return references
-
-
-def _validate_supporting_references(root: Path) -> tuple[Path, ...]:
-    directory = root / SUPPORTING_REFERENCES_DIR
-    if not directory.exists():
-        return ()
-    if not directory.is_dir():
-        raise BundleError(f"{SUPPORTING_REFERENCES_DIR} must be a directory")
-    entries = sorted(directory.iterdir(), key=lambda path: path.name)
-    if not entries:
-        raise BundleError(f"{SUPPORTING_REFERENCES_DIR} must not be empty")
-    expected = [
-        f"reference-design-{index:04d}.png"
-        for index in range(2, len(entries) + 2)
-    ]
-    if [path.name for path in entries] != expected:
-        raise BundleError(
-            f"{SUPPORTING_REFERENCES_DIR} must contain consecutively ordered "
-            "reference-design-NNNN.png files beginning at 0002"
-        )
-    for index, reference in enumerate(entries, 2):
-        if not reference.is_file():
-            raise BundleError(f"supporting reference {index} must be a file")
-        _validate_reference(reference, f"supporting reference design {index}")
-    return tuple(entries)
-
-
-def _validate_prompt(path: Path, label: str) -> Path:
+def _validated_prompt(path: Path, kind: str) -> Path:
     resolved = path.expanduser().resolve()
     if not resolved.is_file():
-        raise BundleError(f"{label} does not exist: {resolved}")
+        raise BundleError(f"{kind} prompt does not exist: {resolved}")
     if resolved.stat().st_size > PROMPT_MAX_BYTES:
-        raise BundleError(f"{label} exceeds the 1 MiB bundle limit: {resolved}")
+        raise BundleError(f"{kind} prompt exceeds the 1 MiB bundle limit: {resolved}")
     try:
         contents = resolved.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
-        raise BundleError(f"{label} must be UTF-8 text: {resolved}") from exc
-    if not contents.strip():
-        raise BundleError(f"{label} must not be empty: {resolved}")
-    if "\x00" in contents:
-        raise BundleError(f"{label} must not contain NUL bytes: {resolved}")
+        raise BundleError(f"{kind} prompt must be UTF-8 text: {resolved}") from exc
+    except OSError as exc:
+        raise BundleError(f"{kind} prompt is not readable: {resolved}") from exc
+    if not contents.strip() or "\x00" in contents:
+        raise BundleError(f"{kind} prompt must be nonempty UTF-8 text without NUL bytes")
     return resolved
 
 
+def _provider_category(provider: str) -> str:
+    expected_category = {"openai": "gpt", "gemini": "gemini"}.get(provider)
+    if expected_category is None:
+        raise BundleError(f"unsupported image provider: {provider}")
+    return expected_category
+
+
+def prompt_contract(path: Path, kind: str, provider: str) -> tuple[Path, str]:
+    """Validate the canonical provider-qualified filename exposed to FE."""
+    resolved = _validated_prompt(path, kind)
+    match = PROMPT_FILENAME_PATTERN.fullmatch(resolved.name)
+    if match is None or match.group(1) != kind:
+        raise BundleError(
+            f"{kind} bundle prompt filename mismatch; actual={resolved.name!r}; "
+            f"expected={kind}-{{gpt|gemini}}.md"
+        )
+    expected_category = _provider_category(provider)
+    if match.group(2) != expected_category:
+        raise BundleError(
+            f"{resolved.name} does not match the selected {provider} provider"
+        )
+    return resolved, resolved.name
+
+
+def authoring_prompt_contract(
+    path: Path, kind: str, provider: str
+) -> tuple[Path, str]:
+    """Validate an experiment prompt and return its canonical bundle name."""
+    resolved = _validated_prompt(path, kind)
+    match = AUTHORING_PROMPT_FILENAME_PATTERN.fullmatch(resolved.name)
+    if match is None or match.group(1) != kind:
+        raise BundleError(
+            f"{kind} authoring prompt filename mismatch; actual={resolved.name!r}; "
+            f"expected={kind}-{{gpt|gemini}}[-<variant>].md"
+        )
+    expected_category = _provider_category(provider)
+    if match.group(2) != expected_category:
+        raise BundleError(
+            f"{resolved.name} does not match the selected {provider} provider"
+        )
+    return resolved, f"{kind}-{expected_category}.md"
+
+
+def validate_raster(
+    path: Path,
+    label: str,
+    *,
+    require_png: bool = False,
+    require_alpha: bool = False,
+    expected_size: tuple[int, int] | None = None,
+    allow_large: bool = False,
+) -> tuple[int, int]:
+    resolved = path.expanduser().resolve()
+    try:
+        with warnings.catch_warnings():
+            if allow_large:
+                warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+            with Image.open(resolved) as image:
+                image.load()
+                if require_png and image.format != "PNG":
+                    raise BundleError(f"{label} must be PNG: {resolved}")
+                if image.width <= 0 or image.height <= 0:
+                    raise BundleError(f"{label} has invalid dimensions: {resolved}")
+                if expected_size is not None and image.size != expected_size:
+                    raise BundleError(
+                        f"{label} dimensions are {image.width}x{image.height}, expected "
+                        f"{expected_size[0]}x{expected_size[1]}"
+                    )
+                if require_alpha:
+                    if "A" not in image.getbands() and "transparency" not in image.info:
+                        raise BundleError(f"{label} must contain an alpha channel: {resolved}")
+                    low, high = image.convert("RGBA").getchannel("A").getextrema()
+                    if high == 0:
+                        raise BundleError(f"{label} is fully transparent: {resolved}")
+                    if low == 255:
+                        raise BundleError(f"{label} has no transparent pixels: {resolved}")
+                return image.size
+    except BundleError:
+        raise
+    except (FileNotFoundError, UnidentifiedImageError, OSError) as exc:
+        raise BundleError(f"{label} is not a readable image: {resolved}") from exc
+
+
+def canonical_reference_paths(count: int) -> list[str]:
+    if not 1 <= count <= MAX_RUNTIME_REFERENCES:
+        raise BundleError(
+            f"runtime requires one to {MAX_RUNTIME_REFERENCES} finished-design references"
+        )
+    return ["reference-design.png"] + [
+        f"{SUPPORTING_REFERENCES_DIR}/reference-design-{index:04d}.png"
+        for index in range(2, count + 1)
+    ]
+
+
 def _scaled_rect(rect: Rect, scale: float) -> Rect:
-    left = round(rect.x * scale)
-    top = round(rect.y * scale)
-    right = round(rect.right * scale)
-    bottom = round(rect.bottom * scale)
+    left = round_half_up(rect.x * scale)
+    top = round_half_up(rect.y * scale)
+    right = round_half_up(rect.right * scale)
+    bottom = round_half_up(rect.bottom * scale)
     return Rect(left, top, right - left, bottom - top)
 
 
-def _validate_resolution_pair(preview: Layout, print_layout: Layout) -> None:
+def validate_layout_pair(preview: Layout, print_layout: Layout) -> None:
     if (
         print_layout.canvas_width <= preview.canvas_width
         or print_layout.canvas_height <= preview.canvas_height
     ):
-        raise BundleError("print art must be larger than preview art in both dimensions")
+        raise BundleError(
+            mismatch(
+                "print canvas must be larger than preview canvas",
+                expected=f"> {preview.canvas_width}x{preview.canvas_height} in both dimensions",
+                actual=f"{print_layout.canvas_width}x{print_layout.canvas_height}",
+            )
+        )
     if (
         print_layout.canvas_width * preview.canvas_height
         != print_layout.canvas_height * preview.canvas_width
     ):
-        raise BundleError("preview and print art must have exactly matching aspect ratios")
-    scale = print_layout.canvas_width / preview.canvas_width
-    if print_layout.pet_box != _scaled_rect(preview.pet_box, scale):
-        raise BundleError("layout-print pet.box is not the scaled preview pet.box")
-    if print_layout.name_box != _scaled_rect(preview.name_box, scale):
-        raise BundleError("layout-print name.box is not the scaled preview name.box")
-    if print_layout.pet_rotation_degrees != preview.pet_rotation_degrees:
-        raise BundleError("preview and print pet rotation must match")
-    if print_layout.font_relative != preview.font_relative:
-        raise BundleError("preview and print layouts must use the same bundled font")
-    if print_layout.font_size_px != max(1, round(preview.font_size_px * scale)):
-        raise BundleError("layout-print font_size_px is not scaled from the preview layout")
-    if print_layout.min_font_size_px != max(
-        1, round(preview.min_font_size_px * scale)
-    ):
         raise BundleError(
-            "layout-print min_font_size_px is not scaled from the preview layout"
+            mismatch(
+                "preview/print aspect ratio",
+                expected=f"{preview.canvas_width}:{preview.canvas_height}",
+                actual=f"{print_layout.canvas_width}:{print_layout.canvas_height}",
+            )
+        )
+    scale = print_layout.canvas_width / preview.canvas_width
+    expected_pet_box = _scaled_rect(preview.pet_box, scale)
+    if print_layout.pet_box != expected_pet_box:
+        raise BundleError(
+            mismatch(
+                "layout-print pet.box",
+                expected=expected_pet_box,
+                actual=print_layout.pet_box,
+            )
+        )
+    expected_name_box = _scaled_rect(preview.name_box, scale)
+    if print_layout.name_box != expected_name_box:
+        raise BundleError(
+            mismatch(
+                "layout-print name.box",
+                expected=expected_name_box,
+                actual=print_layout.name_box,
+            )
+        )
+    scaled_name_values = {
+        "font_size_px": max(1, round_half_up(preview.font_size_px * scale)),
+        "min_font_size_px": max(
+            1, round_half_up(preview.min_font_size_px * scale)
+        ),
+        "name_padding_px": max(
+            0, round_half_up(preview.name_padding_px * scale)
+        ),
+    }
+    for field, expected in scaled_name_values.items():
+        if getattr(print_layout, field) != expected:
+            json_field = "padding_px" if field == "name_padding_px" else field
+            raise BundleError(
+                mismatch(
+                    f"layout-print name.{json_field}",
+                    expected=expected,
+                    actual=getattr(print_layout, field),
+                )
+            )
+    if print_layout.font_relative != preview.font_relative:
+        raise BundleError(
+            mismatch(
+                "layout-print name.font",
+                expected=preview.font_relative,
+                actual=print_layout.font_relative,
+            )
         )
     if (
-        print_layout.color != preview.color
+        print_layout.name_fit != preview.name_fit
+        or print_layout.color != preview.color
         or print_layout.horizontal_align != preview.horizontal_align
-        or print_layout.vertical_align != preview.vertical_align
     ):
-        raise BundleError("preview and print name rendering settings must match")
-
-
-def validate_bundle(root: Path, *, validate_template_id: bool = True) -> Layout:
-    root = root.expanduser().resolve()
-    if validate_template_id and (
-        len(root.name) > 127
-        or not re.fullmatch(r"[a-z0-9][a-z0-9-]*[a-z0-9]", root.name)
-    ):
-        raise BundleError(f"bundle directory name is not a valid template id: {root.name}")
-    if not root.is_dir():
-        raise BundleError(f"bundle directory does not exist: {root}")
-    art_prompt_name, _ = _bundle_prompt_name(root, "art-template")
-    pet_prompt_name, pet_prompt_category = _bundle_prompt_name(root, "pet-transform")
-    allowed_entries = {
-        "layout.json",
-        "layout-print.json",
-        "art.png",
-        "print",
-        "qa",
-        "reference-design.png",
-        SUPPORTING_REFERENCES_DIR,
-        art_prompt_name,
-        pet_prompt_name,
-        "fonts",
-    }
-    unknown_entries = {path.name for path in root.iterdir()} - allowed_entries
-    if unknown_entries:
         raise BundleError(
-            "bundle contains unsupported top-level entries: "
-            + ", ".join(sorted(unknown_entries))
-        )
-    try:
-        layout = load_layout(root)
-        print_layout = load_layout(root, layout_path=root / "layout-print.json")
-    except ConfigError as exc:
-        raise BundleError(str(exc)) from exc
-    if layout.art_relative != "art.png":
-        raise BundleError("layout.art must be art.png in a published bundle")
-    if print_layout.art_relative != "print/art.png":
-        raise BundleError(
-            "layout-print.art must be print/art.png in a published bundle"
-        )
-    _validate_png_alpha(root / "art.png", "art.png")
-    _validate_png_alpha(root / "print" / "art.png", "print/art.png")
-    _validate_resolution_pair(layout, print_layout)
-    _validate_png_alpha(root / "qa" / "transformed-pet.png", "qa/transformed-pet.png")
-    _validate_reference(root / "reference-design.png", "reference-design.png")
-    _validate_supporting_references(root)
-    _validate_prompt(root / art_prompt_name, art_prompt_name)
-    _validate_prompt(root / pet_prompt_name, pet_prompt_name)
-    expected_pet_category = "gpt" if layout.runtime_model == "gpt-image-2" else "gemini"
-    if pet_prompt_category != expected_pet_category:
-        raise BundleError(
-            f"{pet_prompt_name} does not match the {expected_pet_category} runtime route"
-        )
-    try:
-        resolve_ofl_license(layout.font_path)
-    except FontLicenseError as exc:
-        raise BundleError(str(exc)) from exc
-    fonts_dir = root / "fonts"
-    if not fonts_dir.is_dir():
-        raise BundleError("fonts must be a directory")
-    font_entries = {path.name for path in fonts_dir.iterdir()}
-    if font_entries != {layout.font_path.name, "OFL.txt"}:
-        raise BundleError("fonts must contain exactly the configured TTF and OFL.txt")
-    if not all(path.is_file() for path in fonts_dir.iterdir()):
-        raise BundleError("fonts may contain files only")
-    qa_dir = root / "qa"
-    if not qa_dir.is_dir():
-        raise BundleError("qa must be a directory")
-    qa_entries = {path.name for path in qa_dir.iterdir()}
-    if qa_entries != {"transformed-pet.png"}:
-        raise BundleError("qa must contain exactly transformed-pet.png")
-    if not all(path.is_file() for path in qa_dir.iterdir()):
-        raise BundleError("qa may contain files only")
-    print_dir = root / "print"
-    if not print_dir.is_dir():
-        raise BundleError("print must be a directory")
-    print_entries = {path.name for path in print_dir.iterdir()}
-    if print_entries != {"art.png"}:
-        raise BundleError("print must contain exactly art.png")
-    if not all(path.is_file() for path in print_dir.iterdir()):
-        raise BundleError("print may contain files only")
-    return layout
-
-
-def publish_bundle(
-    *,
-    template_dir: Path,
-    output_dir: Path,
-    design_id: str,
-    product_profile: Path,
-    exemplar: Path,
-    reference_design: Path | Sequence[Path],
-    art_prompt: Path,
-    pet_prompt: Path,
-    print_art: Path,
-    print_layout_path: Path,
-    font_license: Path | None = None,
-    runtime_model: str | None = "gpt-image-2",
-    force: bool = False,
-) -> Path:
-    template_dir = template_dir.expanduser().resolve()
-    output_dir = output_dir.expanduser().resolve()
-    try:
-        profile = load_product_profile(product_profile)
-    except ProductProfileError as exc:
-        raise BundleError(str(exc)) from exc
-    template_id = catalog_template_id(design_id, profile.profile_id)
-    destination = output_dir / template_id
-    exemplar = exemplar.expanduser().resolve()
-    reference_designs = _ordered_reference_designs(reference_design)
-    art_prompt = _validate_prompt(art_prompt, "art template prompt")
-    pet_prompt = _validate_prompt(pet_prompt, "pet transformation prompt")
-    art_prompt_name, _ = _prompt_contract(art_prompt, "art-template")
-    pet_prompt_name, pet_prompt_category = _prompt_contract(
-        pet_prompt, "pet-transform"
-    )
-    expected_pet_category = "gpt" if runtime_model == "gpt-image-2" else "gemini"
-    if pet_prompt_category != expected_pet_category:
-        raise BundleError(
-            f"{pet_prompt_name} does not match the {expected_pet_category} runtime route"
-        )
-    _validate_png_alpha(exemplar, "approved exemplar")
-
-    selected_print_art = print_art.expanduser().resolve()
-    selected_print_layout_path = print_layout_path.expanduser().resolve()
-    try:
-        preview_layout = load_layout(template_dir)
-        try:
-            print_layout_value = json.loads(
-                selected_print_layout_path.read_text(encoding="utf-8")
+            mismatch(
+                "layout-print name rendering settings",
+                expected={
+                    "fit": preview.name_fit,
+                    "color": preview.color,
+                    "horizontal_align": preview.horizontal_align,
+                },
+                actual={
+                    "fit": print_layout.name_fit,
+                    "color": print_layout.color,
+                    "horizontal_align": print_layout.horizontal_align,
+                },
             )
-        except (FileNotFoundError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise BundleError(
-                f"print layout is not readable JSON: {selected_print_layout_path}"
-            ) from exc
-        print_layout = parse_layout(
-            print_layout_value,
-            template_dir,
-            art_override=selected_print_art,
         )
-    except ConfigError as exc:
-        raise BundleError(str(exc)) from exc
-    _validate_png_alpha(preview_layout.art_path, "preview art")
-    _validate_png_alpha(selected_print_art, "print art")
-    _validate_resolution_pair(preview_layout, print_layout)
-    if (preview_layout.canvas_width, preview_layout.canvas_height) != (
-        profile.preview_art_size.width,
-        profile.preview_art_size.height,
-    ):
-        raise BundleError("preview layout canvas does not match the product profile")
-    if (print_layout.canvas_width, print_layout.canvas_height) != (
-        profile.print_size.width,
-        profile.print_size.height,
-    ):
-        raise BundleError("print layout canvas does not match the product profile")
-    try:
-        license_path = resolve_ofl_license(preview_layout.font_path, font_license)
-    except FontLicenseError as exc:
-        raise BundleError(str(exc)) from exc
 
-    if destination.exists() and not force:
-        raise BundleError(f"bundle already exists: {destination} (pass --force to replace it)")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    stage = Path(tempfile.mkdtemp(prefix=f".{template_id}-", dir=output_dir))
-    backup: Path | None = None
-    installed = False
-    try:
-        (stage / "qa").mkdir()
-        (stage / "fonts").mkdir()
-        (stage / "print").mkdir()
-        shutil.copyfile(preview_layout.art_path, stage / "art.png")
-        shutil.copyfile(selected_print_art, stage / "print" / "art.png")
-        shutil.copyfile(exemplar, stage / "qa" / "transformed-pet.png")
-        shutil.copyfile(art_prompt, stage / art_prompt_name)
-        shutil.copyfile(pet_prompt, stage / pet_prompt_name)
-        with Image.open(reference_designs[0]) as source_reference:
-            source_reference.convert("RGB").save(stage / "reference-design.png", "PNG")
-        if len(reference_designs) > 1:
-            supporting_dir = stage / SUPPORTING_REFERENCES_DIR
-            supporting_dir.mkdir()
-            for index, supporting_reference in enumerate(reference_designs[1:], 2):
-                with Image.open(supporting_reference) as source_reference:
-                    source_reference.convert("RGB").save(
-                        supporting_dir / f"reference-design-{index:04d}.png",
-                        "PNG",
-                    )
-        shutil.copyfile(
-            preview_layout.font_path,
-            stage / "fonts" / preview_layout.font_path.name,
-        )
-        shutil.copyfile(license_path, stage / "fonts" / "OFL.txt")
-        layout_data = preview_layout.to_dict()
-        layout_data["art"] = "art.png"
-        layout_data["name"]["font"] = f"fonts/{preview_layout.font_path.name}"
-        print_layout_data = print_layout.to_dict()
-        print_layout_data["art"] = "print/art.png"
-        print_layout_data["name"]["font"] = (
-            f"fonts/{preview_layout.font_path.name}"
-        )
-        if runtime_model is None:
-            layout_data.pop("model", None)
-            print_layout_data.pop("model", None)
-        else:
-            layout_data["model"] = runtime_model
-            print_layout_data["model"] = runtime_model
-        try:
-            parse_layout(layout_data, stage)
-            parse_layout(print_layout_data, stage)
-        except ConfigError as exc:
-            raise BundleError(str(exc)) from exc
-        (stage / "layout.json").write_text(
-            json.dumps(layout_data, indent=2) + "\n", encoding="utf-8"
-        )
-        (stage / "layout-print.json").write_text(
-            json.dumps(print_layout_data, indent=2) + "\n", encoding="utf-8"
-        )
-        validate_bundle(stage, validate_template_id=False)
 
-        if destination.exists():
-            backup = output_dir / f".{template_id}-previous"
-            if backup.exists():
-                shutil.rmtree(backup)
-            os.replace(destination, backup)
-        os.replace(stage, destination)
-        installed = True
-        validate_bundle(destination)
-        _write_catalog(
-            output_dir,
-            _catalog_entry(
-                design_id=design_id,
-                profile=profile,
-                layout=preview_layout,
-                print_layout=print_layout,
-                runtime_model=runtime_model,
-                reference_count=len(reference_designs),
-                art_prompt_name=art_prompt_name,
-                pet_prompt_name=pet_prompt_name,
-            ),
-        )
-        if backup is not None:
-            shutil.rmtree(backup)
-        return destination
-    except Exception:
-        if backup is not None and backup.exists():
-            if destination.exists():
-                shutil.rmtree(destination)
-            os.replace(backup, destination)
-        elif installed and destination.exists():
-            shutil.rmtree(destination)
-        raise
-    finally:
-        if stage.exists():
-            shutil.rmtree(stage)
+def media_type(path: Path) -> str:
+    return {
+        ".png": "image/png",
+        ".json": "application/json",
+        ".md": "text/markdown",
+        ".ttf": "font/ttf",
+        ".txt": "text/plain",
+    }.get(path.suffix.lower(), "application/octet-stream")

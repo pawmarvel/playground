@@ -46,20 +46,20 @@ class ManualPrintFlowTests(unittest.TestCase):
         fonts.mkdir()
         copy_font(fonts)
         layout = {
-            "schema_version": 1,
+            "schema_version": 2,
             "art": "art.png",
             "pet": {
                 "box": {"x": 200, "y": 200, "width": 400, "height": 480},
-                "rotation_degrees": 0,
             },
             "name": {
                 "box": {"x": 80, "y": 760, "width": 640, "height": 200},
                 "font": "fonts/TestFont.ttf",
-                "font_size_px": 120,
-                "min_font_size_px": 40,
+                "font_size_px": 160,
+                "min_font_size_px": 80,
+                "fit": "shrink_only",
+                "padding_px": 8,
                 "color": "#FFFFFFFF",
                 "horizontal_align": "center",
-                "vertical_align": "middle",
             },
         }
         (self.template / "layout.json").write_text(json.dumps(layout), encoding="utf-8")

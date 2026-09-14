@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 import tempfile
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 from PIL import Image, UnidentifiedImageError
 
+from .artifact_io import read_json
 
 RGBA_PATTERN = re.compile(r"^#[0-9A-Fa-f]{8}$")
 HORIZONTAL_ALIGNMENTS = {"left", "center", "right"}
-VERTICAL_ALIGNMENTS = {"top", "middle", "bottom"}
 
 
 class ConfigError(ValueError):
@@ -53,40 +53,35 @@ class Layout:
     canvas_width: int
     canvas_height: int
     pet_box: Rect
-    pet_rotation_degrees: float
     font_relative: str
     font_path: Path
     name_box: Rect
     font_size_px: int
     min_font_size_px: int
+    name_padding_px: int
+    name_fit: str
     color: str
     horizontal_align: str
-    vertical_align: str
-    runtime_model: str | None = None
+    schema_version: int = 2
 
     def to_dict(self) -> dict[str, Any]:
-        rotation: int | float = self.pet_rotation_degrees
-        if float(rotation).is_integer():
-            rotation = int(rotation)
         result = {
-            "schema_version": 1,
+            "schema_version": 2,
             "art": self.art_relative,
             "pet": {
                 "box": self.pet_box.to_dict(),
-                "rotation_degrees": rotation,
             },
             "name": {
                 "box": self.name_box.to_dict(),
                 "font": self.font_relative,
                 "font_size_px": self.font_size_px,
                 "min_font_size_px": self.min_font_size_px,
+                "fit": self.name_fit,
+                "padding_px": self.name_padding_px,
                 "color": self.color.upper(),
                 "horizontal_align": self.horizontal_align,
-                "vertical_align": self.vertical_align,
             },
         }
-        if self.runtime_model is not None:
-            result["model"] = self.runtime_model
         return result
 
 
@@ -141,15 +136,20 @@ def _resolve_inside(template_dir: Path, relative: Any, label: str) -> tuple[str,
     return candidate.as_posix(), resolved
 
 
-def _validate_image(path: Path, label: str) -> tuple[int, int]:
+def _validate_image(
+    path: Path, label: str, *, allow_large: bool = False
+) -> tuple[int, int]:
     if not path.is_file():
         raise ConfigError(f"{label} does not exist: {path}")
     try:
-        with Image.open(path) as image:
-            image.load()
-            if image.width <= 0 or image.height <= 0:
-                raise ConfigError(f"{label} has invalid dimensions: {path}")
-            return image.width, image.height
+        with warnings.catch_warnings():
+            if allow_large:
+                warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+            with Image.open(path) as image:
+                image.load()
+                if image.width <= 0 or image.height <= 0:
+                    raise ConfigError(f"{label} has invalid dimensions: {path}")
+                return image.width, image.height
     except UnidentifiedImageError as exc:
         raise ConfigError(f"{label} is not a supported image: {path}") from exc
 
@@ -165,38 +165,31 @@ def parse_layout(
     *,
     art_override: Path | None = None,
     font_override: Path | None = None,
+    allow_large_art: bool = False,
 ) -> Layout:
     template_dir = template_dir.expanduser().resolve()
     data = _require_mapping(value, "layout")
     required_keys = {"schema_version", "art", "pet", "name"}
     missing = required_keys - set(data)
-    unknown = set(data) - required_keys - {"model"}
+    schema_version = data.get("schema_version")
+    if schema_version != 2:
+        raise ConfigError("schema_version must be 2")
+    unknown = set(data) - required_keys
     if missing:
         raise ConfigError(f"layout is missing: {', '.join(sorted(missing))}")
     if unknown:
         raise ConfigError(
             f"layout has unsupported fields: {', '.join(sorted(unknown))}"
         )
-    if data["schema_version"] != 1:
-        raise ConfigError("schema_version must be 1")
-    runtime_model = data.get("model")
-    if runtime_model is not None and runtime_model != "gpt-image-2":
-        raise ConfigError("model must be gpt-image-2 when present")
-
     art_relative, configured_art = _resolve_inside(template_dir, data["art"], "art")
     art_path = art_override.expanduser().resolve() if art_override else configured_art
-    canvas_width, canvas_height = _validate_image(art_path, "art")
+    canvas_width, canvas_height = _validate_image(
+        art_path, "art", allow_large=allow_large_art
+    )
 
     pet = _require_mapping(data["pet"], "pet")
-    _require_exact_keys(pet, {"box", "rotation_degrees"}, "pet")
+    _require_exact_keys(pet, {"box"}, "pet")
     pet_box = _parse_rect(pet["box"], "pet.box")
-    rotation = pet["rotation_degrees"]
-    if isinstance(rotation, bool) or not isinstance(rotation, (int, float)):
-        raise ConfigError("pet.rotation_degrees must be a number")
-    if not math.isfinite(rotation):
-        raise ConfigError("pet.rotation_degrees must be finite")
-    if not -360 <= rotation <= 360:
-        raise ConfigError("pet.rotation_degrees must be between -360 and 360")
 
     name = _require_mapping(data["name"], "name")
     _require_exact_keys(
@@ -206,36 +199,48 @@ def parse_layout(
             "font",
             "font_size_px",
             "min_font_size_px",
+            "fit",
+            "padding_px",
             "color",
             "horizontal_align",
-            "vertical_align",
         },
         "name",
     )
     name_box = _parse_rect(name["box"], "name.box")
     font_relative, configured_font = _resolve_inside(template_dir, name["font"], "font")
+    if re.fullmatch(r"fonts/[A-Za-z0-9._-]+\.ttf", font_relative) is None:
+        raise ConfigError("name.font must use fonts/<filename>.ttf")
     font_path = font_override.expanduser().resolve() if font_override else configured_font
     if not font_path.is_file():
         raise ConfigError(f"font does not exist: {font_path}")
 
-    font_size = _require_int(name["font_size_px"], "name.font_size_px")
-    min_font_size = _require_int(name["min_font_size_px"], "name.min_font_size_px")
-    if min_font_size <= 0 or font_size <= 0 or min_font_size > font_size:
+    font_size_px = _require_int(name["font_size_px"], "name.font_size_px")
+    min_font_size_px = _require_int(
+        name["min_font_size_px"], "name.min_font_size_px"
+    )
+    padding_px = _require_int(name["padding_px"], "name.padding_px")
+    if font_size_px <= 0:
+        raise ConfigError("name.font_size_px must be positive")
+    if min_font_size_px <= 0:
+        raise ConfigError("name.min_font_size_px must be positive")
+    if min_font_size_px > font_size_px:
         raise ConfigError(
-            "name font sizes must be positive and min_font_size_px must not exceed font_size_px"
+            "name.min_font_size_px must not exceed name.font_size_px"
         )
+    if name["fit"] != "shrink_only":
+        raise ConfigError("name.fit must be shrink_only")
+    if padding_px < 0:
+        raise ConfigError("name.padding_px must not be negative")
+    if padding_px * 2 >= name_box.width or padding_px * 2 >= name_box.height:
+        raise ConfigError("name.padding_px leaves no usable name-box area")
+
     color = name["color"]
     if not isinstance(color, str) or not RGBA_PATTERN.fullmatch(color):
         raise ConfigError("name.color must use #RRGGBBAA")
     horizontal = name["horizontal_align"]
-    vertical = name["vertical_align"]
     if horizontal not in HORIZONTAL_ALIGNMENTS:
         raise ConfigError(
             f"name.horizontal_align must be one of {', '.join(sorted(HORIZONTAL_ALIGNMENTS))}"
-        )
-    if vertical not in VERTICAL_ALIGNMENTS:
-        raise ConfigError(
-            f"name.vertical_align must be one of {', '.join(sorted(VERTICAL_ALIGNMENTS))}"
         )
 
     _validate_rect_intersection(pet_box, canvas_width, canvas_height, "pet.box")
@@ -248,31 +253,40 @@ def parse_layout(
         canvas_width=canvas_width,
         canvas_height=canvas_height,
         pet_box=pet_box,
-        pet_rotation_degrees=float(rotation),
         font_relative=font_relative,
         font_path=font_path,
         name_box=name_box,
-        font_size_px=font_size,
-        min_font_size_px=min_font_size,
+        font_size_px=font_size_px,
+        min_font_size_px=min_font_size_px,
+        name_padding_px=padding_px,
+        name_fit="shrink_only",
         color=color.upper(),
         horizontal_align=horizontal,
-        vertical_align=vertical,
-        runtime_model=runtime_model,
+        schema_version=schema_version,
     )
 
 
-def load_layout(template_dir: Path, layout_path: Path | None = None) -> Layout:
+def load_layout(
+    template_dir: Path,
+    layout_path: Path | None = None,
+    *,
+    allow_large_art: bool = False,
+) -> Layout:
     template_dir = template_dir.expanduser().resolve()
     path = (layout_path or template_dir / "layout.json").expanduser().resolve()
-    if not path.is_file():
-        raise ConfigError(f"layout does not exist: {path}")
+    data = read_json(
+        path,
+        label="layout",
+        error_type=ConfigError,
+        require_object=True,
+        correction="fix layout.json or save it again from pawmarvel-layout-config.",
+    )
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except UnicodeDecodeError as exc:
-        raise ConfigError(f"layout must be UTF-8 JSON: {path}") from exc
-    except json.JSONDecodeError as exc:
-        raise ConfigError(f"layout contains invalid JSON: {path}: {exc}") from exc
-    return parse_layout(data, template_dir)
+        return parse_layout(data, template_dir, allow_large_art=allow_large_art)
+    except ConfigError as exc:
+        raise ConfigError(
+            f"layout validation failed; layout={path}; error={exc}"
+        ) from exc
 
 
 def write_layout(path: Path, layout: Layout) -> None:

@@ -6,12 +6,12 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
 from typing import Any, Mapping
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 
+from .artifact_io import read_json
 from .image_size import (
     GPT_IMAGE_2_EDGE_MULTIPLE,
     GPT_IMAGE_2_MAX_EDGE,
@@ -22,7 +22,7 @@ from .image_size import (
 )
 
 
-PROFILE_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:[a-z0-9-]*[a-z0-9])?$")
+PROFILE_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 class ProductProfileError(ValueError):
@@ -37,7 +37,6 @@ class ProductProfile:
     preview_art_size: ImageSize
     preview_pet_size: ImageSize
     preview_target_long_edge: int
-    reference_fit: str
     print_spec: Mapping[str, Any]
 
     @property
@@ -62,7 +61,6 @@ class ProductProfile:
             },
             "preview": {
                 "target_long_edge_px": self.preview_target_long_edge,
-                "reference_fit": self.reference_fit,
                 "art": self.preview_art_size.to_dict(),
                 "transformed_pet": self.preview_pet_size.to_dict(),
             },
@@ -147,7 +145,6 @@ def create_product_profile(
     profile_id: str,
     print_size: ImageSize,
     preview_target_long_edge: int = 1024,
-    reference_fit: str = "contain",
     dpi: int | None = None,
     color_space: str = "sRGB",
     background: str = "transparent",
@@ -157,14 +154,12 @@ def create_product_profile(
     max_file_bytes: int | None = None,
     vendor_requirements_confirmed: bool = False,
 ) -> ProductProfile:
-    if not PROFILE_ID_PATTERN.fullmatch(profile_id):
+    if not 1 <= len(profile_id) <= 64 or not PROFILE_ID_PATTERN.fullmatch(profile_id):
         raise ProductProfileError(
             "profile ID must contain lowercase letters, numbers, and internal hyphens"
         )
     if print_size.width <= 0 or print_size.height <= 0:
         raise ProductProfileError("print dimensions must be positive")
-    if reference_fit not in {"cover", "contain"}:
-        raise ProductProfileError("reference fit must be cover or contain")
     if dpi is not None and dpi <= 0:
         raise ProductProfileError("DPI must be positive")
     if bleed_px < 0 or safe_margin_px < 0:
@@ -215,7 +210,6 @@ def create_product_profile(
         preview_art_size=art,
         preview_pet_size=pet,
         preview_target_long_edge=preview_target_long_edge,
-        reference_fit=reference_fit,
         print_spec=print_spec,
     )
 
@@ -226,8 +220,24 @@ def _require_mapping(value: Any, label: str) -> Mapping[str, Any]:
     return value
 
 
+def _require_exact_keys(
+    value: Mapping[str, Any], expected: set[str], label: str
+) -> None:
+    missing = expected - set(value)
+    extra = set(value) - expected
+    if missing:
+        raise ProductProfileError(
+            f"{label} is missing required fields: {', '.join(sorted(missing))}"
+        )
+    if extra:
+        raise ProductProfileError(
+            f"{label} contains unsupported fields: {', '.join(sorted(extra))}"
+        )
+
+
 def _size_from_mapping(value: Any, label: str) -> ImageSize:
     data = _require_mapping(value, label)
+    _require_exact_keys(data, {"width", "height"}, label)
     width = data.get("width")
     height = data.get("height")
     if isinstance(width, bool) or not isinstance(width, int):
@@ -239,24 +249,62 @@ def _size_from_mapping(value: Any, label: str) -> ImageSize:
     return ImageSize(width, height)
 
 
-def load_product_profile(path: Path) -> ProductProfile:
+def _load_product_profile(path: Path) -> ProductProfile:
     resolved = path.expanduser().resolve()
-    if not resolved.is_file():
-        raise ProductProfileError(f"product profile does not exist: {resolved}")
-    try:
-        value = json.loads(resolved.read_text(encoding="utf-8"))
-    except UnicodeDecodeError as exc:
-        raise ProductProfileError("product profile must be UTF-8 JSON") from exc
-    except json.JSONDecodeError as exc:
-        raise ProductProfileError(f"product profile contains invalid JSON: {exc}") from exc
+    value = read_json(
+        resolved,
+        label="product profile",
+        error_type=ProductProfileError,
+        require_object=True,
+        correction="fix the profile or regenerate it with pawmarvel-product-profile create.",
+    )
     root = _require_mapping(value, "product profile")
+    _require_exact_keys(
+        root,
+        {"schema_version", "profile_id", "print", "preview", "geometry"},
+        "product profile",
+    )
     if root.get("schema_version") != 1:
         raise ProductProfileError("product profile schema_version must be 1")
     profile_id = root.get("profile_id")
-    if not isinstance(profile_id, str) or not PROFILE_ID_PATTERN.fullmatch(profile_id):
+    if (
+        not isinstance(profile_id, str)
+        or not 1 <= len(profile_id) <= 64
+        or not PROFILE_ID_PATTERN.fullmatch(profile_id)
+    ):
         raise ProductProfileError("product profile ID is invalid")
     print_data = _require_mapping(root.get("print"), "print")
     preview = _require_mapping(root.get("preview"), "preview")
+    geometry = _require_mapping(root.get("geometry"), "geometry")
+    required_print_fields = {
+        "canvas",
+        "dpi",
+        "physical_size",
+        "bleed_px",
+        "safe_margin_px",
+        "color_space",
+        "icc_profile",
+        "background",
+        "output_format",
+        "max_file_bytes",
+        "vendor_requirements_confirmed",
+        "delivery_status",
+    }
+    _require_exact_keys(print_data, required_print_fields, "print")
+    _require_exact_keys(
+        preview,
+        {"target_long_edge_px", "art", "transformed_pet"},
+        "preview",
+    )
+    _require_exact_keys(
+        geometry,
+        {
+            "aspect_ratio",
+            "preview_to_print_scale",
+            "nominal_print_layer_dimensions",
+        },
+        "geometry",
+    )
     print_size = _size_from_mapping(print_data.get("canvas"), "print.canvas")
     art = _size_from_mapping(preview.get("art"), "preview.art")
     pet = _size_from_mapping(preview.get("transformed_pet"), "preview.transformed_pet")
@@ -275,29 +323,17 @@ def load_product_profile(path: Path) -> ProductProfile:
     target = preview.get("target_long_edge_px")
     if isinstance(target, bool) or not isinstance(target, int) or target <= 0:
         raise ProductProfileError("preview.target_long_edge_px must be positive")
-    reference_fit = preview.get("reference_fit")
-    if reference_fit not in {"cover", "contain"}:
-        raise ProductProfileError("preview.reference_fit must be cover or contain")
-    print_spec = {key: item for key, item in print_data.items() if key != "canvas"}
-    required_print_fields = {
-        "dpi",
-        "physical_size",
-        "bleed_px",
-        "safe_margin_px",
-        "color_space",
-        "icc_profile",
-        "background",
-        "output_format",
-        "max_file_bytes",
-        "vendor_requirements_confirmed",
-        "delivery_status",
-    }
-    missing_print_fields = required_print_fields - set(print_spec)
-    if missing_print_fields:
+    expected_art = derive_art_preview_size(print_size, target)
+    if art != expected_art:
         raise ProductProfileError(
-            "print is missing required fields: "
-            + ", ".join(sorted(missing_print_fields))
+            "preview.art conflicts with the profile print canvas and target long edge"
         )
+    expected_preview_pet = _closest_square(min(art.width, art.height))
+    if pet != expected_preview_pet:
+        raise ProductProfileError(
+            "preview.transformed_pet conflicts with the derived preview art size"
+        )
+    print_spec = {key: item for key, item in print_data.items() if key != "canvas"}
     dpi = print_spec.get("dpi")
     if dpi is not None and (
         isinstance(dpi, bool) or not isinstance(dpi, int) or dpi <= 0
@@ -317,6 +353,9 @@ def load_product_profile(path: Path) -> ProductProfile:
             raise ProductProfileError("print.physical_size must be null when DPI is null")
     else:
         physical = _require_mapping(physical_size, "print.physical_size")
+        _require_exact_keys(
+            physical, {"width", "height", "unit"}, "print.physical_size"
+        )
         physical_width = physical.get("width")
         physical_height = physical.get("height")
         if (
@@ -365,6 +404,57 @@ def load_product_profile(path: Path) -> ProductProfile:
         raise ProductProfileError(
             "print canvas must be larger than preview.art in both axes"
         )
+
+    ratio_gcd = math.gcd(print_size.width, print_size.height)
+    expected_ratio = ImageSize(
+        print_size.width // ratio_gcd,
+        print_size.height // ratio_gcd,
+    )
+    ratio = _size_from_mapping(geometry.get("aspect_ratio"), "geometry.aspect_ratio")
+    if ratio != expected_ratio:
+        raise ProductProfileError(
+            "geometry.aspect_ratio conflicts with print.canvas"
+        )
+
+    scale = geometry.get("preview_to_print_scale")
+    if isinstance(scale, bool) or not isinstance(scale, (int, float)) or scale <= 0:
+        raise ProductProfileError(
+            "geometry.preview_to_print_scale must be a positive number"
+        )
+    expected_scale = print_size.width / art.width
+    if not math.isclose(float(scale), expected_scale, rel_tol=1e-12, abs_tol=1e-12):
+        raise ProductProfileError(
+            "geometry.preview_to_print_scale conflicts with preview and print canvases"
+        )
+
+    nominal = _require_mapping(
+        geometry.get("nominal_print_layer_dimensions"),
+        "geometry.nominal_print_layer_dimensions",
+    )
+    _require_exact_keys(
+        nominal,
+        {"art", "transformed_pet"},
+        "geometry.nominal_print_layer_dimensions",
+    )
+    nominal_art = _size_from_mapping(
+        nominal.get("art"), "geometry.nominal_print_layer_dimensions.art"
+    )
+    nominal_pet = _size_from_mapping(
+        nominal.get("transformed_pet"),
+        "geometry.nominal_print_layer_dimensions.transformed_pet",
+    )
+    expected_pet = ImageSize(
+        max(1, round(pet.width * expected_scale)),
+        max(1, round(pet.height * expected_scale)),
+    )
+    if nominal_art != print_size:
+        raise ProductProfileError(
+            "geometry.nominal_print_layer_dimensions.art conflicts with print.canvas"
+        )
+    if nominal_pet != expected_pet:
+        raise ProductProfileError(
+            "geometry.nominal_print_layer_dimensions.transformed_pet conflicts with preview scale"
+        )
     return ProductProfile(
         path=resolved,
         profile_id=profile_id,
@@ -372,9 +462,19 @@ def load_product_profile(path: Path) -> ProductProfile:
         preview_art_size=art,
         preview_pet_size=pet,
         preview_target_long_edge=target,
-        reference_fit=reference_fit,
         print_spec=print_spec,
     )
+
+
+def load_product_profile(path: Path) -> ProductProfile:
+    """Load a profile while retaining its absolute path in schema failures."""
+    resolved = path.expanduser().resolve()
+    try:
+        return _load_product_profile(resolved)
+    except ProductProfileError as exc:
+        raise ProductProfileError(
+            f"product profile validation failed; profile={resolved}; error={exc}"
+        ) from exc
 
 
 def write_product_profile(path: Path, profile: ProductProfile, *, force: bool = False) -> Path:
@@ -402,65 +502,6 @@ def write_product_profile(path: Path, profile: ProductProfile, *, force: bool = 
         if temporary:
             Path(temporary).unlink(missing_ok=True)
     return resolved
-
-
-def normalize_reference(
-    source: Path, output: Path, size: ImageSize, *, fit: str, force: bool = False
-) -> Path:
-    source = source.expanduser().resolve()
-    output = output.expanduser().resolve()
-    if not source.is_file():
-        raise ProductProfileError(f"reference design does not exist: {source}")
-    if fit not in {"cover", "contain"}:
-        raise ProductProfileError("reference fit must be cover or contain")
-    if output.exists() and not force:
-        raise ProductProfileError(
-            f"normalized reference already exists: {output} (pass --force to replace it)"
-        )
-    try:
-        with Image.open(source) as original:
-            original.load()
-            image = original.convert("RGBA")
-    except (UnidentifiedImageError, OSError) as exc:
-        raise ProductProfileError(f"reference design is not a readable image: {source}") from exc
-
-    target = (size.width, size.height)
-    if fit == "cover":
-        source_ratio = image.width / image.height
-        target_ratio = size.width / size.height
-        if source_ratio > target_ratio:
-            crop_width = max(1, round(image.height * target_ratio))
-            left = (image.width - crop_width) // 2
-            image = image.crop((left, 0, left + crop_width, image.height))
-        elif source_ratio < target_ratio:
-            crop_height = max(1, round(image.width / target_ratio))
-            top = (image.height - crop_height) // 2
-            image = image.crop((0, top, image.width, top + crop_height))
-        normalized = image.resize(target, Image.Resampling.LANCZOS)
-    else:
-        image.thumbnail(target, Image.Resampling.LANCZOS)
-        normalized = Image.new("RGBA", target, (0, 0, 0, 0))
-        normalized.alpha_composite(
-            image, ((size.width - image.width) // 2, (size.height - image.height) // 2)
-        )
-    buffer = BytesIO()
-    normalized.save(buffer, format="PNG")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    temporary: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb", prefix=f".{output.stem}-", suffix=".tmp", dir=output.parent, delete=False
-        ) as destination:
-            destination.write(buffer.getvalue())
-            destination.flush()
-            os.fsync(destination.fileno())
-            temporary = destination.name
-        os.replace(temporary, output)
-        temporary = None
-    finally:
-        if temporary:
-            Path(temporary).unlink(missing_ok=True)
-    return output
 
 
 def validate_print_output(profile: ProductProfile, path: Path) -> None:

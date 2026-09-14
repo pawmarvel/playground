@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pawmarvel.com/schemas/bundle-v1.schema.json",
+  "title": "PawMarvel immutable template bundle manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "template_id",
+    "design_id",
+    "product_profile_id",
+    "bundle_revision",
+    "created_at",
+    "runtime",
+    "renderer",
+    "personalization",
+    "provenance",
+    "prompts",
+    "assets"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "template_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*--[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 127},
+    "design_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "minLength": 3, "maxLength": 64},
+    "product_profile_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 64},
+    "bundle_revision": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "runtime": {"$ref": "#/$defs/runtime"},
+    "renderer": {"$ref": "#/$defs/renderer"},
+    "personalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pet_name"],
+      "properties": {"pet_name": {"$ref": "#/$defs/petNamePolicy"}}
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selection_id",
+        "selection_sha256",
+        "art_attempt_id",
+        "pet_experiment_id",
+        "representative_pet_attempt_id",
+        "representative_pet_sha256",
+        "qa_fixture",
+        "layout_attempt_id",
+        "component_evaluations",
+        "compatibility_evaluation",
+        "print_candidate",
+        "selected",
+        "print_derivation",
+        "generator"
+      ],
+      "properties": {
+        "selection_id": {"$ref": "#/$defs/nonEmptyString"},
+        "selection_sha256": {"$ref": "#/$defs/sha256"},
+        "art_attempt_id": {"$ref": "#/$defs/nonEmptyString"},
+        "pet_experiment_id": {"$ref": "#/$defs/nonEmptyString"},
+        "representative_pet_attempt_id": {"$ref": "#/$defs/nonEmptyString"},
+        "representative_pet_sha256": {"$ref": "#/$defs/sha256"},
+        "qa_fixture": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["input_pet", "pet_name"],
+          "properties": {
+            "input_pet": {"const": "qa/input-pet.png"},
+            "pet_name": {"type": "string", "minLength": 1}
+          }
+        },
+        "component_evaluations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["art", "pet", "layout"],
+          "properties": {
+            "art": {"$ref": "#/$defs/passingEvaluation"},
+            "pet": {"$ref": "#/$defs/passingEvaluation"},
+            "layout": {"$ref": "#/$defs/passingEvaluation"}
+          }
+        },
+        "layout_attempt_id": {"$ref": "#/$defs/nonEmptyString"},
+        "compatibility_evaluation": {"$ref": "#/$defs/passingEvaluation"},
+        "print_candidate": {"$ref": "#/$defs/printCandidateEvidence"},
+        "selected": {"$ref": "#/$defs/selectedComponents"},
+        "print_derivation": {"$ref": "#/$defs/printDerivation"},
+        "generator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version"],
+          "properties": {"version": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "prompts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["art_template", "pet_transform"],
+      "properties": {
+        "art_template": {"type": "string", "pattern": "^art-template-(gpt|gemini)\\.md$"},
+        "pet_transform": {"type": "string", "pattern": "^pet-transform-(gpt|gemini)\\.md$"}
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 14,
+      "maxItems": 17,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/asset"}
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "transport", "prompt", "reference_assets", "input_image_order", "request_parameters", "output", "normalization"],
+      "properties": {
+        "provider": {"const": "openai"},
+        "model": {"type": "string", "pattern": "^gpt-image-"},
+        "transport": {"const": "images.edits"},
+        "prompt": {"const": "pet-transform-gpt.md"},
+        "reference_assets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^(reference-design\\.png|reference-designs/reference-design-000[2-4]\\.png)$"}
+        },
+        "input_image_order": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "prefixItems": [{"const": "user_pet"}],
+          "items": {"pattern": "^(user_pet|reference_[1-4])$"}
+        },
+        "request_parameters": {"$ref": "#/$defs/openaiRequest"},
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["format", "background", "width", "height"],
+          "properties": {
+            "format": {"const": "png"},
+            "background": {"const": "transparent"},
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1}
+          }
+        },
+        "normalization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["policy", "version", "alpha_failure"],
+          "properties": {
+            "policy": {"const": "transparent-rgba-contain"},
+            "version": {"const": 1},
+            "alpha_failure": {"const": "reject"}
+          }
+        }
+      }
+    },
+    "openaiRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["quality", "size", "background", "output_format", "n"],
+      "properties": {
+        "quality": {"enum": ["low", "medium", "high", "auto"]},
+        "size": {"type": "string", "pattern": "^[1-9][0-9]*x[1-9][0-9]*$"},
+        "background": {"const": "transparent"},
+        "output_format": {"const": "png"},
+        "n": {"const": 1},
+        "input_fidelity": {"const": "high"}
+      }
+    },
+    "renderer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["layout_schema_version", "pet_fit", "pet_anchor", "name_fit", "version"],
+      "properties": {
+        "layout_schema_version": {"const": 2},
+        "pet_fit": {"const": "contain-visible-alpha"},
+        "pet_anchor": {"const": "bottom-center"},
+        "name_fit": {"const": "nominal-size-shrink-only-visible-ink-contain"},
+        "version": {"const": 2}
+      }
+    },
+    "petNamePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["normalization", "whitespace", "length_unit", "min_length", "max_length", "allowed_characters"],
+      "properties": {
+        "normalization": {"const": "NFC"},
+        "whitespace": {"const": "trim-and-collapse"},
+        "length_unit": {"const": "unicode-code-points"},
+        "min_length": {"const": 1},
+        "max_length": {"type": "integer", "minimum": 1, "maximum": 64},
+        "allowed_characters": {"const": "unicode-letters-marks-numbers-space-apostrophes-ascii-hyphen"}
+      }
+    },
+    "passingEvaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evaluation_id", "evaluation_sha256", "status"],
+      "properties": {
+        "evaluation_id": {"type": "string", "minLength": 1},
+        "evaluation_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "status": {"const": "passed"}
+      }
+    },
+    "printCandidateEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["print_candidate_id", "print_candidate_sha256", "status"],
+      "properties": {
+        "print_candidate_id": {"$ref": "#/$defs/nonEmptyString"},
+        "print_candidate_sha256": {"$ref": "#/$defs/sha256"},
+        "status": {"const": "passed"}
+      }
+    },
+    "selectedComponents": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["art", "pet_runtime", "layout_font"],
+      "properties": {
+        "art": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["experiment_id", "attempt_id", "artifact_sha256"],
+          "properties": {
+            "experiment_id": {"$ref": "#/$defs/nonEmptyString"},
+            "attempt_id": {"$ref": "#/$defs/nonEmptyString"},
+            "artifact_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "pet_runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["experiment_id", "experiment_sha256"],
+          "properties": {
+            "experiment_id": {"$ref": "#/$defs/nonEmptyString"},
+            "experiment_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "layout_font": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["experiment_id", "attempt_id", "layout_sha256", "font_sha256"],
+          "properties": {
+            "experiment_id": {"$ref": "#/$defs/nonEmptyString"},
+            "attempt_id": {"$ref": "#/$defs/nonEmptyString"},
+            "layout_sha256": {"$ref": "#/$defs/sha256"},
+            "font_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    },
+    "printDerivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "print_candidate_id", "print_candidate_sha256", "backends", "template_source", "art_sha256", "layout_sha256"],
+      "properties": {
+        "mode": {"const": "selected-print-candidate"},
+        "print_candidate_id": {"$ref": "#/$defs/nonEmptyString"},
+        "print_candidate_sha256": {"$ref": "#/$defs/sha256"},
+        "backends": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["template", "pet"],
+          "properties": {
+            "template": {"enum": ["deterministic", "bria"]},
+            "pet": {"enum": ["deterministic", "bria"]}
+          }
+        },
+        "template_source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode"],
+              "properties": {"mode": {"const": "generated"}}
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode", "print_candidate_id", "manifest_sha256"],
+              "properties": {
+                "mode": {"const": "reused-print-candidate"},
+                "print_candidate_id": {"$ref": "#/$defs/nonEmptyString"},
+                "manifest_sha256": {"$ref": "#/$defs/sha256"}
+              }
+            }
+          ]
+        },
+        "art_sha256": {"$ref": "#/$defs/sha256"},
+        "layout_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes", "media_type"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\).+$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "media_type": {"enum": ["image/png", "application/json", "text/markdown", "font/ttf", "text/plain"]},
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

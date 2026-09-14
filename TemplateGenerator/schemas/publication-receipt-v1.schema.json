@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://pawmarvel.com/schemas/publication-receipt-v1.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "selection_id", "graduation_id", "selection_sha256", "template_id", "bundle_revision", "bundle_manifest_sha256", "release_id", "release_catalog_sha256", "transfer_location", "published_at"],
+  "properties": {"schema_version": {"const": 1}, "selection_id": {"type": "string"}, "graduation_id": {"type": "string"}, "selection_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "template_id": {"type": "string"}, "bundle_revision": {"type": "integer", "minimum": 1}, "bundle_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "release_id": {"type": "string"}, "release_catalog_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "transfer_location": {"type": "string"}, "published_at": {"type": "string"}}
+}

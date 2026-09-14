@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pawmarvel.com/schemas/product-profile-v1.schema.json",
+  "title": "PawMarvel product profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profile_id", "print", "preview", "geometry"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "profile_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 64},
+    "print": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canvas", "dpi", "physical_size", "bleed_px", "safe_margin_px", "color_space", "icc_profile", "background", "output_format", "max_file_bytes", "vendor_requirements_confirmed", "delivery_status"],
+      "properties": {
+        "canvas": {"$ref": "#/$defs/size"},
+        "dpi": {"type": ["integer", "null"], "minimum": 1},
+        "physical_size": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["width", "height", "unit"],
+              "properties": {
+                "width": {"type": "number", "exclusiveMinimum": 0},
+                "height": {"type": "number", "exclusiveMinimum": 0},
+                "unit": {"const": "in"}
+              }
+            }
+          ]
+        },
+        "bleed_px": {"type": "integer", "minimum": 0},
+        "safe_margin_px": {"type": "integer", "minimum": 0},
+        "color_space": {"type": "string", "minLength": 1},
+        "icc_profile": {"type": ["string", "null"]},
+        "background": {"enum": ["transparent", "opaque"]},
+        "output_format": {"const": "png"},
+        "max_file_bytes": {"type": ["integer", "null"], "minimum": 1},
+        "vendor_requirements_confirmed": {"type": "boolean"},
+        "delivery_status": {"enum": ["print-candidate", "vendor-profile-confirmed"]}
+      }
+    },
+    "preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_long_edge_px", "art", "transformed_pet"],
+      "properties": {
+        "target_long_edge_px": {"type": "integer", "minimum": 1},
+        "art": {"$ref": "#/$defs/size"},
+        "transformed_pet": {"$ref": "#/$defs/size"}
+      }
+    },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["aspect_ratio", "preview_to_print_scale", "nominal_print_layer_dimensions"],
+      "properties": {
+        "aspect_ratio": {"$ref": "#/$defs/size"},
+        "preview_to_print_scale": {"type": "number", "exclusiveMinimum": 1},
+        "nominal_print_layer_dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["art", "transformed_pet"],
+          "properties": {
+            "art": {"$ref": "#/$defs/size"},
+            "transformed_pet": {"$ref": "#/$defs/size"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

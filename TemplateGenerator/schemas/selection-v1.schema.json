@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pawmarvel.com/schemas/selection-v1.schema.json",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version", "selection_id", "graduation_id", "design_id",
+    "product_profile_id", "selected", "sources", "component_qa",
+    "compatibility_qa", "review_decisions", "print_qa", "decision"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "selection_id": {"type": "string", "minLength": 1},
+    "graduation_id": {"type": "string", "minLength": 1},
+    "design_id": {"type": "string", "minLength": 1},
+    "product_profile_id": {"type": "string", "minLength": 1},
+    "selected": {"type": "object", "required": ["art", "pet_runtime", "layout_font"]},
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["art_attempt", "pet_experiment", "layout_attempt", "print_candidate"],
+      "properties": {
+        "art_attempt": {"$ref": "#/$defs/relativePath"},
+        "pet_experiment": {"$ref": "#/$defs/relativePath"},
+        "layout_attempt": {"$ref": "#/$defs/relativePath"},
+        "print_candidate": {"$ref": "#/$defs/relativePath"}
+      }
+    },
+    "component_qa": {
+      "type": "object",
+      "required": ["art", "pet", "layout"],
+      "properties": {
+        "art": {"$ref": "#/$defs/passingReview"},
+        "pet": {"$ref": "#/$defs/passingReview"},
+        "layout": {"$ref": "#/$defs/passingReview"}
+      }
+    },
+    "compatibility_qa": {"$ref": "#/$defs/passingReview"},
+    "review_decisions": {
+      "type": "object",
+      "required": ["art", "pet", "layout", "assembly"],
+      "properties": {
+        "art": {"$ref": "#/$defs/reviewDecision"},
+        "pet": {"$ref": "#/$defs/reviewDecision"},
+        "layout": {"$ref": "#/$defs/reviewDecision"},
+        "assembly": {"$ref": "#/$defs/reviewDecision"}
+      }
+    },
+    "print_qa": {
+      "type": "object",
+      "required": ["print_candidate_id", "print_candidate_sha256", "status"],
+      "properties": {"status": {"const": "passed"}}
+    }
+  },
+  "$defs": {
+    "relativePath": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+    "passingReview": {
+      "type": "object",
+      "required": ["review_id", "evaluation_path", "evaluation_sha256", "status"],
+      "properties": {
+        "review_id": {"type": "string"},
+        "evaluation_path": {"$ref": "#/$defs/relativePath"},
+        "evaluation_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "status": {"const": "passed"}
+      }
+    },
+    "reviewDecision": {
+      "type": "object",
+      "required": ["review_id", "decision_path", "decision_sha256", "selected_by", "selected_at", "notes"],
+      "properties": {
+        "review_id": {"type": "string"},
+        "decision_path": {"$ref": "#/$defs/relativePath"},
+        "decision_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "selected_by": {"type": "string"},
+        "selected_at": {"type": "string"},
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}

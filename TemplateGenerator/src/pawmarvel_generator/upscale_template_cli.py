@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .config import ConfigError, load_layout
+from .cli_errors import add_debug_argument, report_unexpected
 from .print_upscale import PrintUpscaleError, parse_target_size, prepare_print_template
 from .product_profile import ProductProfileError, load_product_profile
 
@@ -20,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pawmarvel-upscale-template",
         description="Upscale reusable template art and derive layout-print.json once.",
     )
+    add_debug_argument(parser)
     parser.add_argument("--template-dir", type=Path, required=True)
     parser.add_argument("--layout", type=Path)
     parser.add_argument("--target-size")
@@ -92,8 +94,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Cancelled.", file=sys.stderr)
         return 130
     except Exception as exc:
-        print(f"Template upscale failed: {exc}", file=sys.stderr)
-        return 1
+        return report_unexpected("pawmarvel-upscale-template", exc, debug=args.debug)
     for path in outputs.paths():
         print(path)
     return 0

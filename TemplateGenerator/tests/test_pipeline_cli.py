@@ -13,7 +13,6 @@ from types import SimpleNamespace
 from PIL import Image, ImageDraw
 
 from helpers import copy_font, layout_data, make_image
-from pawmarvel_generator.bundle import load_catalog, validate_bundle
 from pawmarvel_generator.cli import _atomic_write_bytes
 from pawmarvel_generator.pipeline_cli import PipelineError, build_parser, run_pipeline
 from pawmarvel_generator.image_size import ImageSize
@@ -147,7 +146,7 @@ class PipelineCliTests(unittest.TestCase):
             self.assertTrue(outputs[key].is_file(), key)
         record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
         self.assertEqual(record["pipeline"]["pet_name"], "SAUSAGE")
-        self.assertEqual(record["pipeline"]["runtime_model"], "gpt-image-2")
+        self.assertEqual(record["pipeline"]["image_model"], "gpt-image-2")
         self.assertIsNotNone(record["artifact_sha256"]["font"])
         self.assertIsNotNone(record["artifact_sha256"]["font_license"])
         self.assertEqual(
@@ -477,7 +476,7 @@ class PipelineCliTests(unittest.TestCase):
         with self.assertRaisesRegex(PipelineError, "cannot override"):
             run_pipeline(args, client=CombinedClient(), layout_runner=self.save_layout)
 
-    def test_profile_pipeline_runs_through_print_and_bundle_publication(self) -> None:
+    def test_profile_pipeline_runs_through_print_preparation(self) -> None:
         supporting = make_image(self.root / "supporting-reference.png")
         profile_path = write_product_profile(
             self.root / "product.json",
@@ -488,7 +487,6 @@ class PipelineCliTests(unittest.TestCase):
             ),
         )
         print_dir = self.root / "print"
-        bundles = self.root / "bundles"
         args = self.parser.parse_args(
             [
                 "--sample-design", str(self.sample),
@@ -504,8 +502,6 @@ class PipelineCliTests(unittest.TestCase):
                 "--product-profile", str(profile_path),
                 "--quality", "low",
                 "--print-dir", str(print_dir),
-                "--bundle-output-dir", str(bundles),
-                "--design-id", "life-is-good",
             ]
         )
         client = CombinedClient()
@@ -525,7 +521,6 @@ class PipelineCliTests(unittest.TestCase):
             "print_pet_manifest",
             "final_print",
             "final_print_debug",
-            "bundle",
         ):
             self.assertTrue(outputs[key].exists(), key)
         self.assertEqual(
@@ -537,61 +532,10 @@ class PipelineCliTests(unittest.TestCase):
         with Image.open(outputs["final_print"]) as final:
             self.assertEqual(final.size, (1600, 2400))
             self.assertAlmostEqual(final.info["dpi"][0], 300, delta=1)
-        self.assertEqual(validate_bundle(outputs["bundle"]).canvas_width, 672)
-        self.assertEqual(
-            {path.name for path in outputs["bundle"].iterdir()},
-            {
-                "art.png",
-                "layout.json",
-                "layout-print.json",
-                "print",
-                "reference-design.png",
-                "reference-designs",
-                "art-template-gpt.md",
-                "pet-transform-gpt.md",
-                "qa",
-                "fonts",
-            },
-        )
         record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
-        self.assertEqual(record["publication"]["status"], "published")
-        self.assertEqual(
-            record["publication"]["template_id"], "life-is-good--test-blanket"
-        )
-        self.assertEqual(record["publication"]["design_id"], "life-is-good")
-        self.assertEqual(
-            record["publication"]["product_profile_id"], "test-blanket"
-        )
-        catalog = load_catalog(bundles)
-        self.assertEqual(
-            catalog["templates"][0]["template_id"],
-            "life-is-good--test-blanket",
-        )
-        self.assertEqual(
-            catalog["templates"][0]["reference_designs"],
-            [
-                "reference-design.png",
-                "reference-designs/reference-design-0002.png",
-            ],
-        )
-        self.assertEqual(
-            record["publication"]["catalog"],
-            str((bundles / "catalog.json").resolve()),
-        )
-        self.assertEqual(outputs["catalog"], (bundles / "catalog.json").resolve())
-        self.assertEqual(
-            record["publication"]["bundle"], str(outputs["bundle"])
-        )
+        self.assertNotIn("publication", record)
         self.assertIsNotNone(record["artifact_sha256"]["print_art"])
         self.assertIsNotNone(record["artifact_sha256"]["final_print"])
-        self.assertEqual(
-            (outputs["bundle"] / "art-template-gpt.md").read_bytes(),
-            self.art_prompt.read_bytes(),
-        )
-        self.assertEqual(
-            (outputs["bundle"] / "pet-transform-gpt.md").read_bytes(),
-            self.pet_prompt.read_bytes(),
-        )
 
         rerun_client = CombinedClient()
         args.rerun_step = ["pet"]
@@ -604,13 +548,11 @@ class PipelineCliTests(unittest.TestCase):
         )
         self.assertEqual(rerun_client.images.call_count, 1)
         self.assertTrue(rerun_outputs["final_print"].is_file())
-        self.assertEqual(validate_bundle(rerun_outputs["bundle"]).canvas_width, 672)
 
-    def test_bundle_publication_requires_product_profile_before_paid_calls(self) -> None:
+    def test_print_preparation_requires_product_profile_before_paid_calls(self) -> None:
         client = CombinedClient()
         args = self.args(
-            "--design-id", "life-is-good",
-            "--bundle-output-dir", str(self.root / "bundles"),
+            "--print-dir", str(self.root / "print"),
         )
 
         with self.assertRaisesRegex(PipelineError, "requires --product-profile"):

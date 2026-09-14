@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pawmarvel.com/schemas/print-candidate-v1.schema.json",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "print_candidate_id",
+    "design_id",
+    "product_profile_id",
+    "status",
+    "backends",
+    "sources",
+    "source_hashes",
+    "template_source"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "print_candidate_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]+[a-z0-9]$"
+    },
+    "status": {"enum": ["running", "succeeded", "failed"]},
+    "backends": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["template", "pet"],
+      "properties": {
+        "template": {"enum": ["deterministic", "bria"]},
+        "pet": {"enum": ["deterministic", "bria"]}
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "art_attempt",
+        "pet_attempt",
+        "pet_experiment",
+        "layout_attempt"
+      ],
+      "properties": {
+        "art_attempt": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+        "pet_attempt": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+        "pet_experiment": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+        "layout_attempt": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"}
+      }
+    },
+    "source_hashes": {"type": "object"},
+    "template_source": {
+      "type": "object",
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["generated", "reused-print-candidate"]}
+      }
+    }
+  }
+}

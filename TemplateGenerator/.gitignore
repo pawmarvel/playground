@@ -6,10 +6,10 @@ __pycache__/
 .env
 .env.*
 .venv/
-*.py[cod]
-*.egg-info/
 output/
+# Local-only experiments, scratch runs, and immutable S3 staging output.
 /work/
-.pawmarvel-font-cache/
-/examples/life-is-good/work/
 *OPENAI_API_KEY*
+*GEMINI_API_KEY*
+*GOOGLE_API_KEY*
+*BRIA_API_TOKEN*

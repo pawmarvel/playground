@@ -1,7 +1,7 @@
 # CLI purpose:
 # Orchestrate profile-driven template creation, reference-guided sample-pet
-# transformation, layout confirmation, preview/print rendering, and optional
-# publication of the complete reusable two-resolution template bundle.
+# transformation, layout confirmation, and optional preview/print rendering in
+# a replaceable scratch workspace. Production publication is selection-only.
 
 from __future__ import annotations
 
@@ -14,13 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from .bundle import (
-    CATALOG_FILENAME,
-    BundleError,
-    TEMPLATE_ID_PATTERN,
-    catalog_template_id,
-    publish_bundle,
-)
+from .artifact_io import read_json
+from .cli_errors import add_debug_argument, report_unexpected
 from .cli import (
     UserInputError,
     _atomic_write_bytes,
@@ -35,8 +30,9 @@ from .font_catalog import (
     default_local_font_catalog,
     discover_font_catalog,
 )
-from .expanded_font_catalog import ExpandedFontCatalogError, materialize_expanded_fonts
 from .font_license import FontLicenseError, resolve_ofl_license
+from .font_reference import FontReferenceError, load_font_reference
+from .layout_reference import LayoutReferenceError, load_layout_reference
 from .image_size import ImageSizeError, validate_generation_size
 from .layout_server import EditorConfig, serve_layout_editor
 from .product_profile import (
@@ -46,7 +42,6 @@ from .product_profile import (
     validate_print_output,
 )
 from .print_upscale import (
-    PrintOutputs,
     PrintUpscaleError,
     _read_token as _resolve_bria_token,
     prepare_print_pet,
@@ -66,10 +61,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pawmarvel-pipeline",
         description=(
-            "Create one template and tracked personalization preview, with an "
-            "optional profile-driven print and bundle publication run."
+            "Create one replaceable template/personalization debug run, with "
+            "optional profile-driven print preparation."
         ),
     )
+    add_debug_argument(parser)
     parser.add_argument(
         "--sample-design",
         type=Path,
@@ -92,6 +88,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pet-image", type=Path, required=True)
     parser.add_argument("--pet-name", required=True)
     parser.add_argument(
+        "--reference-text",
+        help="initial exact pet-name text visible in the primary reference design",
+    )
+    parser.add_argument(
+        "--font-reference",
+        type=Path,
+        help="existing font-reference-v1 JSON used to initialize font matching",
+    )
+    parser.add_argument(
+        "--layout-reference",
+        type=Path,
+        help="layout-reference-v1 JSON used to initialize pet and name geometry",
+    )
+    parser.add_argument(
         "--font", type=Path,
         help="explicit OFL font override; omit to auto-match from --font-catalog",
     )
@@ -110,24 +120,6 @@ def build_parser() -> argparse.ArgumentParser:
             "repeat to combine catalogs; omit with --font unset to use the "
             "curated local catalog"
         ),
-    )
-    parser.add_argument(
-        "--font-catalog-mode", choices=("local", "expanded"), default="local",
-        help="expanded adds pinned remote OFL candidates through a validated cache",
-    )
-    parser.add_argument(
-        "--font-index", type=Path,
-        default=Path("assets/fonts/expanded-catalog.json"),
-        help="versioned expanded OFL catalog index",
-    )
-    parser.add_argument("--font-cache", type=Path, default=Path(".pawmarvel-font-cache"))
-    parser.add_argument("--font-shortlist-limit", type=int, default=24)
-    parser.add_argument("--font-offline", action="store_true", help="use expanded cache only; never download")
-    parser.add_argument(
-        "--runtime-model",
-        choices=("gpt-image-2", "gemini"),
-        default="gpt-image-2",
-        help="model route encoded in layout.json (default: gpt-image-2)",
     )
     parser.add_argument("--template-dir", type=Path, required=True)
     parser.add_argument(
@@ -169,23 +161,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--no-open", action="store_true")
     parser.add_argument(
-        "--design-id",
-        "--template-id",
-        dest="design_id",
-        help=(
-            "design identity used with the product profile to derive the catalog "
-            "template ID; --template-id is a deprecated alias"
-        ),
-    )
-    parser.add_argument(
-        "--bundle-output-dir",
-        type=Path,
-        help="publish a clean two-resolution bundle under OUTPUT_DIR/TEMPLATE_ID",
-    )
-    parser.add_argument(
         "--print-dir",
         type=Path,
-        help="print staging directory (default: RUN_DIR/print)",
+        help="enable print preparation and write its scratch artifacts here",
     )
     parser.add_argument(
         "--upscale-backend",
@@ -205,7 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help=(
             "rerun only the selected authoring step, then rebuild preview, "
-            "provenance, and requested print/bundle outputs; repeat to combine steps"
+            "provenance, and requested print outputs; repeat to combine steps"
         ),
     )
     parser.add_argument("--force", action="store_true")
@@ -302,16 +280,13 @@ def _stage(label: str, number: int, total: int) -> None:
 
 
 def _load_previous_run(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise PipelineError(
-            f"selective rerun requires an existing pipeline manifest: {path}"
-        )
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise PipelineError(
-            f"cannot read existing pipeline manifest {path}: {exc}"
-        ) from exc
+    value = read_json(
+        path,
+        label="existing pipeline manifest required for a selective rerun",
+        error_type=PipelineError,
+        require_object=True,
+        correction="run the full pipeline first or fix run.json.",
+    )
     if not isinstance(value, dict) or not isinstance(value.get("sources"), dict):
         raise PipelineError(f"existing pipeline manifest has invalid sources: {path}")
     return value
@@ -366,6 +341,37 @@ def run_pipeline(
     if not samples:
         raise PipelineError("at least one --sample-design is required")
     sample = samples[0]
+    font_reference = (
+        args.font_reference.expanduser().resolve()
+        if args.font_reference is not None
+        else None
+    )
+    if font_reference is not None:
+        try:
+            load_font_reference(font_reference, sample)
+        except FontReferenceError as exc:
+            raise PipelineError(str(exc)) from exc
+    layout_reference = (
+        args.layout_reference.expanduser().resolve()
+        if args.layout_reference is not None
+        else None
+    )
+    if layout_reference is not None:
+        try:
+            loaded_layout_reference = load_layout_reference(
+                layout_reference, sample
+            )
+        except LayoutReferenceError as exc:
+            raise PipelineError(str(exc)) from exc
+        if font_reference is not None:
+            loaded_font_reference = load_font_reference(font_reference, sample)
+            if (
+                loaded_layout_reference.name_region.to_dict()
+                != loaded_font_reference.region.to_dict()
+            ):
+                raise PipelineError(
+                    "layout reference name_region must match font reference region"
+                )
     art_prompt_source = _validate_regular_file(args.art_prompt, "art prompt")
     pet_prompt_source = _validate_regular_file(args.pet_prompt, "pet prompt")
     pet_source = _validate_image(args.pet_image, "pet image")
@@ -397,30 +403,12 @@ def run_pipeline(
             font_catalogs = (default_local_font_catalog(),)
         except FontCatalogError as exc:
             raise PipelineError(str(exc)) from exc
-    font_index = args.font_index.expanduser().resolve() if args.font_index else None
-    font_cache = args.font_cache.expanduser().resolve()
-    expanded_fonts: tuple[Path, ...] = ()
-    if args.font_catalog_mode == "expanded" and run_layout and args.layout_mode == "interactive":
-        if font_index is None:
-            raise PipelineError("--font-index is required in expanded font catalog mode")
-        try:
-            expanded_fonts = materialize_expanded_fonts(
-                font_index,
-                font_cache,
-                limit=args.font_shortlist_limit,
-                offline=args.font_offline,
-            )
-        except ExpandedFontCatalogError as exc:
-            if not font_catalogs and font is None:
-                raise PipelineError(str(exc)) from exc
-            print(f"Font catalog warning: {exc}; using local OFL catalog.", file=sys.stderr)
     if run_layout and args.layout_mode == "interactive":
         try:
             font_candidates = discover_font_catalog(
                 font,
                 font_license,
                 catalog_roots=font_catalogs,
-                additional_fonts=expanded_fonts,
             )
         except FontCatalogError as exc:
             raise PipelineError(str(exc)) from exc
@@ -466,23 +454,11 @@ def run_pipeline(
         if args.run_dir is not None
         else template_dir / "runs" / _slug(f"{pet_source.stem}-{pet_name}")
     )
-    bundle_requested = args.design_id is not None or args.bundle_output_dir is not None
-    if (args.design_id is None) != (args.bundle_output_dir is None):
-        raise PipelineError(
-            "--design-id and --bundle-output-dir must be supplied together"
-        )
-    if bundle_requested and profile is None:
-        raise PipelineError("bundle publication requires --product-profile")
-    if args.design_id is not None and not TEMPLATE_ID_PATTERN.fullmatch(
-        args.design_id
-    ):
-        raise PipelineError(
-            "--design-id must contain 3-64 lowercase letters, numbers, or internal hyphens"
-        )
-    if not bundle_requested and args.print_dir is not None:
-        raise PipelineError("--print-dir requires bundle publication")
-    if not bundle_requested and args.upscale_backend != "deterministic":
-        raise PipelineError("--upscale-backend requires bundle publication")
+    print_requested = args.print_dir is not None
+    if print_requested and profile is None:
+        raise PipelineError("print preparation requires --product-profile")
+    if not print_requested and args.upscale_backend != "deterministic":
+        raise PipelineError("--upscale-backend requires --print-dir")
     if args.bria_api_key_file is not None and args.upscale_backend != "bria":
         raise PipelineError("--bria-api-key-file requires --upscale-backend bria")
 
@@ -491,40 +467,11 @@ def run_pipeline(
         if args.print_dir is not None
         else run_dir / "print"
     )
-    bundle_output_dir = (
-        args.bundle_output_dir.expanduser().resolve()
-        if args.bundle_output_dir is not None
-        else None
-    )
-    catalog_id = (
-        catalog_template_id(args.design_id, profile.profile_id)
-        if args.design_id is not None and profile is not None
-        else None
-    )
-    bundle_path = (
-        bundle_output_dir / catalog_id
-        if bundle_output_dir and catalog_id
-        else None
-    )
-    catalog_path = bundle_output_dir / CATALOG_FILENAME if bundle_output_dir else None
-    if bundle_requested:
+    if print_requested:
         if print_dir.exists() and not print_dir.is_dir():
             raise PipelineError(f"--print-dir is not a directory: {print_dir}")
-        assert bundle_output_dir is not None and bundle_path is not None
-        if bundle_output_dir.exists() and not bundle_output_dir.is_dir():
-            raise PipelineError(
-                f"--bundle-output-dir is not a directory: {bundle_output_dir}"
-            )
         if print_dir == template_dir:
             raise PipelineError("--print-dir must not be the template directory")
-        protected_roots = (template_dir, run_dir, print_dir)
-        if any(
-            protected == bundle_path or protected.is_relative_to(bundle_path)
-            for protected in protected_roots
-        ):
-            raise PipelineError(
-                "published bundle path must not equal or contain a working directory"
-            )
         if args.upscale_backend == "bria" and not args.dry_run:
             _resolve_bria_token(args.bria_api_key_file)
 
@@ -559,10 +506,8 @@ def run_pipeline(
     ]
     if profile is not None:
         planned.append(staged_profile)
-    if bundle_requested:
+    if print_requested:
         planned.extend([final_print, final_print_debug])
-        if bundle_path is not None:
-            planned.append(bundle_path)
     if args.layout_mode == "interactive":
         planned.extend(
             [
@@ -612,7 +557,7 @@ def run_pipeline(
                 "print_size",
                 profile.print_size.api_value() if profile is not None else None,
             ),
-            ("runtime_model", args.runtime_model),
+            ("image_model", args.image_model),
         ):
             if previous_plan.get(key) != current:
                 raise PipelineError(
@@ -650,17 +595,10 @@ def run_pipeline(
             resolve_ofl_license(existing_layout.font_path)
         except (ConfigError, FontLicenseError) as exc:
             raise PipelineError(str(exc)) from exc
-        expected_runtime_model = (
-            "gpt-image-2" if args.runtime_model == "gpt-image-2" else None
-        )
-        if existing_layout.runtime_model != expected_runtime_model:
-            raise PipelineError(
-                "existing layout runtime model does not match --runtime-model"
-            )
 
     if full_run:
         existing = [path for path in planned if path.exists()]
-        if bundle_requested and print_dir.is_dir() and any(print_dir.iterdir()):
+        if print_requested and print_dir.is_dir() and any(print_dir.iterdir()):
             existing.insert(0, print_dir)
         if existing and not args.force:
             raise PipelineError(
@@ -683,14 +621,13 @@ def run_pipeline(
         "pet_name": pet_name,
         "font": str(font) if explicit_font else None,
         "font_license": str(font_license) if explicit_font else None,
-        "font_selection": "explicit" if explicit_font else "reference_visual_match_v1",
+        "font_selection": (
+            "explicit" if explicit_font else "confirmed_reference_visual_match_v3"
+        ),
         "font_catalogs": [str(path) for path in font_catalogs],
-        "font_catalog_mode": args.font_catalog_mode,
-        "font_index": str(font_index) if font_index else None,
-        "font_cache": str(font_cache) if args.font_catalog_mode == "expanded" else None,
-        "font_shortlist_limit": args.font_shortlist_limit,
-        "font_offline": args.font_offline,
-        "runtime_model": args.runtime_model,
+        "font_reference": str(font_reference) if font_reference else None,
+        "layout_reference": str(layout_reference) if layout_reference else None,
+        "reference_text": args.reference_text,
         "template_dir": str(template_dir),
         "run_dir": str(run_dir),
         "art_size": art_size,
@@ -698,13 +635,8 @@ def run_pipeline(
         "layout_mode": args.layout_mode,
         "image_model": args.image_model,
         "quality": args.quality,
-        "print_dir": str(print_dir) if bundle_requested else None,
-        "upscale_backend": args.upscale_backend if bundle_requested else None,
-        "bundle_output_dir": str(bundle_output_dir) if bundle_output_dir else None,
-        "design_id": args.design_id,
-        "template_id": catalog_id,
-        "bundle": str(bundle_path) if bundle_path else None,
-        "catalog": str(catalog_path) if catalog_path else None,
+        "print_dir": str(print_dir) if print_requested else None,
+        "upscale_backend": args.upscale_backend if print_requested else None,
         "api_key_source": (
             (
                 str(args.api_key_file.expanduser().resolve())
@@ -719,14 +651,8 @@ def run_pipeline(
     print(json.dumps(plan, indent=2), file=sys.stderr, flush=True)
     if args.dry_run:
         outputs = {"template_dir": template_dir, "run_dir": run_dir}
-        if bundle_path is not None:
-            outputs.update(
-                {
-                    "print_dir": print_dir,
-                    "bundle": bundle_path,
-                    "catalog": catalog_path,
-                }
-            )
+        if print_requested:
+            outputs["print_dir"] = print_dir
         return outputs
     if needs_image_client and client is None:
         _, api_key = _resolve_api_key(args.api_key_file)
@@ -748,12 +674,12 @@ def run_pipeline(
             else "Reuse existing layout"
         )
     stage_labels.append("Render final preview and debug overlay")
-    if bundle_requested:
+    if print_requested:
         stage_labels.extend(
             [
-                "Upscale preview layers and derive print layout",
+                "Upscale reusable template art and derive print layout",
+                "Upscale the representative transformed-pet layer",
                 "Render profile-sized print candidate",
-                "Publish clean two-resolution bundle",
             ]
         )
     stage_labels.append("Write tracked run metadata")
@@ -830,14 +756,9 @@ def run_pipeline(
                 font=font if explicit_font else None,
                 font_license=font_license if explicit_font else None,
                 font_catalogs=font_catalogs,
-                font_catalog_mode=args.font_catalog_mode,
-                font_index=font_index,
-                font_cache=font_cache,
-                font_shortlist_limit=args.font_shortlist_limit,
-                font_offline=args.font_offline,
-                runtime_model=(
-                    "gpt-image-2" if args.runtime_model == "gpt-image-2" else None
-                ),
+                font_reference=font_reference,
+                layout_reference=layout_reference,
+                reference_text=args.reference_text,
                 output=layout_path,
                 force=replace_outputs,
             ),
@@ -860,10 +781,9 @@ def run_pipeline(
         force=replace_outputs,
     )
 
-    print_outputs: PrintOutputs | None = None
-    print_pet_manifest: Path | None = None
-    published_bundle: Path | None = None
-    if bundle_requested:
+    template_print_outputs = None
+    pet_print_outputs = None
+    if print_requested:
         assert profile is not None
         announce("Upscale reusable template art and derive print layout")
         template_print_outputs = prepare_print_template(
@@ -887,20 +807,11 @@ def run_pipeline(
             bria_token_file=args.bria_api_key_file,
             force=replace_outputs,
         )
-        print_pet_manifest = pet_print_outputs.manifest
-        print_outputs = PrintOutputs(
-            art=template_print_outputs.art,
-            pet=pet_print_outputs.pet,
-            layout=template_print_outputs.layout,
-            manifest=template_print_outputs.manifest,
-            product_profile=template_print_outputs.product_profile,
-        )
-
         announce("Render profile-sized print candidate")
         render_to_files(
             template_dir=print_dir,
-            layout_path=print_outputs.layout,
-            pet_image=print_outputs.pet,
+            layout_path=template_print_outputs.layout,
+            pet_image=pet_print_outputs.pet,
             pet_name=pet_name,
             output=final_print,
             debug_output=final_print_debug,
@@ -916,25 +827,6 @@ def run_pipeline(
         )
         validate_print_output(profile, final_print)
 
-        announce("Publish clean two-resolution bundle")
-        assert bundle_output_dir is not None and args.design_id is not None
-        published_bundle = publish_bundle(
-            template_dir=template_dir,
-            output_dir=bundle_output_dir,
-            design_id=args.design_id,
-            product_profile=staged_profile,
-            exemplar=transformed_pet,
-            reference_design=source_references,
-            art_prompt=art_prompt_source,
-            pet_prompt=pet_prompt_source,
-            print_art=print_outputs.art,
-            print_layout_path=print_outputs.layout,
-            runtime_model=(
-                "gpt-image-2" if args.runtime_model == "gpt-image-2" else None
-            ),
-            force=replace_outputs,
-        )
-
     announce("Write tracked run metadata")
     _copy_file(layout_path, layout_snapshot)
     artifacts: dict[str, str | None] = {
@@ -947,15 +839,15 @@ def run_pipeline(
         "product_profile": str(staged_profile) if profile is not None else None,
         "font": str(active_layout.font_path),
         "font_license": str(active_font_license),
-        "print_art": str(print_outputs.art) if print_outputs else None,
-        "print_transformed_pet": str(print_outputs.pet) if print_outputs else None,
-        "print_layout": str(print_outputs.layout) if print_outputs else None,
+        "print_art": str(template_print_outputs.art) if template_print_outputs else None,
+        "print_transformed_pet": str(pet_print_outputs.pet) if pet_print_outputs else None,
+        "print_layout": str(template_print_outputs.layout) if template_print_outputs else None,
         "template_print_manifest": (
-            str(print_outputs.manifest) if print_outputs else None
+            str(template_print_outputs.manifest) if template_print_outputs else None
         ),
-        "print_pet_manifest": str(print_pet_manifest) if print_pet_manifest else None,
-        "final_print": str(final_print) if print_outputs else None,
-        "final_print_debug": str(final_print_debug) if print_outputs else None,
+        "print_pet_manifest": str(pet_print_outputs.manifest) if pet_print_outputs else None,
+        "final_print": str(final_print) if template_print_outputs else None,
+        "final_print_debug": str(final_print_debug) if template_print_outputs else None,
     }
     artifact_sha256 = {
         label: _sha256(Path(path)) if path is not None else None
@@ -1003,25 +895,11 @@ def run_pipeline(
                 for index, path in enumerate(source_references, 1)
             ],
         },
-        "publication": (
-            {
-                "bundle": str(published_bundle),
-                "template_id": catalog_id,
-                "design_id": args.design_id,
-                "product_profile_id": profile.profile_id if profile else None,
-                "catalog": str(catalog_path),
-                "status": "published",
-            }
-            if published_bundle is not None
-            else None
-        ),
         "artifacts": artifacts,
         "artifact_sha256": artifact_sha256,
     }
     _atomic_write_bytes(manifest, _json_bytes(record))
     completion = f"\nPipeline complete. Preview: {preview}"
-    if published_bundle is not None:
-        completion += f"\nBundle: {published_bundle}"
     print(completion, file=sys.stderr, flush=True)
     outputs = {
         "template_dir": template_dir,
@@ -1035,19 +913,17 @@ def run_pipeline(
         "layout_snapshot": layout_snapshot,
         "manifest": manifest,
     }
-    if print_outputs is not None and published_bundle is not None:
+    if template_print_outputs is not None and pet_print_outputs is not None:
         outputs.update(
             {
                 "print_dir": print_dir,
-                "print_art": print_outputs.art,
-                "print_transformed_pet": print_outputs.pet,
-                "print_layout": print_outputs.layout,
-                "template_print_manifest": print_outputs.manifest,
-                "print_pet_manifest": print_pet_manifest,
+                "print_art": template_print_outputs.art,
+                "print_transformed_pet": pet_print_outputs.pet,
+                "print_layout": template_print_outputs.layout,
+                "template_print_manifest": template_print_outputs.manifest,
+                "print_pet_manifest": pet_print_outputs.manifest,
                 "final_print": final_print,
                 "final_print_debug": final_print_debug,
-                "bundle": published_bundle,
-                "catalog": catalog_path,
             }
         )
     return outputs
@@ -1063,7 +939,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         UserInputError,
         ProductProfileError,
         PrintUpscaleError,
-        BundleError,
         ConfigError,
         RenderError,
     ) as exc:
@@ -1072,10 +947,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Cancelled.", file=sys.stderr)
         return 130
     except Exception as exc:
-        request_id = getattr(exc, "request_id", None)
-        detail = f" (request ID: {request_id})" if request_id else ""
-        print(f"Pipeline failed: {exc}{detail}", file=sys.stderr)
-        return 1
+        return report_unexpected("pawmarvel-pipeline", exc, debug=args.debug)
     for label, path in outputs.items():
         print(f"{label}: {path}")
     return 0

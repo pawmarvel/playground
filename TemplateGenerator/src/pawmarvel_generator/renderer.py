@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO
@@ -15,6 +16,30 @@ ALPHA_THRESHOLD = 8
 
 class RenderError(ValueError):
     """A pet or text input cannot be rendered."""
+
+
+@dataclass(frozen=True)
+class TextRenderMetrics:
+    requested_font_size_px: int
+    applied_font_size_px: int
+    fit: str
+    visible_width_px: int
+    visible_height_px: int
+
+    def to_dict(self) -> dict[str, int | str]:
+        return {
+            "requested_font_size_px": self.requested_font_size_px,
+            "applied_font_size_px": self.applied_font_size_px,
+            "fit": self.fit,
+            "visible_width_px": self.visible_width_px,
+            "visible_height_px": self.visible_height_px,
+        }
+
+
+@dataclass(frozen=True)
+class RenderedComposition:
+    image: Image.Image
+    text: TextRenderMetrics
 
 
 def _open_rgba(source: Path | BinaryIO, label: str) -> Image.Image:
@@ -47,12 +72,6 @@ def _fit_contain(image: Image.Image, box: Rect) -> Image.Image:
 
 def _place_pet(canvas: Image.Image, pet: Image.Image, layout: Layout) -> tuple[int, int, int, int]:
     pet = _fit_contain(_trim_visible(pet, "pet image"), layout.pet_box)
-    if layout.pet_rotation_degrees:
-        pet = pet.rotate(
-            layout.pet_rotation_degrees,
-            resample=Image.Resampling.BICUBIC,
-            expand=True,
-        )
     x = layout.pet_box.x + (layout.pet_box.width - pet.width) // 2
     y = layout.pet_box.y + layout.pet_box.height - pet.height
     canvas.alpha_composite(pet, (x, y))
@@ -65,10 +84,10 @@ def _text_bbox(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFon
 
 def _select_font(
     draw: ImageDraw.ImageDraw, text: str, layout: Layout
-) -> tuple[ImageFont.FreeTypeFont, tuple[int, int, int, int]]:
-    # The production bundle consumer ignores the authoring font-size hints and
-    # renders the largest ink bounds that fit the name box. Mirror that contract
-    # here so an approved local preview does not change after import.
+) -> tuple[ImageFont.FreeTypeFont, tuple[int, int, int, int], TextRenderMetrics]:
+    available_width = layout.name_box.width - 2 * layout.name_padding_px
+    available_height = layout.name_box.height - 2 * layout.name_padding_px
+
     def measured(size: int) -> tuple[ImageFont.FreeTypeFont, tuple[int, int, int, int]]:
         font = ImageFont.truetype(str(layout.font_path), size=size)
         bounds = _text_bbox(draw, text, font)
@@ -76,36 +95,62 @@ def _select_font(
 
     def fits(bounds: tuple[int, int, int, int]) -> bool:
         return (
-            bounds[2] - bounds[0] <= layout.name_box.width
-            and bounds[3] - bounds[1] <= layout.name_box.height
+            bounds[2] - bounds[0] <= available_width
+            and bounds[3] - bounds[1] <= available_height
         )
 
-    low = 1
-    high = max(2, layout.font_size_px)
-    while fits(measured(high)[1]):
-        low = high
-        high *= 2
-        if high > max(layout.name_box.width, layout.name_box.height) * 16:
-            break
-    best: tuple[ImageFont.FreeTypeFont, tuple[int, int, int, int]] | None = None
+    requested = measured(layout.font_size_px)
+    if fits(requested[1]):
+        bounds = requested[1]
+        return requested[0], bounds, TextRenderMetrics(
+            requested_font_size_px=layout.font_size_px,
+            applied_font_size_px=layout.font_size_px,
+            fit="nominal",
+            visible_width_px=bounds[2] - bounds[0],
+            visible_height_px=bounds[3] - bounds[1],
+        )
+
+    minimum = measured(layout.min_font_size_px)
+    if not fits(minimum[1]):
+        raise RenderError(
+            "pet name does not fit the padded name box at "
+            f"min_font_size_px={layout.min_font_size_px}"
+        )
+
+    best = minimum
+    best_size = layout.min_font_size_px
+    low = layout.min_font_size_px + 1
+    high = layout.font_size_px - 1
     while low <= high:
         middle = (low + high) // 2
         candidate = measured(middle)
         if fits(candidate[1]):
             best = candidate
+            best_size = middle
             low = middle + 1
         else:
             high = middle - 1
-    if best is None:
-        raise RenderError("pet name does not fit the configured name box")
-    return best
+    bounds = best[1]
+    return best[0], bounds, TextRenderMetrics(
+        requested_font_size_px=layout.font_size_px,
+        applied_font_size_px=best_size,
+        fit="shrunk",
+        visible_width_px=bounds[2] - bounds[0],
+        visible_height_px=bounds[3] - bounds[1],
+    )
 
 
 def _aligned_text_origin(layout: Layout, bounds: tuple[int, int, int, int]) -> tuple[int, int]:
     left, top, right, bottom = bounds
     width = right - left
     height = bottom - top
-    box = layout.name_box
+    padding = layout.name_padding_px
+    box = Rect(
+        x=layout.name_box.x + padding,
+        y=layout.name_box.y + padding,
+        width=layout.name_box.width - 2 * padding,
+        height=layout.name_box.height - 2 * padding,
+    )
     if layout.horizontal_align == "left":
         x = box.x - left
     elif layout.horizontal_align == "right":
@@ -113,8 +158,6 @@ def _aligned_text_origin(layout: Layout, bounds: tuple[int, int, int, int]) -> t
     else:
         x = box.x + (box.width - width) // 2 - left
 
-    # Production vertically centers the visible ink regardless of the legacy
-    # vertical_align authoring hint.
     y = box.y + (box.height - height) // 2 - top
     return x, y
 
@@ -123,13 +166,13 @@ def _parse_rgba(value: str) -> tuple[int, int, int, int]:
     return tuple(int(value[index : index + 2], 16) for index in range(1, 9, 2))  # type: ignore[return-value]
 
 
-def render_with_layout(
+def render_composition(
     layout: Layout,
     pet_image: Path | BinaryIO,
     pet_name: str,
     *,
     debug: bool = False,
-) -> Image.Image:
+) -> RenderedComposition:
     pet_name = pet_name.strip()
     if not pet_name:
         raise RenderError("pet name must not be empty")
@@ -140,7 +183,7 @@ def render_with_layout(
     pet_bounds = _place_pet(canvas, pet, layout)
 
     draw = ImageDraw.Draw(canvas)
-    font, text_bounds = _select_font(draw, pet_name, layout)
+    font, text_bounds, text_metrics = _select_font(draw, pet_name, layout)
     text_origin = _aligned_text_origin(layout, text_bounds)
     draw.text(text_origin, pet_name, font=font, fill=_parse_rgba(layout.color))
 
@@ -157,7 +200,22 @@ def render_with_layout(
             outline=(64, 192, 255, 255),
             width=2,
         )
-    return canvas
+    return RenderedComposition(image=canvas, text=text_metrics)
+
+
+def render_with_layout(
+    layout: Layout,
+    pet_image: Path | BinaryIO,
+    pet_name: str,
+    *,
+    debug: bool = False,
+) -> Image.Image:
+    return render_composition(
+        layout,
+        pet_image,
+        pet_name,
+        debug=debug,
+    ).image
 
 
 def _png_bytes(

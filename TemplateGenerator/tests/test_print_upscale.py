@@ -71,9 +71,11 @@ class PrintUpscaleTests(unittest.TestCase):
             layout.name_box.to_dict(),
             {"x": 40, "y": 380, "width": 320, "height": 100},
         )
-        self.assertEqual(layout.font_size_px, 60)
-        self.assertEqual(layout.min_font_size_px, 20)
-        self.assertEqual(layout.runtime_model, "gpt-image-2")
+        self.assertEqual(layout.schema_version, 2)
+        self.assertEqual(layout.font_size_px, 84)
+        self.assertEqual(layout.min_font_size_px, 40)
+        self.assertEqual(layout.name_padding_px, 8)
+        self.assertEqual(layout.name_fit, "shrink_only")
         self.assertTrue((self.output / "fonts" / "TestFont.ttf").is_file())
         self.assertTrue((self.output / "fonts" / "OFL.txt").is_file())
 
@@ -143,8 +145,32 @@ class PrintUpscaleTests(unittest.TestCase):
         layout = load_layout(self.output, layout_path=outputs.layout)
         self.assertEqual(layout.pet_box.to_dict(), {"x": 75, "y": 75, "width": 150, "height": 180})
         self.assertEqual(layout.name_box.to_dict(), {"x": 30, "y": 285, "width": 240, "height": 75})
+        self.assertEqual(layout.font_size_px, 63)
+        self.assertEqual(layout.min_font_size_px, 30)
+        self.assertEqual(layout.name_padding_px, 6)
         with Image.open(outputs.pet) as image:
             self.assertEqual(image.size, (120, 90))
+
+    def test_fractional_scale_uses_round_half_up_for_layout_pixels(self) -> None:
+        data = layout_data()
+        data["pet"]["box"]["x"] = 51
+        data["name"]["font_size_px"] = 41
+        data["name"]["min_font_size_px"] = 19
+        data["name"]["padding_px"] = 3
+        (self.template / "layout.json").write_text(
+            json.dumps(data), encoding="utf-8"
+        )
+        outputs = prepare_print_assets(
+            template_dir=self.template,
+            transformed_pet=self.pet,
+            target_size=(300, 450),
+            output_dir=self.output,
+        )
+        layout = load_layout(self.output, layout_path=outputs.layout)
+        self.assertEqual(layout.pet_box.x, 77)
+        self.assertEqual(layout.font_size_px, 62)
+        self.assertEqual(layout.min_font_size_px, 29)
+        self.assertEqual(layout.name_padding_px, 5)
 
     def test_rejects_aspect_ratio_change(self) -> None:
         with self.assertRaisesRegex(PrintUpscaleError, "aspect ratio"):

@@ -1,440 +1,360 @@
-# Personalized Product Toolset — Future Iterations
+# Personalized Product Toolset — Prioritized Future Roadmap
 
-Status: Deferred roadmap  
-Depends on: Successful profile-driven preview-to-print POC validation
-Last updated: 2026-09-02
+Status: Deferred roadmap
+Depends on: Evidence from the immutable-bundle MVP trial
+Last updated: 2026-09-13
 
-## 1. Purpose
+## 1. Purpose and decision rule
 
-This document records capabilities intentionally excluded from the
-profile-driven proof of concept described in
-[`OFFLINE_PERSONALIZATION_TOOLSET_DESIGN.md`](OFFLINE_PERSONALIZATION_TOOLSET_DESIGN.md).
+This document records work intentionally excluded from the current MVP. It is
+not a commitment to implement every item. Start an iteration only when trial or
+production evidence identifies a concrete limitation, an owner, and measurable
+acceptance criteria.
 
-These items should not be implemented merely because they appear here. Each
-iteration starts only after the preceding workflow has demonstrated a real need
-and the team has selected measurable acceptance criteria.
+| Priority | Meaning |
+| --- | --- |
+| P0 | Required before moving from the limited MVP trial to paid orders or vendor production |
+| P1 | Highest-value quality or reliability work after the MVP baseline is measured |
+| P2 | Efficiency and maintainability work triggered by recurring operator or engineering cost |
+| P3 | Scale infrastructure unnecessary for the initial catalog and traffic level |
 
-## 2. Graduation criteria from the current MVP
+Do not add speculative fields to a published contract. A bundle or layout
+contract changes only when an accepted requirement cannot be represented by the
+current schema. Published revisions remain immutable.
 
-Consider the MVP validated when several representative runs show that:
+## 2. MVP baseline and graduation evidence
 
-- Background-only `art.png` can be generated at acceptable quality.
-- The layout editor can reproduce useful pet and name placement.
-- Different pet shapes remain correctly aligned after alpha trimming and fit.
-- The same stored `art.png` and `layout.json` work with more than one user pet.
-- Prompt or layout changes can be tested quickly.
-- The result is promising enough to justify print-quality and online-production
-  investment.
-- Product-profile geometry and print-manifest integrity work across more than
-  one print canvas.
-- Upscaled candidates retain acceptable detail at the actual scale factors
-  required by representative products.
+The current baseline already provides:
 
-Before starting the next iteration, record the actual MVP limitations. Do not
-design future schema fields from hypothetical requirements alone.
+- product-scoped immutable art, pet, layout, print, review, and graduation
+  artifacts;
+- independent low-resolution and print-resolution art/pet preparation;
+- mechanically derived preview and print geometry;
+- bundle-v1, release-catalog-v2, layout-v2, and product-profile-v1 validation;
+- an OpenAI `gpt-image-2` production pet-runtime contract;
+- private OpenAI/Gemini authoring experiments;
+- a local catalog of 40 print-oriented OFL fonts; and
+- immutable S3 bundle and release publication with local receipts.
 
-## 3. Suggested iteration sequence
+The limited MVP trial should establish a baseline across representative designs,
+products, pets, and name lengths. Record at least:
 
-### Iteration 2 — Template quality and authoring efficiency
+- art-template acceptance and retry rate;
+- pet identity, style, pose, crop, and usable-alpha failure rate;
+- generation latency and cost by model/configuration;
+- layout/font correction time;
+- preview-to-print geometry discrepancies;
+- upscale artifacts observed at real product scale factors;
+- FE bundle-import or renderer-contract failures; and
+- operator effort from new design through published release.
 
-Goal: improve the offline template workflow while it remains low resolution.
+The trial is successful when multiple product profiles can reuse their bundled
+art/layout with different pets, the FE can import and render bundles without
+private authoring knowledge, and observed print candidates justify further
+production investment.
 
-Potential capabilities:
+## 3. Prioritized iteration stages
 
-- Optional layout presets for repeated design structures.
-- More pet and name slots only when required by tested products.
-- Additional deterministic properties such as text stroke, tracking, shadows,
-  opacity, rotation, and configurable layer order.
-- Curved or path-based text.
-- Evaluate AI-generated pet-name PNGs as an alternative to deterministic font
-  rendering, including spelling reliability, isolated lettering extraction,
-  transparent-background quality, long-name handling, and approval criteria.
-  No implementation remains in the MVP repository; reintroduce it only after
-  the font-rendered workflow is validated and there is evidence it is needed.
-- Foreground masks and controlled occlusion.
-- Multiple representative-pet fixtures and name-length test cases.
-- A pet-prompt evaluation set spanning breeds, coat lengths, colors, markings,
-  head shapes, source poses, and photo quality.
-- Automated identity/style/pose scoring, prompt-derivation retries, and
-  side-by-side analyzer comparison once human MVP results justify them.
-- Optional automatic suggestions for pet and text regions.
-- OCR-assisted text-region suggestions.
-- Reference cropping and perspective-rectification assistance.
-- Prompt history and side-by-side result comparison.
-- A lightweight accepted-template snapshot command.
+Stages express dependencies, not fixed calendar releases. Stage 2 and Stage 3
+may run in parallel when different owners are available, but P0 gates take
+precedence.
 
-Keep automatic detection advisory. Operators should remain able to override all
-suggested geometry.
+### Stage 0 — Measure and stabilize the MVP trial (current, P0)
 
-#### Deferred capability — open-world OFL font discovery
+Goal: obtain trustworthy evidence without broadening the contract.
 
-The MVP font boundary is the versioned local catalog of 40 print-oriented OFL
-faces. Layout authoring ranks only those locally available
-artifacts. Expanding beyond that catalog during a layout session is explicitly
-deferred until the template workflow is validated at larger scale.
+- Exercise the complete authoring-to-S3-to-FE import path for the trial catalog.
+- Classify failures by art generation, pet runtime, layout/font, print
+  derivation, bundle contract, or FE integration.
+- Retain exact bundle identity, hashes, provider/model settings, latency, and
+  safe reproduction inputs for each defect.
+- Verify that publication receipts preserve revision allocation after local
+  exchange cleanup.
+- Agree with FE on ownership of import validation, runtime retries, activation,
+  rollback, and production diagnostics.
 
-Future font discovery should use a two-tier model:
+Exit when the trial catalog imports successfully, no contract or geometry defect
+remains unresolved, and measured quality/latency results can prioritize later
+work.
 
-1. Rank the local core catalog first.
-2. Enter discovery only when the operator rejects the results or calibrated
-   score and confidence thresholds indicate that no candidate is adequate.
-3. Extract structural lettering traits from the reference, including serif
-   class, width, weight, contrast, terminals, case, and decorative style.
-4. Search a pinned metadata snapshot of a broader OFL universe, rather than
-   making an unbounded live-web search part of the template contract.
-5. Materialize a bounded candidate set, validate it, render comparison
-   specimens, and optionally apply multimodal reranking restricted to known
-   candidate IDs.
-6. Present the resulting top candidates for operator confirmation.
-7. Pin the selected artifacts, original licenses, source revisions, and hashes,
-   then promote useful selections into a later version of the local catalog.
+### Stage 1 — Vendor readiness and customer-data safety (P0)
 
-Candidate discovery may use Google Fonts metadata and repository artifacts,
-Fontsource metadata/WOFF2 packaging, and other reputable OFL foundries. Font
-identification services may provide classification clues, but their results
-must never bypass license, glyph, renderability, source-integrity, and
-FontBakery-style quality checks. Temporary discovery downloads must not become
-bundle inputs until promoted and pinned.
+Goal: qualify an accepted print artifact for fulfillment and safely handle real
+customer inputs. Vendor qualification, geometry conformance, and upload/privacy
+controls are required before automated fulfillment.
 
-The future design must also distinguish a missing typeface from effects that
-make an existing typeface look different. Tracking, outlines, shadows, width
-adjustments, curved baselines, distressing, and custom lettering may require
-layout/effect support rather than a larger font search. If no suitable OFL font
-exists, record that outcome and require an explicit design decision; do not
-silently introduce a proprietary font or generated lettering asset.
+#### 1.1 Vendor print qualification
 
-Acceptance criteria for this capability should include:
+Define and revision-lock per vendor/product:
 
-- bounded discovery latency and download volume;
-- deterministic reruns from a pinned discovery-index revision;
-- no invented or unlicensed font identifiers from multimodal ranking;
-- complete required glyph coverage for configured customer-name languages;
-- identical selected-font identity across preview and print rendering;
-- promotion of a discovered font without mutating previously published
-  templates; and
-- evidence that discovery materially improves matches missed by the local
-  30–50-font catalog.
+- physical and pixel dimensions plus DPI interpretation;
+- printable area, bleed, and safe area;
+- formats, compression, transparency, file-size limits, color space, and ICC
+  behavior;
+- backend/style/scale-factor combinations approved for upscaling; and
+- measurable edge, detail, color, and alpha thresholds from printed samples.
 
-#### Deferred issue — Charlie Well Trained pet shadow
+The current deterministic and Bria backends produce print candidates, not
+vendor-qualified deliverables. An upscaler must preserve canvas origin, aspect
+ratio, crop, subject placement, and alpha silhouette; it must not regenerate or
+reinterpret approved artwork. For alpha images, evaluate enhancing RGB while
+scaling the approved alpha mask deterministically.
 
-The `charlie-well-trained` reference design includes a pet shadow that the
-current automated art-template workflow does not reproduce reliably. Supporting
-this effect requires more than generating a shadow in the background artwork:
+#### 1.2 Cross-resolution conformance
 
-- The shadow position, dimensions, shape, softness, opacity, and color must
-  match the reference design.
-- The shadow must be positioned relative to the final transformed pet rather
-  than treated as a fixed part of `art.png`.
-- Changes to the transformed pet's crop, scale, or placement must move or adjust
-  the shadow consistently so the two elements remain visually connected.
-- The compositor and layout schema may need an explicit shadow layer or another
-  pet-relative effect representation, with deterministic layer ordering.
+Add renderer-owned `render-metadata.json` containing resolved boxes, anchors,
+visible-alpha bounds, text bounds, and baselines. Compare preview and print
+metadata after applying the exact profile scale and defined rounding rules.
 
-This coupling adds complexity to template extraction, layout authoring, and
-preview composition. Shadow extraction and pet-relative shadow placement are
-therefore excluded from the current MVP. For MVP validation, the Charlie
-example may omit or approximate the shadow; it must not be treated as evidence
-that automated shadow handling is supported. Revisit this issue in Iteration 2
-after the basic art-template, transformed-pet, and layout workflow is validated.
+Also provide downscaled print comparisons, preview/print debug overlays, numeric
+tolerances, crop/padding/translation/alpha checks, and golden tests with bundled
+fonts and pinned rendering dependencies. Do not recover geometry from flattened
+images when the renderer can emit it directly.
 
-### Iteration 3 — Vendor-qualified print assets
+#### 1.3 Upload/privacy safety (P0) and formal rights evidence (P1)
 
-Goal: graduate exact-size print candidates into vendor-qualified deliverables
-without changing the approved composition.
+The limited MVP deliberately keeps the accepted lightweight operator
+source/rights review. Do not make a formal license schema a retroactive MVP
+blocker. Before catalog distribution or sales channels expand, introduce a
+formal publication gate because ownership and permitted use cannot be inferred
+from a file or generated output.
 
-Implemented POC baseline (2026-08-31): named profiles define preview and print
-canvases plus print-contract metadata; `pawmarvel-upscale-template` prepares
-reusable art/layout once and `pawmarvel-upscale-pet` prepares each customer
-cutout against that immutable geometry, with exact-canvas scaling,
-source-alpha preservation, and separate checksum manifests;
-the renderer verifies the bundle/profile and creates an exact-size final-review
-manifest. Formal preview approval is deliberately deferred. This still produces
-print *candidates*, not vendor-qualified deliverables.
+The gate should:
 
-Implemented two-resolution consumer package:
+- cover every reference design, QA pet, and generated production asset;
+- record source/owner, commercial and redistribution permission, applicable
+  territory/term, reviewer, date, status, and artifact hash;
+- distinguish source permission, provider terms, trademark review,
+  privacy/publicity rights, and generated-output review;
+- keep sensitive evidence in restricted storage while authoring stores a stable
+  evidence identifier; and
+- block publication when evidence is missing, expired, or does not cover the
+  sales channel.
 
-```text
-art.png                  # low-resolution web asset
-layout.json              # low-resolution web geometry
-print/art.png            # high-resolution print asset
-layout-print.json        # high-resolution print geometry
-fonts/
-```
+Before processing customer images, define retention/deletion policy, validate
+image type/size/decode behavior, isolate uploads from executable paths, keep
+credentials and customer sources out of bundles, and confirm vendor privacy
+handling.
 
-The publisher validates that both art files share an exact aspect ratio and
-that print placement/text geometry is mechanically scaled from the preview
-layout. Profile metadata and vendor qualification remain outside the portable
-consumer bundle for this MVP.
+Exit the P0 portion when at least one product/profile/backend passes physical
+sample QA, preview-to-print structural checks pass, and upload/privacy controls
+are enforced. Complete the P1 formal-rights gate before broader catalog or
+channel expansion.
 
-Implemented geometry rules:
+### Stage 2 — Pet-runtime quality, reliability, and latency (P1)
 
-- Define preview and print canvas dimensions in one named profile.
-- Require exact matching aspect ratios and uniform scaling.
-- Derive print geometry mechanically from preview geometry.
-- Scale rectangle edges to avoid accumulated rounding error.
-- Scale font sizes while keeping rotation, alignment, color, and other
-  dimensionless values unchanged.
-- Store `layout-print.json` and prevent independent print-layout tuning.
+Goal: improve customer-facing transformation using measured MVP failures while
+preserving one explicit FE contract.
 
-Future graduation work:
+Build a versioned evaluation set spanning breeds, coat lengths, colors,
+markings, head shapes, source poses, photo quality, and difficult alpha edges.
+Measure:
 
-- Qualify one or more upscaling backends per style and scale-factor range.
-- Define measurable detail, edge, and alpha acceptance thresholds.
-- Confirm how strokes, tracking, masks, and future effect layers scale.
-- Confirm each product/vendor profile and lock its revision.
+- identity, style, pose, expression, crop, and composition hard gates;
+- usable transparency and edge contamination;
+- retry/fallback behavior, stability, p50/p95 latency, and cost; and
+- automated scores only after their correlation with human decisions is known.
 
-Example uniform derivation:
+Provider/model changes remain independent pet experiments and must not force art
+or layout regeneration when outputs satisfy existing geometry.
 
-```text
-scale_x = print_width / preview_width
-scale_y = print_height / preview_height
+#### Provider expansion
 
-require scale_x == scale_y
+Bundle-v1 permits only the OpenAI image-edit pet runtime. Future candidates
+include a Responses-based OpenAI image transport and Gemini. Before either can
+graduate:
 
-print_left  = round(preview_left * scale_x)
-print_right = round((preview_left + preview_width) * scale_x)
-print_width = print_right - print_left
-```
+1. Define the exact endpoint, request fields, image order, output semantics, and
+   model allowlist.
+2. Define deterministic alpha validation or a named/versioned matting policy.
+3. Implement matching offline and FE adapters.
+4. Run conformance, quality, latency, failure, and cost tests.
+5. Introduce an explicit bundle schema revision and rollout/rollback policy.
 
-#### Print specification contract
+Gemini remains suitable for private experiments but cannot graduate merely by
+winning latency. `Images.edit()` does not accept `service_tier`; Fast-mode
+evaluation requires a supported transport, not an undocumented request field.
 
-Before calling an asset print-ready, define:
+Exit when the chosen runtime meets agreed quality/latency/cost targets, offline
+replay and FE use the same contract, and retry outcomes remain diagnosable.
 
-- Physical print width and height.
-- Required pixel dimensions and DPI.
-- Printable area, bleed, and safe-area bounds.
-- Required color space and ICC profile behavior.
-- Transparency and background requirements.
-- Accepted output formats and compression settings.
-- Vendor-specific file limits.
+### Stage 3 — Template quality and authoring throughput (P1/P2)
 
-#### Upscaling
+Goal: expand design coverage and reduce operator effort without turning
+layout-v2 into a generic graphics format.
 
-The POC has replaceable deterministic Lanczos and Bria backends. Evaluate them
-against real printed samples before selecting a production default or adding a
-heavyweight local super-resolution model.
+Prioritize only features required by rejected or slow-to-author designs:
 
-An upscaler must preserve:
+1. Prompt history, side-by-side results, accepted-template snapshots, and richer
+   pet/name fixtures.
+2. Advisory pet/text region and OCR-assisted text suggestions.
+3. Layout presets for repeated structures.
+4. Deterministic tracking, stroke, opacity, shadow, pet/name rotation, layer ordering,
+   masks, and controlled occlusion.
+5. Curved/path text, multiple slots, and optional layers only when real products
+   require them.
+6. Reference-cropping and perspective-rectification assistance.
 
-- Exact output dimensions and aspect ratio.
-- Canvas origin.
-- Alpha silhouette.
-- Subject position and crop.
-- Input-to-output geometry.
+Automatic detection remains advisory; operators retain final control.
 
-It must not independently regenerate or reinterpret approved artwork.
+#### Pet-relative shadows
 
-For alpha images, consider enhancing RGB separately while scaling the approved
-alpha mask deterministically, then recombining them.
+The `charlie-well-trained` design exposes a missing abstraction. Its shadow
+cannot be baked reliably into `art.png`: shape, softness, opacity, and position
+must move with the transformed pet. Support should use an explicit pet-relative
+effect/layer with deterministic ordering and preview/print derivation. Until
+then, this example may omit or approximate its shadow and is not evidence of
+automated shadow support.
 
-### Iteration 4 — Cross-resolution validation
+#### Wider OFL font discovery
 
-Goal: prove that the print composition preserves the approved preview layout.
+Use the local 40-face catalog first. Enter broader discovery only after an
+operator rejects local results or calibrated confidence shows no adequate match.
+The future flow should:
 
-Potential capabilities:
+- distinguish missing typefaces from tracking, outlines, shadows, width
+  changes, curved baselines, or distressing;
+- search a pinned metadata snapshot of a broader OFL universe;
+- materialize and validate a bounded candidate set;
+- optionally rerank only known candidates with a multimodal model;
+- verify glyph coverage, renderability, source integrity, license, and
+  FontBakery-style quality; and
+- pin font, license, source revision, and hashes before local-catalog promotion.
 
-- Emit `render-metadata.json` with resolved boxes, anchors, visible alpha bounds,
-  text bounds, and baselines.
-- Compare preview and scaled print metadata numerically.
-- Downscale print renders for human side-by-side inspection.
-- Add debug overlays for both profiles.
-- Define numeric tolerances for scaled positions and rounding.
-- Detect crop, padding, translation, or alpha loss introduced by upscaling.
-- Add golden tests using bundled fonts and pinned image-library versions.
+Possible sources include Google Fonts, Fontsource, and reputable OFL foundries.
+Identification services may provide clues but cannot bypass validation. If no
+suitable OFL font exists, require an explicit decision rather than silently
+using a proprietary font.
 
-Do not attempt to recover boxes or baselines from a flattened raster when the
-renderer can report them directly.
+#### Generated pet-name artwork
 
-### Iteration 5 — Online customer preview and order overrides
+Reconsider AI-generated name PNGs only if deterministic font/effect support
+cannot meet validated designs. Evaluation must cover spelling, transparent
+isolation, reproducibility, long names, and review criteria. No AI-name
+implementation remains in the MVP repository.
 
-Goal: expose the validated renderer through a low-latency customer workflow.
+Exit criteria are feature-specific: show material improvement on designs that
+failed the current workflow, with deterministic bundles and matching preview and
+print behavior.
+
+### Stage 4 — Customer approval and order reproducibility (P1)
+
+Goal: bind a customer-approved preview to the exact high-resolution artifact
+sent for fulfillment.
 
 Potential flow:
 
-1. Accept the customer pet and name.
-2. Generate a transformed preview pet.
-3. Render with the approved preview template.
-4. Allow a bounded set of layout adjustments.
-5. Save adjustments as an order-scoped override instead of modifying the
-   product template.
-6. Record customer approval.
+1. Validate the customer pet and name.
+2. Generate the transformed preview pet.
+3. Render with one immutable bundle revision.
+4. Optionally allow bounded, server-validated translation/scale adjustments.
+5. Store changes as an order override, never a template mutation.
+6. Bind approval to bundle revision, normalized name, transformed-pet hash,
+   override, and preview hash.
 
-Potential override fields:
+The print flow upscales the exact approved transformed pet, derives any print
+override mechanically, renders text from the bundled font, and composes separate
+print-resolution layers. It must not upscale the flattened preview or silently
+substitute an independently regenerated pet.
 
-```json
-{
-  "pet": {
-    "translate_x_px": 12,
-    "translate_y_px": -8,
-    "scale": 1.05,
-    "rotation_delta_degrees": 0
-  },
-  "name": {
-    "translate_x_px": 0,
-    "translate_y_px": 4
-  }
-}
-```
-
-The server should whitelist and range-check overrides. If print profiles exist,
-derive the print override with the same shared geometry function used for the
-product layout.
-
-### Iteration 6 — Approved high-resolution order rendering
-
-Goal: create final high-resolution personalized artwork after customer
-approval.
-
-Recommended flow:
-
-1. Bind customer approval to the selected product revision, transformed preview
-   pet, pet name, layout override, and preview result.
-2. Upscale the exact approved transformed pet rather than independently
-   generating a different high-resolution pet.
-3. Preserve the approved pet geometry and alpha silhouette.
-4. Derive the print override from the approved preview override.
-5. Render high-resolution text from the bundled font.
-6. Compose high-resolution art, pet, and text from their separate components.
-7. Do not upscale the flattened customer preview as the final print asset.
-8. Run cross-resolution geometry validation.
-
-An independently generated high-resolution pet may change pose, markings,
-silhouette, crop, or style and therefore must not silently replace the pet the
-customer approved.
-
-### Iteration 7 — Product and order lifecycle controls
-
-Goal: make approved artifacts traceable and resistant to accidental mutation.
-
-This iteration owns the deferred preview-approval feature. Reintroduce an
-approval command or authenticated action only with an explicit revision model;
-it may bind a pipeline `run.json` when available, but must also define how
-manually assembled artifacts are captured into an immutable revision before
-approval.
-
-Potential product states:
-
-```text
-draft -> preview_approved -> print_approved -> published
-```
-
-Potential order states:
+Add pet or name rotation only with a defined origin, post-rotation containment,
+preview/print derivation, and FE conformance tests.
 
 ```text
 draft -> customer_approved -> print_rendered -> operations_approved
       -> sent_to_vendor
 ```
 
-Potential controls:
+Record actor, timestamp, hashes, retry lineage, and the exact approved vendor
+artifact. Product activation and rollback remain FE state over immutable bundle
+revisions.
 
-- Immutable product revision directories.
-- Package and order manifests.
-- SHA-256 hashes for approved assets and configs.
-- Actor and timestamp records for state transitions.
-- Approval commands or authenticated API actions.
-- Rejection and controlled revision paths.
-- Verification that vendor release references the operations-approved print
-  hash.
-- Rollback by switching product revision instead of editing approved files.
+### Stage 5 — Authoring lifecycle and deployment hardening (P2)
 
-These controls should be introduced together with a real production owner and
-operational workflow, not during the offline POC.
+Goal: reduce maintenance cost only after trial use demonstrates recurring pain.
 
-### Iteration 8 — Scalable service infrastructure
+- Add reference-aware cleanup states for reviewed-but-not-graduated decisions
+  and print candidates.
+- Provide standalone wheel/container distribution, including packaged or
+  explicitly provisioned fonts, schemas, profiles, and static assets.
+- Split the large authoring module into experiment, review/decision,
+  print/graduation, trace, and cleanup services while preserving one CLI.
+- Add a compact release summary covering design, product profile, revision,
+  preview/print sizes, runtime references, and validation state.
+- Add an optional HTML comparison report over immutable evaluation data and
+  contact-sheet assets; keep winner selection explicitly human-owned.
+- Expand thin CLI-adapter tests beyond the MVP smoke coverage to a complete
+  argument/error matrix for bundle and catalog commands.
+- Pin rendering dependencies where exact reproduction matters.
+- Add structured diagnostics and cost/latency summaries.
+- Replace repeated font-catalog snapshots with content-addressed storage only if
+  storage or copy time becomes material.
 
-Goal: support concurrent customer requests and operational reliability.
+These changes must not add compatibility branches for pre-MVP formats.
 
-Potential capabilities:
+### Stage 6 — Service and operational scale (P3)
 
-- Online API around the shared renderer.
-- Asynchronous job queue for generation and print preparation.
-- Object storage for product and order assets.
-- Database for product revisions, jobs, and approvals.
-- Retry and idempotency policy.
-- Authentication and authorization.
-- API-key secret management.
-- Observability, structured logs, metrics, and alerts.
-- Resource limits and abuse protection.
-- Cost tracking for image-generation requests.
-- Automated deployment and rollback.
-- Operations review portal.
-- Vendor integration.
+Goal: support concurrency and operational reliability after traffic and catalog
+volume justify a service platform.
 
-Retain the deterministic renderer as a reusable library. Avoid duplicating
-placement logic across offline and online code paths.
+- asynchronous generation and print jobs with retry/idempotency;
+- object storage and databases for customer jobs, orders, and approvals;
+- authentication, authorization, managed secrets, abuse controls, and quotas;
+- logs, metrics, tracing, alerts, and per-request cost accounting;
+- automated deployment and rollback;
+- operations review tooling; and
+- vendor API integration.
 
-## 4. Future schema considerations
+Retain the deterministic renderer as shared code. Do not duplicate geometry or
+text behavior across offline and online paths.
 
-Potential additions should be driven by demonstrated product needs:
+## 4. Contract evolution rules
 
-- Multiple named image slots.
-- Multiple text fields.
-- Optional slots and conditional layers.
-- `contain` and `cover` fit modes.
-- Named anchors beyond `bottom_center`.
-- Rotation origin.
-- Clipping and foreground masks.
-- Text tracking, stroke, shadow, case transformation, and multiline behavior.
-- Curved text paths.
-- Safe areas and print regions.
-- Multiple output profiles.
-- Product-defined customer override bounds.
-- Schema migration and backward compatibility.
+Possible additions include multiple image/text slots, optional layers, named
+anchors, contain/cover fit, clipping, masks, tracking, stroke, shadow, rotation,
+curved or multiline text, safe areas, multiple output profiles, and bounded
+order overrides.
 
-Prefer a small explicit schema over a generic graphics document model until
-the product set proves that broader abstraction is necessary.
+For every change:
 
-## 5. Future quality and testing work
+- add the smallest representation satisfying a demonstrated requirement;
+- define preview rendering, print derivation, validation, and FE conformance
+  together;
+- create a new schema version when published semantics would change;
+- never silently reinterpret bundle-v1 name or rendering rules; and
+- keep published bundles complete and immutable.
 
-- Test short, long, narrow, and wide names.
-- Test pets with wide ears, tall bodies, long tails, and unusual alpha padding.
-- Validate multiple image formats and color modes.
-- Pin fonts and rendering-library versions when exact reproducibility matters.
-- Prefer pixel-difference thresholds over raw PNG byte equality across
-  environments.
-- Add render metadata for structural assertions.
-- Test layout-profile derivation and rounding.
-- Test order-override derivation.
-- Test approval-state transitions and unauthorized transitions.
-- Test upscaler geometry and alpha preservation.
-- Test failed and retried asynchronous jobs.
-- Keep OpenAI API calls out of default unit tests; use explicit live integration
-  tests.
+If multilingual testing requires user-perceived name lengths, replace Unicode
+code-point counting with UAX #29 grapheme counting only in a new schema version.
 
-## 6. Security, legal, and operational concerns
+## 5. Shared quality backlog
 
-Address these before external production use:
+Each stage selects relevant tests from this common backlog:
 
-- Confirm rights to reference designs, fonts, trademarks, and generated assets.
-- Keep API keys and customer source images out of reusable product packages.
-- Define retention and deletion rules for customer photos.
-- Validate uploaded image type, size, and decode behavior.
-- Isolate untrusted uploads from executable paths.
-- Define who may approve products, print files, and vendor release.
-- Record model, prompt, input roles, and generation settings where auditability
-  is required.
-- Confirm vendor privacy and data-handling requirements.
+- short, long, narrow, wide, multilingual, and punctuation-bearing names;
+- pets with wide ears, tall bodies, long tails, unusual padding, difficult
+  edges, and varied source quality;
+- supported formats, malformed inputs, color modes, and size limits;
+- pixel-difference thresholds rather than PNG byte equality across platforms;
+- structural assertions using render metadata;
+- profile derivation, rounding, alpha, and upscale preservation;
+- override and approval-state transitions;
+- failed and retried asynchronous jobs; and
+- opt-in live provider tests, with mocked calls in the default unit suite.
 
-## 7. Risks to reassess after MVP
+## 6. Priority summary
 
-| Risk | Future response |
-| --- | --- |
-| AI-generated background does not reproduce reusable artwork reliably | Improve prompts, add controlled editing, or introduce a human art-cleanup step |
-| Manual layout becomes the authoring bottleneck | Add automatic region suggestions while preserving manual override |
-| Low-resolution transformed pets do not upscale adequately | Evaluate dedicated super-resolution or a controlled high-resolution generation workflow with explicit reapproval |
-| Preview and print geometry diverge | Use shared derivation, render metadata, and cross-resolution tests |
-| Font rendering differs by environment | Bundle fonts and pin rendering dependencies |
-| Customer overrides break composition | Use product-defined bounds and server-side validation |
-| Reference shadows do not stay aligned with transformed pets | Add an explicit pet-relative shadow layer and validate its geometry and compositing order |
-| Approved files are changed accidentally | POC hashes detect mutation; add immutable revision storage and signing for production |
-| Operational review does not scale | Add an approval portal and role-based workflow |
-| Vendor specifications differ by product | Confirm and revision-lock the existing explicit profiles per vendor/product |
-| Reference designs create copyright or trademark exposure | Require design-rights review before publication |
+| Order | Stage | Priority | Trigger |
+| --- | --- | --- | --- |
+| 0 | Measure and stabilize MVP | P0 | Current trial |
+| 1 | Vendor, cross-resolution, and customer-data safety | P0 | Before automated vendor fulfillment |
+| 1b | Formal rights evidence | P1 | Before broader catalog/channel distribution |
+| 2 | Pet-runtime quality and latency | P1 | Runtime quality, latency, or cost misses target |
+| 3 | Template quality and authoring throughput | P1/P2 | Designs are rejected or authoring cost repeats |
+| 4 | Customer approval and order reproducibility | P1 | Before self-service approval or automated fulfillment |
+| 5 | Lifecycle and deployment hardening | P2 | Maintenance, retention, or deployment pain repeats |
+| 6 | Service and operational scale | P3 | Proven traffic, catalog, or operations demand |
 
-## 8. Decision rule
-
-Implement the smallest next iteration that addresses a limitation observed in
-real POC runs. Vendor qualification, cross-resolution quality scoring,
-lifecycle, and infrastructure work should remain deferred until the reusable
-artifacts and personalized print candidates demonstrate sufficient product
-value.
+When priorities compete, protect contract correctness, customer identity, print
+fidelity, rights/privacy, and reproducibility before design breadth or
+operational automation.

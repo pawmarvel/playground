@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://pawmarvel.com/schemas/evaluation-protocol-v1.schema.json",
+  "type": "object", "additionalProperties": true, "required": ["schema_version", "evaluation_protocol_id"],
+  "properties": {"schema_version": {"const": 1}, "evaluation_protocol_id": {"type": "string", "minLength": 1}}
+}

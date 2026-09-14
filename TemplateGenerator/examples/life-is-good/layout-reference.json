@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "reference_image_sha256": "54761c41bd6bb351b0be67801b71db078611f2bef78fdb79001010c94c52b472",
+  "pet_region": {
+    "x": 49,
+    "y": 36,
+    "width": 145,
+    "height": 148
+  },
+  "name_region": {
+    "x": 12,
+    "y": 179,
+    "width": 218,
+    "height": 54
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pawmarvel.com/schemas/evaluation-decision-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_id", "kind", "design_id", "product_profile_id", "approved", "evaluation", "selected", "decision"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "review_id": {"type": "string"},
+    "kind": {"enum": ["art", "pet", "layout", "assembly"]},
+    "design_id": {"type": "string"},
+    "product_profile_id": {"type": "string"},
+    "approved": {"const": true},
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "evaluation_sha256"],
+      "properties": {
+        "path": {"const": "evaluation.json"},
+        "evaluation_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "selected": {"type": "object"},
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selected_by", "selected_at", "notes"],
+      "properties": {
+        "selected_by": {"type": "string", "minLength": 1},
+        "selected_at": {"type": "string"},
+        "notes": {"type": "string"}
+      }
+    }
+  }
+}

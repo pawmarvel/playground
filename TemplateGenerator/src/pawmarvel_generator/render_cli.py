@@ -13,6 +13,7 @@ from typing import Sequence
 
 from .config import ConfigError
 from .cli import _atomic_write_bytes
+from .cli_errors import add_debug_argument, report_unexpected
 from .product_profile import (
     ProductProfileError,
     load_product_profile,
@@ -35,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pawmarvel-render",
         description="Render one personalized preview from an explicit layout.",
     )
+    add_debug_argument(parser)
     parser.add_argument("--template-dir", type=Path, required=True)
     parser.add_argument(
         "--layout",
@@ -160,6 +162,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         RenderError,
     ) as exc:
         parser.error(str(exc))
+    except KeyboardInterrupt:
+        return 130
+    except Exception as exc:
+        return report_unexpected("pawmarvel-render", exc, debug=args.debug)
     print(output)
     if debug_output:
         print(debug_output)

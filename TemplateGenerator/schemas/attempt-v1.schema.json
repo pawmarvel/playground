@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://pawmarvel.com/schemas/attempt-v1.schema.json",
+  "type": "object", "additionalProperties": true,
+  "required": ["schema_version", "attempt_id", "experiment_id", "kind", "status", "started_at", "generator"],
+  "properties": {"schema_version": {"const": 1}, "kind": {"enum": ["art", "pet", "layout"]}, "status": {"enum": ["running", "succeeded", "failed"]}, "duration_seconds": {"type": "number", "minimum": 0}, "generator": {"type": "object", "required": ["version"], "properties": {"version": {"type": "string"}}}}
+}

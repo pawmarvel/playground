@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "fixture_set_id": "mvp-pets-v1",
+  "fixtures": [
+    {
+      "id": "sausage-dog",
+      "pet_image": "../../../pet-inputs/sausage-dog-puppy.png"
+    },
+    {
+      "id": "white-fluffy-dog",
+      "pet_image": "../../../pet-inputs/white-fluffy-dog.png"
+    }
+  ]
+}

@@ -4,70 +4,296 @@ const boot = window.PAWMARVEL_BOOTSTRAP;
 const state = structuredClone(boot.layout);
 const canvas = document.querySelector("#preview");
 const context = canvas.getContext("2d");
+const referenceCanvas = document.querySelector("#reference");
+const referenceContext = referenceCanvas.getContext("2d");
 const statusNode = document.querySelector("#status");
-const reference = document.querySelector("#reference");
-reference.src = boot.referenceDataUrl;
+const metricsNode = document.querySelector("#text-metrics");
+const fontReferenceStatus = document.querySelector("#font-reference-status");
+const petNameInput = document.querySelector("#preview-pet-name");
+const previewPetSelect = document.querySelector("#preview-pet");
+const previewPetUpload = document.querySelector("#preview-pet-upload");
+const referenceTextInput = document.querySelector("#reference-text");
+const matchReferenceScaleButton = document.querySelector("#match-reference-scale");
+const selectPetRegionButton = document.querySelector("#select-pet-region");
+const selectNameRegionButton = document.querySelector("#select-name-region");
+const applyReferenceLayoutButton = document.querySelector("#apply-reference-layout");
+const referenceRegionMode = document.querySelector("#reference-region-mode");
+const saveButtons = [document.querySelector("#save"), document.querySelector("#complete")];
+
+petNameInput.value = boot.petName;
+referenceTextInput.value = boot.referenceText;
 document.querySelector("#name-mode").textContent =
-  "Preview source: configured font. Production chooses the largest fitting size and ink-centers vertically.";
+  "Production starts at one fixed nominal size and only shrinks longer names to fit. Resizing the name box height scales that authored size proportionally.";
 canvas.width = boot.canvas.width;
 canvas.height = boot.canvas.height;
+referenceCanvas.width = boot.referenceCanvas.width;
+referenceCanvas.height = boot.referenceCanvas.height;
 
 let previewImage = null;
 let previewTimer = null;
+let previewController = null;
 let drag = null;
 let selectedFontId = boot.selectedFontId;
+let selectedPreviewPetId = "pinned";
+let stateRevision = 0;
+let renderedRevision = -1;
+let editorLocked = false;
+let fontSpecimen = null;
+let fontSelect = null;
+let fontHelp = null;
+let fontSelectionConfirmed = boot.fontSelectionConfirmed;
+let fontRanking = boot.fontRanking || null;
+let fontReferenceRevision = 0;
+let rankedReferenceRevision = fontRanking ? 0 : -1;
+let rankTimer = null;
+let rankController = null;
+let referenceDrag = null;
+let referenceSelectionMode = boot.layoutReference ? "name" : "pet";
+let referenceRegion = boot.fontReference
+  ? structuredClone(boot.fontReference.region)
+  : boot.layoutReference
+    ? structuredClone(boot.layoutReference.name_region)
+    : null;
+let petReferenceRegion = boot.layoutReference
+  ? structuredClone(boot.layoutReference.pet_region)
+  : null;
+let referenceGeometryApplied = Boolean(boot.layoutReference);
 
-function selectFont(candidateId) {
-  const candidate = boot.fontCandidates.find(value => value.id === candidateId);
+const referenceImage = new Image();
+referenceImage.onload = () => {
+  drawReference();
+  if (referenceRegion && referenceTextInput.value.trim() && !fontRanking) {
+    requestFontRanking();
+  }
+};
+referenceImage.src = boot.referenceDataUrl;
+
+function currentFontReference() {
+  if (!referenceRegion || !referenceTextInput.value.trim()) return null;
+  return {
+    region: structuredClone(referenceRegion),
+    text: referenceTextInput.value,
+  };
+}
+
+function currentLayoutReference() {
+  if (!petReferenceRegion || !referenceRegion) return null;
+  return {
+    pet_region: structuredClone(petReferenceRegion),
+    name_region: structuredClone(referenceRegion),
+  };
+}
+
+function setReferenceSelectionMode(mode) {
+  referenceSelectionMode = mode;
+  referenceRegionMode.textContent = mode === "pet"
+    ? "Drag a box around the intended pet placement region."
+    : "Drag a box around the complete personalized-name region.";
+  selectPetRegionButton.classList.toggle("active", mode === "pet");
+  selectNameRegionButton.classList.toggle("active", mode === "name");
+}
+
+function setApplyReferenceEnabled() {
+  applyReferenceLayoutButton.disabled = editorLocked || !currentLayoutReference();
+}
+
+function canSave() {
+  const fontReady = !boot.autoFont ||
+    (fontSelectionConfirmed && rankedReferenceRevision === fontReferenceRevision);
+  const referenceGeometryReady = !currentLayoutReference() || referenceGeometryApplied;
+  return !editorLocked && renderedRevision === stateRevision && fontReady && referenceGeometryReady;
+}
+
+function setSaveEnabled() {
+  for (const button of saveButtons) button.disabled = !canSave();
+}
+
+function canCalibrateFontSize() {
+  return Boolean(
+    fontRanking && selectedFontId && (!boot.autoFont || fontSelectionConfirmed)
+  );
+}
+
+function setEditorLocked(locked) {
+  editorLocked = locked;
+  for (const control of document.querySelectorAll("input, select, button")) {
+    control.disabled = locked;
+  }
+  if (!locked) {
+    if (fontSelect) fontSelect.disabled = !fontRanking;
+    matchReferenceScaleButton.disabled = !canCalibrateFontSize();
+    setApplyReferenceEnabled();
+    setSaveEnabled();
+  }
+}
+
+function markDirty() {
+  if (editorLocked) return;
+  stateRevision += 1;
+  renderedRevision = -1;
+  if (previewController) previewController.abort();
+  canvas.classList.add("stale");
+  setSaveEnabled();
+  metricsNode.textContent = "Text metrics pending.";
+  statusNode.textContent = `Preview stale; rendering revision ${stateRevision}…`;
+}
+
+function markFontReferenceDirty() {
+  if (editorLocked) return;
+  fontReferenceRevision += 1;
+  rankedReferenceRevision = -1;
+  fontRanking = null;
+  if (rankController) rankController.abort();
+  if (boot.autoFont) fontSelectionConfirmed = false;
+  setSaveEnabled();
+  renderFontOptions();
+  fontReferenceStatus.textContent =
+    "Reference typography changed; analyze fonts again.";
+}
+
+function scaledReferenceBox(region) {
+  const left = Math.round(region.x * canvas.width / referenceCanvas.width);
+  const top = Math.round(region.y * canvas.height / referenceCanvas.height);
+  const right = Math.round(
+    (region.x + region.width) * canvas.width / referenceCanvas.width
+  );
+  const bottom = Math.round(
+    (region.y + region.height) * canvas.height / referenceCanvas.height
+  );
+  return {
+    x: left,
+    y: top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
+}
+
+function applyReferenceGeometry() {
+  const reference = currentLayoutReference();
+  if (!reference) return;
+  state.pet.box = scaledReferenceBox(reference.pet_region);
+  state.name.box = scaledReferenceBox(reference.name_region);
+  state.name.font_size_px = state.name.box.height;
+  state.name.min_font_size_px = Math.max(1, Math.round(state.name.box.height * 0.5));
+  state.name.padding_px = Math.min(4, Math.max(0, Math.floor((state.name.box.height - 1) / 2)));
+  referenceGeometryApplied = true;
+  syncInputs();
+  markDirty();
+  draw();
+  schedulePreview();
+  if (fontRanking && fontSelectionConfirmed) calibrateFontSize();
+  referenceRegionMode.textContent =
+    "Applied normalized reference geometry. Review it against the generated art before saving.";
+}
+
+function candidateById(candidateId) {
+  return boot.fontCandidates.find(value => value.id === candidateId);
+}
+
+function selectFont(candidateId, confirmed = true) {
+  const candidate = candidateById(candidateId);
   if (!candidate) return;
+  const changed = selectedFontId !== candidate.id || state.name.font !== candidate.relativeName;
   selectedFontId = candidate.id;
   state.name.font = candidate.relativeName;
-  schedulePreview();
+  fontSelectionConfirmed = confirmed;
+  if (fontSpecimen) fontSpecimen.style.fontFamily = `"${candidate.id}"`;
+  if (changed) {
+    markDirty();
+    schedulePreview();
+  } else {
+    setSaveEnabled();
+  }
+  if (confirmed && fontRanking && currentFontReference()) calibrateFontSize();
 }
 
 function buildFontCatalog() {
   const host = document.querySelector("#font-catalog");
-  const description = document.createElement("p");
-  description.className = "font-help";
-  const recommended = boot.fontCandidates.find(value => value.recommended);
-  description.textContent = `Recommended from reference: ${recommended.label} (${Math.round(recommended.confidence * 100)}% visual confidence). Choose one of the five highest-ranked eligible OFL fonts.`;
-  host.append(description);
   const style = document.createElement("style");
   for (const candidate of boot.fontCandidates) {
     style.textContent += `@font-face { font-family: "${candidate.id}"; src: url("/fonts/${candidate.id}") format("truetype"); }\n`;
   }
   document.head.append(style);
 
-  const ranked = [...boot.fontCandidates]
-    .sort((left, right) => left.rank - right.rank)
-    .filter(candidate => candidate.rank <= 5 || candidate.id === selectedFontId);
+  fontHelp = document.createElement("p");
+  fontHelp.className = "font-help";
   const label = document.createElement("label");
   label.className = "font-select-label";
   label.textContent = "Top font recommendations";
-  const select = document.createElement("select");
-  select.id = "font-recommendations";
-  select.setAttribute("aria-label", "Top five font recommendations");
-  for (const candidate of ranked) {
+  fontSelect = document.createElement("select");
+  fontSelect.id = "font-recommendations";
+  fontSelect.setAttribute("aria-label", "Top 15 font recommendations");
+  fontSelect.addEventListener("change", () => {
+    if (fontSelect.value) {
+      selectFont(fontSelect.value, true);
+      renderFontOptions();
+    }
+  });
+  label.append(fontSelect);
+  fontSpecimen = document.createElement("div");
+  fontSpecimen.className = "font-specimen";
+  fontSpecimen.textContent = petNameInput.value;
+  const current = candidateById(selectedFontId);
+  if (current) fontSpecimen.style.fontFamily = `"${current.id}"`;
+  host.append(fontHelp, label, fontSpecimen);
+  renderFontOptions();
+}
+
+function renderFontOptions() {
+  if (!fontSelect || !fontHelp) return;
+  fontSelect.replaceChildren();
+  if (!fontRanking) {
     const option = document.createElement("option");
-    option.value = candidate.id;
-    const suffix = candidate.recommended ? " — recommended" : "";
-    option.textContent = `#${candidate.rank} ${candidate.label} — ${Math.round(candidate.confidence * 100)}% confidence${suffix}`;
-    option.selected = candidate.id === selectedFontId;
-    select.append(option);
+    option.textContent = boot.autoFont
+      ? "Analyze the confirmed reference lettering first"
+      : `Explicit font: ${candidateById(selectedFontId)?.label || state.name.font}`;
+    option.value = "";
+    option.selected = true;
+    fontSelect.append(option);
+    fontSelect.disabled = true;
+    matchReferenceScaleButton.disabled = true;
+    fontHelp.textContent = boot.autoFont
+      ? "No font is automatically accepted until the visible reference text and its exact region are analyzed."
+      : "The explicit font is active. Reference analysis is optional.";
+    return;
   }
-  const specimen = document.createElement("div");
-  specimen.className = "font-specimen";
-  specimen.textContent = boot.petName;
-  function updateSelection() {
-    const candidate = ranked.find(value => value.id === select.value);
-    if (!candidate) return;
-    specimen.style.fontFamily = `"${candidate.id}"`;
-    selectFont(candidate.id);
+
+  const recommendation = fontRanking.recommendation;
+  const ranked = fontRanking.ranked_options.slice(0, 15);
+  if (!ranked.some(value => value.font_id === selectedFontId)) {
+    const selected = fontRanking.ranked_options.find(
+      value => value.font_id === selectedFontId
+    );
+    if (selected) ranked.push(selected);
   }
-  select.addEventListener("change", updateSelection);
-  label.append(select);
-  host.append(label, specimen);
-  updateSelection();
+  if (boot.autoFont && !fontSelectionConfirmed) {
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a font after reviewing the candidates";
+    placeholder.selected = true;
+    fontSelect.append(placeholder);
+  }
+  for (const match of ranked) {
+    const option = document.createElement("option");
+    option.value = match.font_id;
+    const suffix = match.rank === 1 ? " — recommended" : "";
+    option.textContent =
+      `#${match.rank} ${match.label} — similarity ${Math.round(match.similarity_score * 100)}%, ` +
+      `evidence ${Math.round(match.confidence_score * 100)}% (${match.confidence_level})${suffix}`;
+    option.selected = fontSelectionConfirmed && match.font_id === selectedFontId;
+    fontSelect.append(option);
+  }
+  fontSelect.disabled = false;
+  matchReferenceScaleButton.disabled = !canCalibrateFontSize();
+  fontHelp.textContent =
+    `Recommendation: ${candidateById(recommendation.font_id)?.label || recommendation.font} ` +
+    `(${recommendation.confidence_level} confidence; ` +
+    `${Math.round(recommendation.similarity_score * 100)}% similarity). ` +
+    (recommendation.auto_select
+      ? "High-confidence recommendation applied automatically."
+      : fontSelectionConfirmed
+        ? "Manual font selection confirmed."
+        : "Manual selection is required.");
 }
 
 buildFontCatalog();
@@ -75,12 +301,27 @@ buildFontCatalog();
 const numericFields = [
   ["pet", "x", "Pet x"], ["pet", "y", "Pet y"],
   ["pet", "width", "Pet width"], ["pet", "height", "Pet height"],
-  ["pet", "rotation_degrees", "Pet rotation"],
   ["name", "x", "Name x"], ["name", "y", "Name y"],
   ["name", "width", "Name width"], ["name", "height", "Name height"],
-  ["name", "font_size_px", "Font size"],
+  ["name", "font_size_px", "Nominal font size"],
   ["name", "min_font_size_px", "Minimum font size"],
+  ["name", "padding_px", "Safety padding"],
 ];
+
+function scaleNameTypography(original, nextHeight, nextWidth) {
+  if (!original || original.height <= 0 || nextHeight <= 0) return;
+  const ratio = nextHeight / original.height;
+  state.name.font_size_px = Math.max(1, Math.round(original.fontSize * ratio));
+  state.name.min_font_size_px = Math.min(
+    state.name.font_size_px,
+    Math.max(1, Math.round(original.minFontSize * ratio)),
+  );
+  const maximumPadding = Math.max(0, Math.floor((Math.min(nextWidth, nextHeight) - 1) / 2));
+  state.name.padding_px = Math.min(
+    maximumPadding,
+    Math.max(0, Math.round(original.padding * ratio)),
+  );
+}
 
 function valueFor(section, key) {
   if (["x", "y", "width", "height"].includes(key)) return state[section].box[key];
@@ -101,14 +342,23 @@ function addNumberControl(section, key, labelText) {
   input.value = valueFor(section, key);
   input.dataset.section = section;
   input.dataset.key = key;
-  if (section === "name" && ["font_size_px", "min_font_size_px"].includes(key)) {
-    input.disabled = true;
-    input.title = "Legacy schema hint; ignored by the production renderer";
-  }
   input.addEventListener("input", () => {
     const number = Number(input.value);
     if (Number.isFinite(number)) {
-      setValue(section, key, key === "rotation_degrees" ? number : Math.round(number));
+      const typography = section === "name" && key === "height"
+        ? {
+            height: state.name.box.height,
+            fontSize: state.name.font_size_px,
+            minFontSize: state.name.min_font_size_px,
+            padding: state.name.padding_px,
+          }
+        : null;
+      setValue(section, key, Math.round(number));
+      if (typography && number > 0) {
+        scaleNameTypography(typography, Math.round(number), state.name.box.width);
+        syncInputs();
+      }
+      markDirty();
       draw();
       schedulePreview();
     }
@@ -119,7 +369,7 @@ function addNumberControl(section, key, labelText) {
 
 for (const field of numericFields) addNumberControl(...field);
 
-function addSelect(key, labelText, values, disabled = false) {
+function addSelect(key, labelText, values) {
   const host = document.querySelector("#name-controls");
   const label = document.createElement("label");
   label.textContent = labelText;
@@ -131,24 +381,83 @@ function addSelect(key, labelText, values, disabled = false) {
     option.selected = state.name[key] === value;
     select.append(option);
   }
-  select.addEventListener("change", () => { state.name[key] = select.value; schedulePreview(); });
-  select.disabled = disabled;
-  if (disabled) select.title = "Legacy schema hint; production ink-centers vertically";
+  select.addEventListener("change", () => {
+    state.name[key] = select.value;
+    markDirty();
+    schedulePreview();
+  });
   label.append(select);
   host.append(label);
 }
 
 addSelect("horizontal_align", "Horizontal alignment", ["left", "center", "right"]);
-addSelect("vertical_align", "Vertical alignment", ["top", "middle", "bottom"], true);
 
 const colorLabel = document.createElement("label");
 colorLabel.textContent = "Text color";
 const colorInput = document.createElement("input");
 colorInput.type = "color";
 colorInput.value = state.name.color.slice(0, 7);
-colorInput.addEventListener("input", () => { state.name.color = `${colorInput.value}FF`; schedulePreview(); });
+colorInput.addEventListener("input", () => {
+  state.name.color = `${colorInput.value}FF`;
+  markDirty();
+  schedulePreview();
+});
 colorLabel.append(colorInput);
 document.querySelector("#name-controls").append(colorLabel);
+
+petNameInput.addEventListener("input", () => {
+  if (fontSpecimen) fontSpecimen.textContent = petNameInput.value || " ";
+  markDirty();
+  schedulePreview();
+});
+
+previewPetSelect.addEventListener("change", () => {
+  selectedPreviewPetId = previewPetSelect.value;
+  markDirty();
+  schedulePreview();
+});
+
+previewPetUpload.addEventListener("change", async () => {
+  const file = previewPetUpload.files?.[0];
+  if (!file) return;
+  previewPetUpload.disabled = true;
+  statusNode.textContent = `Loading transformed pet ${file.name}…`;
+  try {
+    const response = await fetch("/preview-pet", {
+      method: "POST",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "X-PawMarvel-Pet-Name": encodeURIComponent(file.name),
+      },
+      body: file,
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || response.statusText);
+    let option = Array.from(previewPetSelect.options).find(
+      value => value.value === result.id,
+    );
+    if (!option) {
+      option = document.createElement("option");
+      option.value = result.id;
+      previewPetSelect.append(option);
+    }
+    option.textContent = file.name;
+    previewPetSelect.value = result.id;
+    selectedPreviewPetId = result.id;
+    markDirty();
+    schedulePreview();
+  } catch (error) {
+    statusNode.textContent = `Transformed pet could not be loaded: ${error.message}`;
+  } finally {
+    previewPetUpload.value = "";
+    previewPetUpload.disabled = editorLocked;
+  }
+});
+
+referenceTextInput.addEventListener("input", () => {
+  markFontReferenceDirty();
+  scheduleFontRanking();
+});
 
 function syncInputs() {
   for (const input of document.querySelectorAll("input[data-section]")) {
@@ -172,11 +481,54 @@ function draw() {
   drawBox(state.name.box, "#40c0ff");
 }
 
-function canvasPoint(event) {
-  const rect = canvas.getBoundingClientRect();
+function drawReference() {
+  referenceContext.clearRect(0, 0, referenceCanvas.width, referenceCanvas.height);
+  if (referenceImage.complete && referenceImage.naturalWidth) {
+    referenceContext.drawImage(
+      referenceImage, 0, 0, referenceCanvas.width, referenceCanvas.height
+    );
+  }
+  if (petReferenceRegion) {
+    referenceContext.fillStyle = "rgba(255, 79, 79, 0.12)";
+    referenceContext.fillRect(
+      petReferenceRegion.x,
+      petReferenceRegion.y,
+      petReferenceRegion.width,
+      petReferenceRegion.height,
+    );
+    referenceContext.strokeStyle = "#ff4f4f";
+    referenceContext.lineWidth = Math.max(1, referenceCanvas.width / 240);
+    referenceContext.strokeRect(
+      petReferenceRegion.x,
+      petReferenceRegion.y,
+      petReferenceRegion.width,
+      petReferenceRegion.height,
+    );
+  }
+  if (referenceRegion) {
+    referenceContext.fillStyle = "rgba(64, 192, 255, 0.16)";
+    referenceContext.fillRect(
+      referenceRegion.x,
+      referenceRegion.y,
+      referenceRegion.width,
+      referenceRegion.height,
+    );
+    referenceContext.strokeStyle = "#40c0ff";
+    referenceContext.lineWidth = Math.max(1, referenceCanvas.width / 240);
+    referenceContext.strokeRect(
+      referenceRegion.x,
+      referenceRegion.y,
+      referenceRegion.width,
+      referenceRegion.height,
+    );
+  }
+}
+
+function pointInCanvas(event, target) {
+  const rect = target.getBoundingClientRect();
   return {
-    x: (event.clientX - rect.left) * canvas.width / rect.width,
-    y: (event.clientY - rect.top) * canvas.height / rect.height,
+    x: Math.max(0, Math.min(target.width - 1, (event.clientX - rect.left) * target.width / rect.width)),
+    y: Math.max(0, Math.min(target.height - 1, (event.clientY - rect.top) * target.height / rect.height)),
   };
 }
 
@@ -188,11 +540,26 @@ function hit(box, point) {
 }
 
 canvas.addEventListener("pointerdown", event => {
-  const point = canvasPoint(event);
+  if (editorLocked) return;
+  const point = pointInCanvas(event, canvas);
   for (const section of ["name", "pet"]) {
     const mode = hit(state[section].box, point);
     if (mode) {
-      drag = { section, mode, start: point, original: structuredClone(state[section].box) };
+      markDirty();
+      drag = {
+        section,
+        mode,
+        start: point,
+        original: structuredClone(state[section].box),
+        typography: section === "name" && mode === "resize"
+          ? {
+              height: state.name.box.height,
+              fontSize: state.name.font_size_px,
+              minFontSize: state.name.min_font_size_px,
+              padding: state.name.padding_px,
+            }
+          : null,
+      };
       canvas.setPointerCapture(event.pointerId);
       return;
     }
@@ -201,7 +568,7 @@ canvas.addEventListener("pointerdown", event => {
 
 canvas.addEventListener("pointermove", event => {
   if (!drag) return;
-  const point = canvasPoint(event);
+  const point = pointInCanvas(event, canvas);
   const dx = Math.round(point.x - drag.start.x);
   const dy = Math.round(point.y - drag.start.y);
   const box = state[drag.section].box;
@@ -211,28 +578,226 @@ canvas.addEventListener("pointermove", event => {
   } else {
     box.width = Math.max(1, drag.original.width + dx);
     box.height = Math.max(1, drag.original.height + dy);
+    if (drag.section === "name") {
+      scaleNameTypography(drag.typography, box.height, box.width);
+    }
   }
   syncInputs();
   draw();
 });
 
-canvas.addEventListener("pointerup", () => { if (drag) schedulePreview(); drag = null; });
+canvas.addEventListener("pointerup", () => {
+  if (drag) schedulePreview();
+  drag = null;
+});
+
+referenceCanvas.addEventListener("pointerdown", event => {
+  if (editorLocked) return;
+  const point = pointInCanvas(event, referenceCanvas);
+  referenceDrag = {start: point, mode: referenceSelectionMode};
+  const region = {x: Math.round(point.x), y: Math.round(point.y), width: 1, height: 1};
+  if (referenceSelectionMode === "pet") {
+    petReferenceRegion = region;
+  } else {
+    referenceRegion = region;
+    markFontReferenceDirty();
+  }
+  referenceGeometryApplied = false;
+  setSaveEnabled();
+  setApplyReferenceEnabled();
+  referenceCanvas.setPointerCapture(event.pointerId);
+  drawReference();
+});
+
+referenceCanvas.addEventListener("pointermove", event => {
+  if (!referenceDrag) return;
+  const point = pointInCanvas(event, referenceCanvas);
+  const left = Math.round(Math.min(referenceDrag.start.x, point.x));
+  const top = Math.round(Math.min(referenceDrag.start.y, point.y));
+  const right = Math.round(Math.max(referenceDrag.start.x, point.x));
+  const bottom = Math.round(Math.max(referenceDrag.start.y, point.y));
+  const region = {
+    x: left,
+    y: top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
+  if (referenceDrag.mode === "pet") petReferenceRegion = region;
+  else referenceRegion = region;
+  setApplyReferenceEnabled();
+  drawReference();
+});
+
+referenceCanvas.addEventListener("pointerup", () => {
+  const mode = referenceDrag?.mode;
+  referenceDrag = null;
+  if (mode === "name") scheduleFontRanking();
+});
+
+selectPetRegionButton.addEventListener("click", () => setReferenceSelectionMode("pet"));
+selectNameRegionButton.addEventListener("click", () => setReferenceSelectionMode("name"));
+applyReferenceLayoutButton.addEventListener("click", applyReferenceGeometry);
+setReferenceSelectionMode(referenceSelectionMode);
+setApplyReferenceEnabled();
+
+async function requestFontRanking() {
+  clearTimeout(rankTimer);
+  const fontReference = currentFontReference();
+  if (!fontReference || !fontReference.text.trim()) {
+    fontReferenceStatus.textContent =
+      "Select a text region and enter the exact visible text.";
+    return;
+  }
+  const requestedRevision = fontReferenceRevision;
+  if (rankController) rankController.abort();
+  const controller = new AbortController();
+  rankController = controller;
+  fontReferenceStatus.textContent = "Analyzing the confirmed lettering region…";
+  try {
+    const response = await fetch("/rank-fonts", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({font_reference: fontReference}),
+      signal: controller.signal,
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || response.statusText);
+    if (requestedRevision !== fontReferenceRevision) return;
+    fontRanking = result;
+    rankedReferenceRevision = requestedRevision;
+    const recommendation = result.recommendation;
+    if (boot.autoFont) {
+      selectFont(recommendation.font_id, recommendation.auto_select);
+      if (!recommendation.auto_select) calibrateFontSize();
+    }
+    renderFontOptions();
+    fontReferenceStatus.textContent =
+      `Reference region analyzed at revision ${requestedRevision}.`;
+    setSaveEnabled();
+  } catch (error) {
+    if (error.name !== "AbortError" && requestedRevision === fontReferenceRevision) {
+      fontRanking = null;
+      rankedReferenceRevision = -1;
+      renderFontOptions();
+      fontReferenceStatus.textContent = `Font analysis failed: ${error.message}`;
+      setSaveEnabled();
+    }
+  } finally {
+    if (rankController === controller) rankController = null;
+  }
+}
+
+async function calibrateFontSize() {
+  const fontReference = currentFontReference();
+  if (!fontReference || !fontRanking || !selectedFontId) {
+    fontReferenceStatus.textContent =
+      "Analyze the confirmed reference lettering before matching its scale.";
+    return;
+  }
+  const requestedStateRevision = stateRevision;
+  const requestedReferenceRevision = fontReferenceRevision;
+  const requestedFontId = selectedFontId;
+  matchReferenceScaleButton.disabled = true;
+  fontReferenceStatus.textContent = "Matching the reference lettering scale…";
+  try {
+    const response = await fetch("/calibrate-font-size", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        layout: structuredClone(state),
+        font_id: requestedFontId,
+        font_reference: fontReference,
+      }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || response.statusText);
+    if (
+      requestedStateRevision !== stateRevision ||
+      requestedReferenceRevision !== fontReferenceRevision ||
+      requestedFontId !== selectedFontId
+    ) return;
+    state.name.font_size_px = result.font_size_px;
+    state.name.min_font_size_px = result.min_font_size_px;
+    syncInputs();
+    markDirty();
+    schedulePreview();
+    fontReferenceStatus.textContent =
+      `Applied fixed ${result.font_size_px}px nominal size from ` +
+      `${Math.round(result.reference_horizontal_fill * 100)}% × ` +
+      `${Math.round(result.reference_vertical_fill * 100)}% reference ink fill.`;
+  } catch (error) {
+    fontReferenceStatus.textContent = `Reference scale matching failed: ${error.message}`;
+  } finally {
+    matchReferenceScaleButton.disabled = !canCalibrateFontSize();
+  }
+}
+
+function scheduleFontRanking() {
+  clearTimeout(rankTimer);
+  rankTimer = setTimeout(requestFontRanking, 300);
+}
+
+document.querySelector("#rank-fonts").addEventListener("click", requestFontRanking);
+matchReferenceScaleButton.addEventListener("click", calibrateFontSize);
 
 async function requestPreview() {
-  statusNode.textContent = "Rendering with Pillow…";
+  clearTimeout(previewTimer);
+  const requestedRevision = stateRevision;
+  const requestedLayout = structuredClone(state);
+  const requestedPetName = petNameInput.value;
+  if (previewController) previewController.abort();
+  const controller = new AbortController();
+  previewController = controller;
+  statusNode.textContent = `Rendering revision ${requestedRevision} with Pillow…`;
   try {
     const response = await fetch("/preview", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({layout: state, font_id: selectedFontId}),
+      body: JSON.stringify({
+        revision: requestedRevision,
+        layout: requestedLayout,
+        pet_name: requestedPetName,
+        preview_pet_id: selectedPreviewPetId,
+        font_id: selectedFontId,
+      }),
+      signal: controller.signal,
     });
     if (!response.ok) throw new Error((await response.json()).error || response.statusText);
-    const image = new Image();
-    image.onload = () => { previewImage = image; draw(); URL.revokeObjectURL(image.src); };
-    image.src = URL.createObjectURL(await response.blob());
-    statusNode.textContent = "Preview ready.";
+    const responseRevision = Number(response.headers.get("X-PawMarvel-Preview-Revision"));
+    const appliedSize = response.headers.get("X-PawMarvel-Applied-Font-Size");
+    const textFit = response.headers.get("X-PawMarvel-Text-Fit");
+    const blob = await response.blob();
+    if (responseRevision !== requestedRevision || requestedRevision !== stateRevision) return;
+    const imageUrl = URL.createObjectURL(blob);
+    await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        if (requestedRevision === stateRevision) {
+          previewImage = image;
+          renderedRevision = requestedRevision;
+          canvas.classList.remove("stale");
+          draw();
+          metricsNode.textContent = `Applied font size: ${appliedSize}px (${textFit}).`;
+          statusNode.textContent = `Preview revision ${requestedRevision} ready.`;
+          setSaveEnabled();
+        }
+        URL.revokeObjectURL(imageUrl);
+        resolve();
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(imageUrl);
+        reject(new Error("preview image could not be decoded"));
+      };
+      image.src = imageUrl;
+    });
   } catch (error) {
-    statusNode.textContent = `Preview failed: ${error.message}`;
+    if (error.name !== "AbortError" && requestedRevision === stateRevision) {
+      renderedRevision = -1;
+      setSaveEnabled();
+      statusNode.textContent = `Preview failed: ${error.message}`;
+    }
+  } finally {
+    if (previewController === controller) previewController = null;
   }
 }
 
@@ -248,24 +813,66 @@ async function closeEditor() {
 }
 
 async function save(overwrite = false, closeAfter = false) {
-  statusNode.textContent = "Saving…";
-  const response = await fetch("/save", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({layout: state, font_id: selectedFontId, overwrite}),
-  });
-  const result = await response.json();
-  if (response.status === 409 && !overwrite && window.confirm(`${result.error}. Replace them?`)) return save(true, closeAfter);
-  if (!response.ok) throw new Error(result.error || response.statusText);
-  statusNode.textContent = `Saved ${result.layout} and ${result.calibration}`;
-  if (closeAfter) await closeEditor();
+  if (renderedRevision !== stateRevision) throw new Error("preview the current revision before saving");
+  if (boot.autoFont && !fontSelectionConfirmed) {
+    throw new Error("select a ranked font before saving");
+  }
+  const revision = stateRevision;
+  const payload = {
+    revision,
+    layout: structuredClone(state),
+    pet_name: petNameInput.value,
+    preview_pet_id: selectedPreviewPetId,
+    font_id: selectedFontId,
+    font_reference: currentFontReference(),
+    layout_reference: currentLayoutReference(),
+    font_selection_confirmed: fontSelectionConfirmed,
+    overwrite,
+  };
+  setEditorLocked(true);
+  statusNode.textContent = `Saving previewed revision ${revision}…`;
+  try {
+    let allowOverwrite = overwrite;
+    while (true) {
+      payload.overwrite = allowOverwrite;
+      const response = await fetch("/save", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (response.status === 409 && result.code === "overwrite_required" && !allowOverwrite && window.confirm(`${result.error}. Replace them?`)) {
+        allowOverwrite = true;
+        continue;
+      }
+      if (!response.ok) throw new Error(result.error || response.statusText);
+      if (result.revision !== revision || result.layout_sha256 === undefined) {
+        throw new Error("server saved an unexpected layout revision");
+      }
+      statusNode.textContent = `Saved revision ${revision}: ${result.layout}`;
+      if (closeAfter) await closeEditor();
+      return;
+    }
+  } finally {
+    if (!closeAfter) setEditorLocked(false);
+  }
 }
 
-document.querySelector("#refresh").addEventListener("click", requestPreview);
-document.querySelector("#save").addEventListener("click", () => save().catch(error => { statusNode.textContent = `Save failed: ${error.message}`; }));
-document.querySelector("#complete").addEventListener("click", () => save(false, true).catch(error => { statusNode.textContent = `Save failed: ${error.message}`; }));
+document.querySelector("#refresh").addEventListener("click", () => {
+  markDirty();
+  requestPreview();
+});
+document.querySelector("#save").addEventListener("click", () => save().catch(error => {
+  statusNode.textContent = `Save failed: ${error.message}`;
+}));
+document.querySelector("#complete").addEventListener("click", () => save(false, true).catch(error => {
+  setEditorLocked(false);
+  statusNode.textContent = `Save failed: ${error.message}`;
+}));
 setInterval(() => fetch("/heartbeat", {method: "POST"}).catch(() => {}), 1500);
 window.addEventListener("pagehide", () => {
   fetch("/close", {method: "POST", keepalive: true}).catch(() => {});
 });
+
+setSaveEnabled();
 requestPreview();

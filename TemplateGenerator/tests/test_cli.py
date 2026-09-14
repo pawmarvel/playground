@@ -78,6 +78,7 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("Input image 1", request["prompt"])
         self.assertNotIn("Replace only", request["prompt"])
         self.assertNotIn("input_fidelity", request)
+        self.assertNotIn("service_tier", request)
 
     def test_sample_only_generation_is_supported(self) -> None:
         client = FakeClient()

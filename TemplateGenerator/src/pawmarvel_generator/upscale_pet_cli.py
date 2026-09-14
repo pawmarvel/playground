@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .config import ConfigError
+from .cli_errors import add_debug_argument, report_unexpected
 from .print_upscale import PrintUpscaleError, prepare_print_pet
 
 
@@ -19,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pawmarvel-upscale-pet",
         description="Upscale only customer cutouts for an approved print layout.",
     )
+    add_debug_argument(parser)
     parser.add_argument("--template-dir", type=Path, required=True)
     parser.add_argument("--layout", type=Path)
     parser.add_argument("--print-layout", type=Path, required=True)
@@ -62,8 +64,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Cancelled.", file=sys.stderr)
         return 130
     except Exception as exc:
-        print(f"Pet upscale failed: {exc}", file=sys.stderr)
-        return 1
+        return report_unexpected("pawmarvel-upscale-pet", exc, debug=args.debug)
     for path in outputs.paths():
         print(path)
     return 0

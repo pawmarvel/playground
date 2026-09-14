@@ -13,14 +13,14 @@ official Google Fonts repository at the immutable revision recorded there.
 When neither `--font` nor `--font-catalog` is supplied,
 `pawmarvel-layout-config` and `pawmarvel-pipeline` use this catalog by default.
 The editor compares normalized lettering silhouettes against the reference,
-preselects the highest-scoring font, and provides the five best candidates with
-visual-confidence scores for manual override.
+using an operator-confirmed text region and the exact characters visible there.
+It provides the 15 best candidates with separate similarity and conservative
+confidence scores. Only a high-confidence winner may be selected
+automatically; otherwise the operator must choose explicitly.
 
 The selected family is copied into the template and remains the only font
 published in the current runtime bundle. The larger catalog is an authoring
 asset, not a frontend payload. Do not place system, proprietary, variable-only,
 or license-ambiguous fonts in this directory.
 
-`expanded-catalog.json` and its cache loader remain for compatibility with
-earlier experiments. They are not part of the current local-catalog MVP.
 Open-world OFL discovery is deferred to the future scaling roadmap.

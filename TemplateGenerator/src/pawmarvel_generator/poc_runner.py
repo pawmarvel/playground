@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .cli import UserInputError, _resolve_provider_model, generate
+from .cli_errors import add_debug_argument, report_unexpected
 from .config import ConfigError, load_layout
 from .renderer import RenderError, render_to_files
 
@@ -22,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Transform one pet and render a preview, or reuse an approved transformed pet."
         ),
     )
+    add_debug_argument(parser)
     parser.add_argument("--template-dir", type=Path, required=True)
     parser.add_argument(
         "--layout",
@@ -166,7 +168,7 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
         "model": model,
         "size": args.size,
         "quality": args.quality,
-        "runtime_model": layout.runtime_model or "gemini",
+        "runtime_model": model,
     }
     print("POC run inputs and outputs:", file=sys.stderr)
     print(json.dumps(summary, indent=2), file=sys.stderr, flush=True)
@@ -214,10 +216,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Cancelled.", file=sys.stderr)
         return 130
     except Exception as exc:
-        request_id = getattr(exc, "request_id", None)
-        detail = f" (request ID: {request_id})" if request_id else ""
-        print(f"POC run failed: {exc}{detail}", file=sys.stderr)
-        return 1
+        return report_unexpected("pawmarvel-poc-run", exc, debug=args.debug)
     for output in outputs:
         print(output)
     return 0

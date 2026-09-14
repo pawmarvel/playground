@@ -8,7 +8,13 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from helpers import copy_font, layout_data, make_image
-from pawmarvel_generator.renderer import RenderError, render_preview, render_to_files
+from pawmarvel_generator.config import load_layout
+from pawmarvel_generator.renderer import (
+    RenderError,
+    render_composition,
+    render_preview,
+    render_to_files,
+)
 
 
 class RendererTests(unittest.TestCase):
@@ -53,20 +59,23 @@ class RendererTests(unittest.TestCase):
         with self.assertRaisesRegex(RenderError, "must not be empty"):
             render_preview(self.root, self.pet, "  ")
 
-    def test_font_size_hints_do_not_change_contract_rendering(self) -> None:
-        baseline = render_preview(self.root, self.pet, "BUDDY")
-        layout = layout_data()
-        layout["name"]["font_size_px"] = 2
-        layout["name"]["min_font_size_px"] = 1
-        (self.root / "layout.json").write_text(json.dumps(layout), encoding="utf-8")
-        self.assertEqual(render_preview(self.root, self.pet, "BUDDY"), baseline)
+    def test_short_name_uses_nominal_size_without_growing(self) -> None:
+        result = render_composition(load_layout(self.root), self.pet, "MAX")
+        self.assertEqual(result.text.requested_font_size_px, 42)
+        self.assertEqual(result.text.applied_font_size_px, 42)
+        self.assertEqual(result.text.fit, "nominal")
 
-    def test_vertical_alignment_hint_does_not_change_contract_rendering(self) -> None:
-        baseline = render_preview(self.root, self.pet, "BUDDY")
-        layout = layout_data()
-        layout["name"]["vertical_align"] = "bottom"
-        (self.root / "layout.json").write_text(json.dumps(layout), encoding="utf-8")
-        self.assertEqual(render_preview(self.root, self.pet, "BUDDY"), baseline)
+    def test_long_name_shrinks_but_not_below_configured_minimum(self) -> None:
+        result = render_composition(
+            load_layout(self.root), self.pet, "MARSHMALLOW"
+        )
+        self.assertLess(result.text.applied_font_size_px, 42)
+        self.assertGreaterEqual(result.text.applied_font_size_px, 20)
+        self.assertEqual(result.text.fit, "shrunk")
+
+    def test_name_that_cannot_fit_at_minimum_size_fails(self) -> None:
+        with self.assertRaisesRegex(RenderError, "min_font_size_px=20"):
+            render_preview(self.root, self.pet, "W" * 64)
 
     def test_fully_transparent_pet_fails(self) -> None:
         transparent = self.root / "transparent.png"

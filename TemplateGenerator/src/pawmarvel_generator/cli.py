@@ -25,6 +25,8 @@ from urllib.request import Request, urlopen
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from .cli_errors import add_debug_argument, report_unexpected
+from .generation_contract import gemini_aspect_ratio, gemini_image_size
 from .image_size import ImageSizeError, validate_generation_size
 from .product_profile import ProductProfileError, load_product_profile
 
@@ -43,22 +45,6 @@ DEFAULT_MODELS = {
     "openai": "gpt-image-2",
     "gemini": "gemini-3.1-flash-image",
 }
-GEMINI_ASPECT_RATIOS = (
-    "1:8",
-    "1:4",
-    "2:3",
-    "3:4",
-    "4:5",
-    "1:1",
-    "5:4",
-    "4:3",
-    "3:2",
-    "4:1",
-    "8:1",
-    "9:16",
-    "16:9",
-    "21:9",
-)
 PROMPT_CATEGORY_PATTERN = re.compile(r"-(gpt|gemini)\.md$")
 
 
@@ -85,24 +71,56 @@ class _GeminiRestInteractions:
                 result = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             raw_detail = exc.read().decode("utf-8", errors="replace").strip()
+            request_id = None
+            if exc.headers is not None:
+                request_id = exc.headers.get("x-request-id") or exc.headers.get(
+                    "x-goog-request-id"
+                )
             exc.close()
             detail = raw_detail
+            error_code = None
             try:
                 body = json.loads(raw_detail)
                 error = body.get("error", {})
                 if isinstance(error, dict):
                     detail = str(error.get("message", ""))
+                    error_code = error.get("status") or error.get("code")
                 elif error:
                     detail = str(error)
             except (json.JSONDecodeError, AttributeError):
                 pass
             detail = " ".join(detail.split())[:1000]
             suffix = f": {detail}" if detail else ""
-            raise RuntimeError(f"Gemini API returned HTTP {exc.code}{suffix}") from exc
+            context = f"; provider=gemini; model={payload.get('model', '<unknown>')}"
+            if error_code:
+                context += f"; error_code={error_code}"
+            if request_id:
+                context += f"; request_id={request_id}"
+            if exc.code in {401, 403}:
+                correction = "verify GEMINI_API_KEY and project/model permissions"
+            elif exc.code == 429:
+                correction = "wait and retry, or verify quota and rate limits"
+            elif 400 <= exc.code < 500:
+                correction = "correct the model, prompt, image, or request parameters"
+            else:
+                correction = "retry; if it persists, check Gemini service status"
+            raise RuntimeError(
+                f"Gemini API returned HTTP {exc.code}{suffix}{context}. "
+                f"Correction: {correction}."
+            ) from exc
         except URLError as exc:
-            raise RuntimeError(f"Gemini API request failed: {exc.reason}") from exc
+            raise RuntimeError(
+                "Gemini API request failed; provider=gemini; "
+                f"model={payload.get('model', '<unknown>')}; error={exc.reason}. "
+                "Correction: verify network connectivity and retry."
+            ) from exc
         except json.JSONDecodeError as exc:
-            raise RuntimeError("Gemini API returned invalid JSON") from exc
+            raise RuntimeError(
+                "Gemini API returned malformed JSON; provider=gemini; "
+                f"model={payload.get('model', '<unknown>')}; line={exc.lineno}; "
+                f"column={exc.colno}; error={exc.msg}. Correction: retry; if it "
+                "persists, record the model and report a provider response issue."
+            ) from exc
 
         for step in reversed(result.get("steps", [])):
             for content in reversed(step.get("content", [])):
@@ -164,6 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
             "design, a pet image, or both."
         ),
     )
+    add_debug_argument(parser)
     parser.add_argument(
         "--sample-design",
         type=Path,
@@ -462,35 +481,6 @@ def _gemini_prompt(prompt: str, background: str) -> str:
     )
 
 
-def _gemini_aspect_ratio(size: str) -> str | None:
-    if size == "auto":
-        return None
-    width, height = (int(value) for value in size.split("x", 1))
-    target = width / height
-
-    def distance(value: str) -> float:
-        numerator, denominator = (int(part) for part in value.split(":", 1))
-        return abs((numerator / denominator) - target)
-
-    return min(GEMINI_ASPECT_RATIOS, key=distance)
-
-
-def _gemini_image_size(size: str, model: str) -> str | None:
-    if size == "auto":
-        return None
-    if "flash-lite-image" in model:
-        return "1K"
-    width, height = (int(value) for value in size.split("x", 1))
-    longest = max(width, height)
-    if longest <= 512:
-        return "512"
-    if longest <= 1024:
-        return "1K"
-    if longest <= 2048:
-        return "2K"
-    return "4K"
-
-
 def _image_mime_type(path: Path) -> str:
     suffix = path.suffix.lower()
     return "image/jpeg" if suffix in {".jpg", ".jpeg"} else f"image/{suffix[1:]}"
@@ -566,8 +556,8 @@ def _print_request_details(summary: dict[str, Any]) -> None:
             "input_images": images,
             "response_format": {
                 "type": "image",
-                "aspect_ratio": _gemini_aspect_ratio(summary["size"]),
-                "image_size": _gemini_image_size(
+                "aspect_ratio": gemini_aspect_ratio(summary["size"]),
+                "image_size": gemini_image_size(
                     summary["size"], summary["model"]
                 ),
             },
@@ -829,8 +819,8 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         # response MIME type. Omit the field and convert the result locally to
         # the caller's requested PNG/JPEG/WebP format.
         response_format: dict[str, str] = {"type": "image"}
-        aspect_ratio = _gemini_aspect_ratio(request_size)
-        image_size = _gemini_image_size(request_size, model)
+        aspect_ratio = gemini_aspect_ratio(request_size)
+        image_size = gemini_image_size(request_size, model)
         if aspect_ratio is not None:
             response_format["aspect_ratio"] = aspect_ratio
         if image_size is not None:
@@ -892,10 +882,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Cancelled.", file=sys.stderr)
         return 130
     except Exception as exc:
-        request_id = getattr(exc, "request_id", None)
-        detail = f" (request ID: {request_id})" if request_id else ""
-        print(f"Generation failed: {exc}{detail}", file=sys.stderr)
-        return 1
+        return report_unexpected("pawmarvel-generate", exc, debug=args.debug)
 
     if not args.dry_run:
         print(output)

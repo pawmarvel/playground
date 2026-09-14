@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pawmarvel.com/schemas/layout-v2.schema.json",
+  "title": "PawMarvel preview and print composition layout",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "art", "pet", "name"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "art": {"type": "string", "minLength": 1},
+    "pet": {
+      "type": "object", "additionalProperties": false,
+      "required": ["box"],
+      "properties": {"box": {"$ref": "#/$defs/rect"}}
+    },
+    "name": {
+      "type": "object", "additionalProperties": false,
+      "$comment": "Consumers must also require min_font_size_px <= font_size_px and 2 * padding_px < both box dimensions.",
+      "required": ["box", "font", "font_size_px", "min_font_size_px", "fit", "padding_px", "color", "horizontal_align"],
+      "properties": {
+        "box": {"$ref": "#/$defs/rect"}, "font": {"type": "string", "pattern": "^fonts/[A-Za-z0-9._-]+\\.ttf$"},
+        "font_size_px": {"type": "integer", "minimum": 1},
+        "min_font_size_px": {"type": "integer", "minimum": 1},
+        "fit": {"const": "shrink_only"},
+        "padding_px": {"type": "integer", "minimum": 0},
+        "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{8}$"},
+        "horizontal_align": {"enum": ["left", "center", "right"]}
+      }
+    }
+  },
+  "$defs": {"rect": {"type": "object", "additionalProperties": false, "required": ["x", "y", "width", "height"], "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}, "width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}}}}
+}

@@ -19,9 +19,11 @@ from typing import Any, Callable, Mapping
 
 from PIL import Image, UnidentifiedImageError
 
+from .artifact_io import mismatch, read_json
 from .cli import _atomic_write_bytes
 from .config import Layout, Rect, load_layout
 from .font_license import FontLicenseError, resolve_ofl_license
+from .geometry import round_half_up
 from .renderer import ALPHA_THRESHOLD
 
 
@@ -173,10 +175,10 @@ def _scaled_edges(
 ) -> tuple[int, int, int, int]:
     left, top, right, bottom = bounds
     return (
-        round(left * scale_x),
-        round(top * scale_y),
-        round(right * scale_x),
-        round(bottom * scale_y),
+        round_half_up(left * scale_x),
+        round_half_up(top * scale_y),
+        round_half_up(right * scale_x),
+        round_half_up(bottom * scale_y),
     )
 
 
@@ -275,12 +277,43 @@ def _bria_request(contents: bytes, increase: int, preserve_alpha: bool, token: s
         with urllib.request.urlopen(image_url, timeout=300) as response:
             result = response.read()
     except urllib.error.HTTPError as exc:
-        detail = exc.read(2048).decode("utf-8", errors="replace")
-        raise RuntimeError(f"Bria returned HTTP {exc.code}: {detail}") from exc
+        raw_detail = exc.read(2048).decode("utf-8", errors="replace")
+        detail = raw_detail
+        try:
+            body = json.loads(raw_detail)
+            if isinstance(body, Mapping):
+                detail = str(
+                    body.get("message")
+                    or body.get("error")
+                    or body.get("detail")
+                    or raw_detail
+                )
+        except json.JSONDecodeError:
+            pass
+        detail = " ".join(detail.split())[:1000] or "<empty response>"
+        if exc.code in {401, 403}:
+            correction = "verify BRIA_API_TOKEN and account permissions"
+        elif exc.code == 429:
+            correction = "wait and retry, or verify Bria quota and rate limits"
+        elif 400 <= exc.code < 500:
+            correction = "correct the upscale request or input image"
+        else:
+            correction = "retry; if it persists, check Bria service status"
+        raise RuntimeError(
+            f"Bria API returned HTTP {exc.code}: {detail}; endpoint={BRIA_ENDPOINT}. "
+            f"Correction: {correction}."
+        ) from exc
     except (urllib.error.URLError, TimeoutError) as exc:
-        raise RuntimeError(f"Bria request failed: {exc}") from exc
+        raise RuntimeError(
+            f"Bria API request failed; endpoint={BRIA_ENDPOINT}; error={exc}. "
+            "Correction: verify network connectivity and retry."
+        ) from exc
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise RuntimeError("Bria returned an invalid response") from exc
+        raise RuntimeError(
+            f"Bria API returned an invalid response; endpoint={BRIA_ENDPOINT}; "
+            f"error={type(exc).__name__}: {exc}. Correction: retry; if it persists, "
+            "report a provider response-contract issue."
+        ) from exc
     if not result:
         raise RuntimeError("Bria returned an empty image")
     return result
@@ -306,15 +339,13 @@ def _file_sha256(path: Path) -> str:
 
 
 def _load_print_manifest(path: Path) -> Mapping[str, Any]:
-    resolved = path.expanduser().resolve()
-    if not resolved.is_file():
-        raise PrintUpscaleError(f"print manifest does not exist: {resolved}")
-    try:
-        value = json.loads(resolved.read_text(encoding="utf-8"))
-    except UnicodeDecodeError as exc:
-        raise PrintUpscaleError("print manifest must be UTF-8 JSON") from exc
-    except json.JSONDecodeError as exc:
-        raise PrintUpscaleError(f"print manifest contains invalid JSON: {exc}") from exc
+    value = read_json(
+        path,
+        label="print manifest",
+        error_type=PrintUpscaleError,
+        require_object=True,
+        correction="regenerate the print assets before rendering the print design.",
+    )
     if not isinstance(value, Mapping) or value.get("schema_version") != 1:
         raise PrintUpscaleError("print manifest must be a schema-v1 object")
     return value
@@ -365,19 +396,32 @@ def verify_print_bundle(
             continue
         if expected_path is None or supplied_path is None:
             raise PrintUpscaleError(
-                f"final render {label} does not match the prepared print bundle"
+                mismatch(
+                    f"final render {label} path",
+                    expected=str(expected_path) if expected_path else None,
+                    actual=str(supplied_path) if supplied_path else None,
+                )
             )
         expected_path = expected_path.resolve()
         if supplied_path != expected_path:
             raise PrintUpscaleError(
-                f"final render {label} is not the prepared print-bundle artifact"
+                mismatch(
+                    f"final render {label} path",
+                    expected=str(expected_path),
+                    actual=str(supplied_path),
+                )
             )
         if not supplied_path.is_file():
             raise PrintUpscaleError(f"print-bundle artifact does not exist: {supplied_path}")
         expected_hash = hashes.get(label)
-        if not isinstance(expected_hash, str) or _file_sha256(supplied_path) != expected_hash:
+        actual_hash = _file_sha256(supplied_path)
+        if not isinstance(expected_hash, str) or actual_hash != expected_hash:
             raise PrintUpscaleError(
-                f"print-bundle artifact changed after upscale: {label} ({supplied_path})"
+                mismatch(
+                    f"print-bundle artifact changed after upscale: {label} ({supplied_path})",
+                    expected=expected_hash,
+                    actual=actual_hash,
+                )
             )
     return manifest_path
 
@@ -546,16 +590,18 @@ def _scaled_print_layout(
         canvas_width=target_size[0],
         canvas_height=target_size[1],
         pet_box=_scale_rect(layout.pet_box, scale, scale),
-        pet_rotation_degrees=layout.pet_rotation_degrees,
         font_relative=layout.font_relative,
         font_path=output_dir / layout.font_relative,
         name_box=_scale_rect(layout.name_box, scale, scale),
-        font_size_px=max(1, round(layout.font_size_px * scale)),
-        min_font_size_px=max(1, round(layout.min_font_size_px * scale)),
+        font_size_px=max(1, round_half_up(layout.font_size_px * scale)),
+        min_font_size_px=max(
+            1, round_half_up(layout.min_font_size_px * scale)
+        ),
+        name_padding_px=max(0, round_half_up(layout.name_padding_px * scale)),
+        name_fit=layout.name_fit,
         color=layout.color,
         horizontal_align=layout.horizontal_align,
-        vertical_align=layout.vertical_align,
-        runtime_model=layout.runtime_model,
+        schema_version=2,
     )
 
 
@@ -571,15 +617,15 @@ def _assert_scaled_layout(preview: Layout, print_layout: Layout) -> float:
     )
     compared = (
         "pet_box",
-        "pet_rotation_degrees",
         "font_relative",
         "name_box",
         "font_size_px",
         "min_font_size_px",
+        "name_padding_px",
+        "name_fit",
         "color",
         "horizontal_align",
-        "vertical_align",
-        "runtime_model",
+        "schema_version",
     )
     if any(getattr(expected, field) != getattr(print_layout, field) for field in compared):
         raise PrintUpscaleError(
@@ -928,16 +974,20 @@ def prepare_print_assets(
         canvas_width=target_width,
         canvas_height=target_height,
         pet_box=_scale_rect(layout.pet_box, scale_x, scale_y),
-        pet_rotation_degrees=layout.pet_rotation_degrees,
         font_relative=layout.font_relative,
         font_path=font_output,
         name_box=_scale_rect(layout.name_box, scale_x, scale_y),
-        font_size_px=max(1, round(layout.font_size_px * scale)),
-        min_font_size_px=max(1, round(layout.min_font_size_px * scale)),
+        font_size_px=max(1, round_half_up(layout.font_size_px * scale_x)),
+        min_font_size_px=max(
+            1, round_half_up(layout.min_font_size_px * scale_x)
+        ),
+        name_padding_px=max(
+            0, round_half_up(layout.name_padding_px * scale_x)
+        ),
+        name_fit=layout.name_fit,
         color=layout.color,
         horizontal_align=layout.horizontal_align,
-        vertical_align=layout.vertical_align,
-        runtime_model=layout.runtime_model,
+        schema_version=2,
     )
     layout_bytes = (json.dumps(print_layout.to_dict(), indent=2) + "\n").encode("utf-8")
     manifest = {

@@ -24,7 +24,6 @@
   },
   "preview": {
     "target_long_edge_px": 1024,
-    "reference_fit": "contain",
     "art": {
       "width": 800,
       "height": 1056

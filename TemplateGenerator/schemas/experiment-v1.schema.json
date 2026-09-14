@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://pawmarvel.com/schemas/experiment-v1.schema.json",
+  "type": "object", "additionalProperties": true,
+  "required": ["schema_version", "experiment_id", "kind", "design_id", "product_profile_id", "status", "inputs", "generator", "created_at"],
+  "properties": {"schema_version": {"const": 1}, "experiment_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]+[a-z0-9]$"}, "kind": {"enum": ["art", "pet", "layout"]}, "status": {"enum": ["draft", "evaluated", "discarded"]}, "inputs": {"type": "object"}, "generation": {"type": ["object", "null"], "properties": {"provider": {"enum": ["openai", "gemini"]}, "model": {"type": "string"}, "parameters": {"type": "object", "properties": {"quality": {"enum": ["low", "medium", "high", "auto"]}}}}}, "generator": {"type": "object", "required": ["version"], "properties": {"version": {"type": "string"}}}}
+}

@@ -62,21 +62,20 @@ def make_transparent_mark(
 
 def layout_data(font_name: str = "fonts/TestFont.ttf") -> dict:
     return {
-        "schema_version": 1,
-        "model": "gpt-image-2",
+        "schema_version": 2,
         "art": "art.png",
         "pet": {
             "box": {"x": 50, "y": 50, "width": 100, "height": 120},
-            "rotation_degrees": 0,
         },
         "name": {
             "box": {"x": 20, "y": 190, "width": 160, "height": 50},
             "font": font_name,
-            "font_size_px": 30,
-            "min_font_size_px": 10,
+            "font_size_px": 42,
+            "min_font_size_px": 20,
+            "fit": "shrink_only",
+            "padding_px": 4,
             "color": "#F7E7C6FF",
             "horizontal_align": "center",
-            "vertical_align": "middle",
         },
     }
 

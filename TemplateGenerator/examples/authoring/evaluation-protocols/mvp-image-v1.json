@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "evaluation_protocol_id": "mvp-image-v1",
+  "rubric_version": 1,
+  "hard_gates": [
+    "readable_output",
+    "expected_dimensions",
+    "transparent_alpha",
+    "assembly_render"
+  ],
+  "human_review": [
+    "identity_retention",
+    "style_fidelity",
+    "pose_expression_crop",
+    "art_completeness",
+    "layout_and_name_readability"
+  ]
+}

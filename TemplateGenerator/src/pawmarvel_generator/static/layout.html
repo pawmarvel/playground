@@ -14,8 +14,21 @@
     <main>
       <section class="visuals">
         <article>
-          <h2>Reference</h2>
-          <img id="reference" alt="Design reference">
+          <h2>Reference composition target</h2>
+          <canvas id="reference" aria-label="Design reference with font region"></canvas>
+          <div class="reference-actions">
+            <button id="select-pet-region" type="button">Select pet region</button>
+            <button id="select-name-region" type="button">Select name region</button>
+            <button id="apply-reference-layout" type="button" disabled>Apply reference geometry</button>
+          </div>
+          <p id="reference-region-mode" class="font-help">Drag a box around the pet placement region.</p>
+          <p class="font-help">Red is the pet placement region. Blue is the complete personalized-name region and is also used for font analysis. Exclude taglines and unrelated decoration.</p>
+          <label class="preview-name-label">
+            Reference text as shown
+            <input id="reference-text" type="text" maxlength="64" autocomplete="off" placeholder="Example: CHARLIE">
+          </label>
+          <button id="rank-fonts" type="button">Analyze fonts</button>
+          <p id="font-reference-status" class="font-help" role="status">Select a text region and enter the exact visible text.</p>
         </article>
         <article>
           <h2>Authoritative Pillow preview</h2>
@@ -26,18 +39,38 @@
       <section class="controls">
         <fieldset>
           <legend>Pet box</legend>
+          <label>
+            Preview transformed pet
+            <select id="preview-pet">
+              <option value="pinned">Pinned experiment pet</option>
+            </select>
+          </label>
+          <label>
+            Add transformed pet for QA
+            <input id="preview-pet-upload" type="file" accept="image/png,image/webp">
+          </label>
+          <p class="font-help">Uploaded pets are temporary local QA inputs. They test this layout but do not change its pinned pet lineage or enter the bundle.</p>
           <div id="pet-controls" class="grid"></div>
         </fieldset>
         <fieldset>
           <legend>Name box and text</legend>
           <p id="name-mode"></p>
+          <label class="preview-name-label">
+            Preview pet name
+            <input id="preview-pet-name" type="text" maxlength="64" autocomplete="off">
+          </label>
+          <p class="font-help">Change this QA-only value to compare short and long names. It is not saved in layout.json.</p>
           <div id="font-catalog"></div>
+          <button id="match-reference-scale" type="button" disabled>Match reference text scale</button>
+          <p class="font-help">This sets one fixed nominal font size from the reference lettering's fill. It does not grow each customer name independently.</p>
           <div id="name-controls" class="grid"></div>
+          <p class="font-help">The default minimum font size conservatively fits 12 common printable name characters. It remains editable. Safety padding is the minimum inset used for fit validation.</p>
+          <p id="text-metrics" class="font-help">Text metrics pending.</p>
         </fieldset>
         <div class="actions">
           <button id="refresh" type="button">Refresh preview</button>
-          <button id="save" type="button">Save layout</button>
-          <button id="complete" type="button">Save &amp; continue</button>
+          <button id="save" type="button" disabled>Save layout</button>
+          <button id="complete" type="button" disabled>Save &amp; continue</button>
         </div>
       </section>
     </main>

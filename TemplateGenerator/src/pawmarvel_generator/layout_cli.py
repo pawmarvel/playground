@@ -8,9 +8,8 @@ import argparse
 from pathlib import Path
 from typing import Sequence
 
-from .config import ConfigError
-from .font_catalog import FontCatalogError, default_local_font_catalog
-from .font_license import FontLicenseError
+from .cli_errors import add_debug_argument, report_unexpected
+from .font_catalog import default_local_font_catalog
 from .layout_server import EditorConfig, serve_layout_editor
 
 
@@ -19,10 +18,38 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pawmarvel-layout-config",
         description="Open the local low-resolution template layout editor.",
     )
+    add_debug_argument(parser)
     parser.add_argument("--art", type=Path, required=True)
     parser.add_argument("--reference", type=Path, required=True)
     parser.add_argument("--pet", type=Path, required=True)
-    parser.add_argument("--pet-name", required=True)
+    parser.add_argument(
+        "--pet-name",
+        default="PET",
+        help="initial QA preview name; it can be changed in the editor (default: PET)",
+    )
+    parser.add_argument(
+        "--reference-text",
+        help=(
+            "initial text visibly printed in the reference name region; this is "
+            "independent from --pet-name and remains editable"
+        ),
+    )
+    parser.add_argument(
+        "--font-reference",
+        type=Path,
+        help=(
+            "existing font-reference-v1 JSON used to initialize the exact "
+            "reference-image text region and visible text"
+        ),
+    )
+    parser.add_argument(
+        "--layout-reference",
+        type=Path,
+        help=(
+            "existing layout-reference-v1 JSON used to initialize pet and "
+            "name boxes from normalized screenshot coordinates"
+        ),
+    )
     parser.add_argument(
         "--font", type=Path,
         help="explicit OFL font override; omit to auto-match from --font-catalog",
@@ -42,24 +69,6 @@ def build_parser() -> argparse.ArgumentParser:
             "repeat to combine catalogs; omit with --font unset to use the "
             "curated local catalog"
         ),
-    )
-    parser.add_argument(
-        "--font-catalog-mode", choices=("local", "expanded"), default="local",
-        help="expanded adds pinned remote OFL candidates through a validated cache",
-    )
-    parser.add_argument(
-        "--font-index", type=Path,
-        default=Path("assets/fonts/expanded-catalog.json"),
-        help="versioned expanded OFL catalog index",
-    )
-    parser.add_argument("--font-cache", type=Path, default=Path(".pawmarvel-font-cache"))
-    parser.add_argument("--font-shortlist-limit", type=int, default=24)
-    parser.add_argument("--font-offline", action="store_true", help="use expanded cache only; never download")
-    parser.add_argument(
-        "--runtime-model",
-        choices=("gpt-image-2", "gemini"),
-        default="gpt-image-2",
-        help="production pet-styling route; gemini is encoded by omitting layout.model",
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--port", type=int, default=0)
@@ -86,22 +95,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 font=args.font,
                 font_license=args.font_license,
                 font_catalogs=font_catalogs,
-                font_catalog_mode=args.font_catalog_mode,
-                font_index=args.font_index,
-                font_cache=args.font_cache,
-                font_shortlist_limit=args.font_shortlist_limit,
-                font_offline=args.font_offline,
-                runtime_model=(
-                    "gpt-image-2" if args.runtime_model == "gpt-image-2" else None
-                ),
+                font_reference=args.font_reference,
+                layout_reference=args.layout_reference,
+                reference_text=args.reference_text,
                 output=args.output,
                 force=args.force,
             ),
             port=args.port,
             open_browser=not args.no_open,
         )
-    except (ConfigError, FontCatalogError, FontLicenseError) as exc:
+    except (ValueError, OSError) as exc:
         parser.error(str(exc))
+    except KeyboardInterrupt:
+        return 130
+    except Exception as exc:
+        return report_unexpected("pawmarvel-layout-config", exc, debug=args.debug)
     return 0
 
 
