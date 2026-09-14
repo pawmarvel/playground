@@ -29,7 +29,7 @@ The MVP provides:
   benchmark, compare candidates with immutable art/pet/layout contact sheets,
   prepare a hash-bound print finalist, graduate and trace a reviewed selection,
   record publication, safely clean up losers, and initialize a private
-  per-design operation configuration.
+  reusable shared configuration plus private per-design configurations.
 - `pawmarvel-bundle`: build a complete immutable revision from a reviewed
   `selection.json` only.
 - `pawmarvel-catalog`: validate bundles and build a canonical exchange-root
@@ -58,9 +58,11 @@ QA replay pets must not contain customer data.
 The examples are copy sources, not live authoring inputs. For each design,
 operators copy the selected reference, provider prompts, and any valid optional
 layout/font references into ignored `work/design-inputs/<design-id>/`.
-`pawmarvel-author init-config` points generated configuration at that private
-folder and leaves optional reference variables empty when their files are not
-present. Experiments then snapshot the exact source files they consume.
+`pawmarvel-author init-config` points generated design configuration at that
+private folder and leaves optional reference variables empty when their files
+are not present. Provider credentials and AWS/S3 publication settings live in
+the separate reusable `pawmarvel-shared.env`. Experiments then snapshot the
+exact non-secret source files they consume.
 
 ## Install
 
@@ -102,9 +104,14 @@ runner exposes the same provider/model options and calls Tool 1 once followed
 by the renderer once.
 It can instead reuse `--transformed-pet` with an explicit `--layout`, which is
 the no-generation path used to inspect a prepared print bundle.
-For the full authoring flow, `pawmarvel-author init-config` creates a mode-0600,
-sourceable template below ignored `work/configs/` for provider keys, input
-paths, model defaults, local roots, and S3/AWS settings.
+For the full authoring flow, `pawmarvel-author init-shared-config` creates the
+mode-0600 `work/configs/pawmarvel-shared.env` once for provider credentials and
+AWS/S3 publication settings. `pawmarvel-author init-config` separately creates
+a mode-0600, sourceable
+`work/configs/<design-id>--<product-profile-id>--vNN.env` for design/product
+inputs, model choices, local roots, and release identity. Source the shared
+file first and the selected design file second. The design filename is derived
+from `--design-id`, `--product-profile-id`, and an optional `--version-number`.
 
 Use `pawmarvel-pipeline` when starting from a new finished design. It generates
 art with the design's art prompt, transforms a representative pet using the

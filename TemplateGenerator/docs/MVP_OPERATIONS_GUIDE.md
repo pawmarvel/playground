@@ -88,16 +88,27 @@ Confirm the lifecycle commands:
 .venv/bin/pawmarvel-pipeline --help
 ```
 
-## 3. Generate and edit a private operation configuration
+## 3. Generate and edit private operation configurations
 
 The primary example uses GPT Image 2 for both art and pet generation. Alternate
 provider experiments, including Gemini, are optional and documented at the end.
-Generate one private configuration for this design/product iteration:
+Generate the shared private configuration once per checkout. It contains only
+design-independent provider credentials and AWS/S3 publication settings:
 
 ```bash
 PAWMARVEL_PROJECT="/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator"
-PAWMARVEL_DESIGN_INPUT="$PAWMARVEL_PROJECT/work/design-inputs/life-is-good"
-PAWMARVEL_CONFIG="$PAWMARVEL_PROJECT/work/configs/life-is-good--blanket-king-9375x12375--v01.env"
+PAWMARVEL_SHARED_CONFIG="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" init-shared-config)"
+"${EDITOR:-vi}" "$PAWMARVEL_SHARED_CONFIG"
+source "$PAWMARVEL_SHARED_CONFIG"
+```
+
+Then prepare the private design inputs and generate one configuration for this
+design/product iteration:
+
+```bash
+PAWMARVEL_DESIGN_ID="life-is-good"
+PAWMARVEL_PRODUCT_PROFILE_ID="blanket-king-9375x12375"
+PAWMARVEL_DESIGN_INPUT="$PAWMARVEL_PROJECT/work/design-inputs/$PAWMARVEL_DESIGN_ID"
 
 mkdir -p "$PAWMARVEL_DESIGN_INPUT"
 cp "$PAWMARVEL_PROJECT/examples/life-is-good/reference-design.png" "$PAWMARVEL_DESIGN_INPUT/"
@@ -106,26 +117,33 @@ cp "$PAWMARVEL_PROJECT/examples/life-is-good/pet-transform-gpt.md" "$PAWMARVEL_D
 cp "$PAWMARVEL_PROJECT/examples/life-is-good/font-reference.json" "$PAWMARVEL_DESIGN_INPUT/"
 cp "$PAWMARVEL_PROJECT/examples/life-is-good/layout-reference.json" "$PAWMARVEL_DESIGN_INPUT/"
 
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" init-config \
-  --output "$PAWMARVEL_CONFIG" \
-  --project-root "$PAWMARVEL_PROJECT" \
-  --design-id life-is-good \
-  --product-profile-id blanket-king-9375x12375
+PAWMARVEL_CONFIG="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" init-config \
+  --design-id "$PAWMARVEL_DESIGN_ID" \
+  --product-profile-id "$PAWMARVEL_PRODUCT_PROFILE_ID")"
 
 "${EDITOR:-vi}" "$PAWMARVEL_CONFIG"
 source "$PAWMARVEL_CONFIG"
 ```
 
-The generated file has mode `0600` and contains the baseline operator inputs
-used throughout this guide:
+`init-shared-config` derives and prints the fixed absolute path
+`work/configs/pawmarvel-shared.env`. It has mode `0600`; update its empty
+`OPENAI_API_KEY`, S3 values, and any AWS profile/region that differs from the
+example. Leave unused provider keys empty. Prefer an AWS profile or SSO; do not
+put AWS access and secret keys in this file. Enter `PAWMARVEL_S3_PREFIX` as path
+segments such as `Template/MVP-test`, with no leading or trailing slash;
+sourcing the file rejects either form. Reuse this file for every design and
+product iteration in the checkout.
+
+`init-config` derives and prints the absolute path
+`work/configs/<design-id>--<product-profile-id>--v01.env`; the command
+substitution assigns that exact path to `PAWMARVEL_CONFIG`. The generated file
+also has mode `0600` and contains only the iteration-specific baseline inputs:
 design/profile/prompt/pet paths, default art and pet provider/model/quality,
-optional OpenAI/Gemini/Bria credentials, local authoring/exchange roots, pet
-name policy, release ID, AWS profile/region, and S3 bucket/prefix. Update its
-empty `OPENAI_API_KEY`, the S3 values, and any paths/settings that differ from
-the example. Leave unused provider keys empty. Prefer an AWS profile or SSO;
-do not put AWS access and secret keys in this file. Enter
-`PAWMARVEL_S3_PREFIX` as path segments such as `Template/MVP-test`, with no
-leading or trailing slash; sourcing the file rejects either form.
+local authoring/exchange roots, pet-name policy, and release identity. It does
+not duplicate credentials or AWS/S3 settings. Update any design-specific paths
+or settings that differ from the example.
+The editable repository root is detected automatically. Use `--project-root`
+only when intentionally writing the private workspace under another checkout.
 
 The generated design paths point to
 `work/design-inputs/<design-id>/`, not directly to checked-in examples. Before
@@ -142,23 +160,28 @@ publish an existing release, change it to that catalog's exact directory name
 before sourcing the config. Otherwise complete `build-release` below before
 running `publish-s3`.
 
-The file is mutable operator input, not an immutable experiment artifact. Use a
-new filename for a different design/product iteration or materially different
-input set, for example `charlie--blanket-king--v01.env`; each experiment still
-snapshots its exact prompt, references, profile, provider, model, and quality.
-Re-source the intended file when opening a new terminal:
+Both files are mutable operator input, not immutable experiment artifacts. For a
+new configuration iteration, rerun `init-config` with `--version-number 2` to
+derive the `--v02.env` filename. Each experiment still snapshots its exact
+prompt, references, profile, provider, model, and quality. Re-source the
+intended file when opening a new terminal:
 
 ```bash
-PAWMARVEL_CONFIG="/absolute/path/to/TemplateGenerator/work/configs/life-is-good--blanket-king-9375x12375--v01.env"
+PAWMARVEL_PROJECT="/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator"
+PAWMARVEL_SHARED_CONFIG="$PAWMARVEL_PROJECT/work/configs/pawmarvel-shared.env"
+PAWMARVEL_CONFIG="$PAWMARVEL_PROJECT/work/configs/life-is-good--blanket-king-9375x12375--v01.env"
+source "$PAWMARVEL_SHARED_CONFIG"
 source "$PAWMARVEL_CONFIG"
+printf 'loaded shared config: %s\n' "$PAWMARVEL_SHARED_CONFIG_FILE"
 printf 'loaded config: %s\n' "$PAWMARVEL_CONFIG_FILE"
 ```
 
 Configuration files under `work/` are ignored by Git. Never move one into an
-example, bundle, experiment, or release directory. `init-config` refuses to
-overwrite an existing file unless `--force` is explicit; avoid `--force` after
-adding secrets. Because `source` executes shell syntax, source only a config
-generated and edited by a trusted operator.
+example, bundle, experiment, or release directory. Both initialization commands
+refuse to overwrite an existing file unless `--force` is explicit. In
+particular, avoid `init-shared-config --force` after adding credentials. Because
+`source` executes shell syntax, source only configs generated and edited by a
+trusted operator.
 
 The checked-in reference and pet images are development workflow inputs and are
 not automatically approved production fixtures. The MVP deliberately uses a
@@ -1362,11 +1385,13 @@ with genuine transparency. It is therefore an experimental candidate, not the
 MVP production runtime. Never select it only because its median latency is lower: opaque
 background, identity, crop, pose, or style failures are hard-gate failures.
 
-Set `GEMINI_API_KEY` and, if needed, the Gemini prompt paths in the private
-operation configuration, then source it again:
+Set `GEMINI_API_KEY` in the reusable shared configuration. Set any alternate
+Gemini prompt paths in the design configuration, then source both again:
 
 ```bash
+"${EDITOR:-vi}" "$PAWMARVEL_SHARED_CONFIG_FILE"
 "${EDITOR:-vi}" "$PAWMARVEL_CONFIG_FILE"
+source "$PAWMARVEL_SHARED_CONFIG_FILE"
 source "$PAWMARVEL_CONFIG_FILE"
 test -n "$GEMINI_API_KEY"
 test -f "$PAWMARVEL_PET_PROMPT_GEMINI"

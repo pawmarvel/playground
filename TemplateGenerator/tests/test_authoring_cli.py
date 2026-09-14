@@ -10,10 +10,26 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from pawmarvel_generator.authoring_cli import build_parser, main
+from pawmarvel_generator.authoring_cli import DEFAULT_PROJECT_ROOT, build_parser, main
 
 
 class AuthoringCliTests(unittest.TestCase):
+    def test_init_config_defaults_to_editable_project_root(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "init-config",
+                "--design-id",
+                "life-is-good",
+                "--product-profile-id",
+                "blanket-king-9375x12375",
+            ]
+        )
+        self.assertEqual(args.project_root, DEFAULT_PROJECT_ROOT)
+
+    def test_init_shared_config_defaults_to_editable_project_root(self) -> None:
+        args = build_parser().parse_args(["init-shared-config"])
+        self.assertEqual(args.project_root, DEFAULT_PROJECT_ROOT)
+
     def test_help_does_not_require_resolvable_current_user(self) -> None:
         output = io.StringIO()
         with (
@@ -28,13 +44,16 @@ class AuthoringCliTests(unittest.TestCase):
     def test_init_config_writes_private_sourceable_design_config(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            output = root / "work" / "configs" / "life-is-good.env"
+            output = (
+                root
+                / "work"
+                / "configs"
+                / "life-is-good--blanket-king-9375x12375--v01.env"
+            )
             self.assertEqual(
                 main(
                     [
                         "init-config",
-                        "--output",
-                        str(output),
                         "--project-root",
                         str(root),
                         "--design-id",
@@ -46,10 +65,13 @@ class AuthoringCliTests(unittest.TestCase):
                 0,
             )
             contents = output.read_text(encoding="utf-8")
-            self.assertIn("export OPENAI_API_KEY=''", contents)
-            self.assertIn("export GEMINI_API_KEY=''", contents)
-            self.assertIn("export BRIA_API_TOKEN=''", contents)
-            self.assertIn("export PAWMARVEL_S3_BUCKET=''", contents)
+            self.assertNotIn("OPENAI_API_KEY", contents)
+            self.assertNotIn("GEMINI_API_KEY", contents)
+            self.assertNotIn("BRIA_API_TOKEN", contents)
+            self.assertNotIn("AWS_PROFILE", contents)
+            self.assertNotIn("AWS_REGION", contents)
+            self.assertNotIn("PAWMARVEL_S3_BUCKET", contents)
+            self.assertNotIn("PAWMARVEL_S3_PREFIX", contents)
             self.assertIn(
                 "work/design-inputs/$PAWMARVEL_DESIGN_ID", contents
             )
@@ -90,7 +112,29 @@ class AuthoringCliTests(unittest.TestCase):
                 f"{design_input}/font-reference.json|{design_input}/layout-reference.json",
             )
 
-    def test_generated_config_rejects_surrounding_s3_prefix_slash_when_loaded(
+    def test_init_shared_config_writes_private_sourceable_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output = root / "work" / "configs" / "pawmarvel-shared.env"
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                self.assertEqual(
+                    main(["init-shared-config", "--project-root", str(root)]),
+                    0,
+                )
+
+            contents = output.read_text(encoding="utf-8")
+            self.assertEqual(stdout.getvalue().strip(), str(output))
+            self.assertEqual(os.stat(output).st_mode & 0o777, 0o600)
+            self.assertIn("export OPENAI_API_KEY=''", contents)
+            self.assertIn("export GEMINI_API_KEY=''", contents)
+            self.assertIn("export BRIA_API_TOKEN=''", contents)
+            self.assertIn("export AWS_PROFILE='default'", contents)
+            self.assertIn("export AWS_REGION='us-west-2'", contents)
+            self.assertIn("export PAWMARVEL_S3_BUCKET=''", contents)
+            self.assertIn("export PAWMARVEL_S3_PREFIX='mvp'", contents)
+
+    def test_shared_config_rejects_surrounding_s3_prefix_slash_when_loaded(
         self,
     ) -> None:
         for prefix in ("/mvp", "mvp/"):
@@ -99,20 +143,8 @@ class AuthoringCliTests(unittest.TestCase):
                 tempfile.TemporaryDirectory() as temporary,
             ):
                 root = Path(temporary).resolve()
-                output = root / "work" / "configs" / "design.env"
-                main(
-                    [
-                        "init-config",
-                        "--output",
-                        str(output),
-                        "--project-root",
-                        str(root),
-                        "--design-id",
-                        "life-is-good",
-                        "--product-profile-id",
-                        "blanket-king-9375x12375",
-                    ]
-                )
+                output = root / "work" / "configs" / "pawmarvel-shared.env"
+                main(["init-shared-config", "--project-root", str(root)])
                 contents = output.read_text(encoding="utf-8").replace(
                     "export PAWMARVEL_S3_PREFIX='mvp'",
                     f"export PAWMARVEL_S3_PREFIX='{prefix}'",
@@ -128,14 +160,17 @@ class AuthoringCliTests(unittest.TestCase):
                 self.assertEqual(loaded.returncode, 2)
                 self.assertIn("leading or trailing slash", loaded.stderr)
 
-    def test_init_config_refuses_to_replace_existing_secrets(self) -> None:
+    def test_init_config_refuses_to_replace_existing_file(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            output = root / "work" / "configs" / "design.env"
+            output = (
+                root
+                / "work"
+                / "configs"
+                / "life-is-good--blanket-king-9375x12375--v01.env"
+            )
             arguments = [
                 "init-config",
-                "--output",
-                str(output),
                 "--project-root",
                 str(root),
                 "--design-id",
@@ -152,28 +187,55 @@ class AuthoringCliTests(unittest.TestCase):
             self.assertEqual(output.read_text(encoding="utf-8"), "secret\n")
             self.assertIn(str(output), stderr.getvalue())
 
-    def test_init_config_rejects_repository_tracked_location(self) -> None:
+    def test_init_config_derives_versioned_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            output = root / "examples" / "design.env"
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    main(
+                        [
+                            "init-config",
+                            "--project-root",
+                            str(root),
+                            "--design-id",
+                            "life-is-good",
+                            "--product-profile-id",
+                            "blanket-king-9375x12375",
+                            "--version-number",
+                            "2",
+                        ]
+                    ),
+                    0,
+                )
+            expected = (
+                root
+                / "work"
+                / "configs"
+                / "life-is-good--blanket-king-9375x12375--v02.env"
+            )
+            self.assertEqual(output.getvalue().strip(), str(expected))
+            self.assertTrue(expected.is_file())
+
+    def test_init_config_rejects_invalid_version_number(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
             stderr = io.StringIO()
             with redirect_stderr(stderr), self.assertRaises(SystemExit):
                 main(
                     [
                         "init-config",
-                        "--output",
-                        str(output),
                         "--project-root",
                         str(root),
                         "--design-id",
                         "life-is-good",
                         "--product-profile-id",
                         "blanket-king-9375x12375",
+                        "--version-number",
+                        "0",
                     ]
                 )
-
-            self.assertFalse(output.exists())
-            self.assertIn(str(root / "work"), stderr.getvalue())
+            self.assertIn("version number must be between", stderr.getvalue())
 
     def test_empty_shell_path_is_rejected_with_actionable_error(self) -> None:
         stderr = io.StringIO()

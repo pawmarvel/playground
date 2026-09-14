@@ -2,7 +2,7 @@
 # Manage immutable offline art, pet-runtime, and layout experiments; compare
 # attempts, keep evaluation/decision review packets together, prepare print
 # finalists, graduate and trace selections, record publications, safely clean
-# up losing artifacts, and initialize private per-design operation config.
+# up losing artifacts, and initialize shared and per-design private configs.
 
 from __future__ import annotations
 
@@ -17,7 +17,10 @@ from .authoring import (
     run_attempt, set_status, trace_graduation,
 )
 from .cli_errors import add_debug_argument, report_unexpected
-from .operation_config import write_operation_config
+from .operation_config import write_operation_config, write_shared_config
+
+
+DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _path_argument(value: str) -> Path:
@@ -43,20 +46,44 @@ def build_parser() -> argparse.ArgumentParser:
     add_debug_argument(parser)
     commands = parser.add_subparsers(dest="command", required=True)
 
+    init_shared = commands.add_parser(
+        "init-shared-config",
+        help="generate reusable private provider and AWS/S3 config under ignored work/",
+    )
+    init_shared.add_argument(
+        "--project-root",
+        type=_path_argument,
+        default=DEFAULT_PROJECT_ROOT,
+        help="repository root containing work/ (default: installed editable source root)",
+    )
+    init_shared.add_argument(
+        "--force",
+        action="store_true",
+        help="replace the existing shared config, including any secrets it contains",
+    )
+
     init_config = commands.add_parser(
         "init-config",
-        help="generate a private sourceable operation config under ignored work/",
+        help="generate a credential-free design/product config under ignored work/",
     )
-    init_config.add_argument("--output", type=_path_argument, required=True)
     init_config.add_argument(
-        "--project-root", type=_path_argument, default=Path.cwd()
+        "--project-root",
+        type=_path_argument,
+        default=DEFAULT_PROJECT_ROOT,
+        help="repository root containing work/ (default: installed editable source root)",
     )
     init_config.add_argument("--design-id", required=True)
     init_config.add_argument("--product-profile-id", required=True)
     init_config.add_argument(
+        "--version-number",
+        type=int,
+        default=1,
+        help="positive config iteration number used in the derived filename (default: 1)",
+    )
+    init_config.add_argument(
         "--force",
         action="store_true",
-        help="replace an existing config, including any secrets it contains",
+        help="replace an existing design/product config",
     )
 
     create = commands.add_parser("create-experiment")
@@ -231,12 +258,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command == "init-config":
+        if args.command == "init-shared-config":
+            result = write_shared_config(
+                project_root=args.project_root,
+                force=args.force,
+            )
+        elif args.command == "init-config":
             result = write_operation_config(
-                output=args.output,
                 project_root=args.project_root,
                 design_id=args.design_id,
                 product_profile_id=args.product_profile_id,
+                version_number=args.version_number,
                 force=args.force,
             )
         elif args.command == "create-experiment":

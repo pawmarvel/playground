@@ -422,17 +422,28 @@ backed-up filesystem when losing valuable experiment history would be costly.
 The authoring lifecycle relies on exclusive directory creation and atomic
 rename; S3 is not an authoring backend. No attempt command uploads artifacts.
 
-Each operator run starts from a mode-`0600`, sourceable file below
-`work/configs/`. It centralizes provider keys, design/product input paths,
-provider/model/quality defaults, local roots, release identity, and S3/AWS
-settings. The file is mutable private operator state: it is ignored by Git,
-never copied into an experiment or bundle, and never consumed by FE. Experiments
-continue snapshotting their resolved non-secret inputs, so changing or switching
-configuration files cannot rewrite provenance. Existing CLIs keep their explicit
-arguments; sourcing the file only removes repetitive shell setup.
+Operator configuration is split by ownership into two mode-`0600`, sourceable
+files below `work/configs/`:
+
+- `pawmarvel-shared.env` contains reusable provider credentials and AWS/S3
+  publication settings. `init-shared-config` creates it once per checkout.
+- `<design-id>--<product-profile-id>--vNN.env` contains only design/product
+  inputs, provider/model/quality selections, local roots, and release identity.
+  `init-config` derives its identity-bearing filename.
+
+Operators source the shared file first and the selected design file second.
+Both are mutable private operator state: they are ignored by Git, never copied
+into an experiment or bundle, and never consumed by FE. This separation avoids
+duplicating or drifting credentials and cloud destinations across design
+iterations. Experiments continue snapshotting their resolved non-secret inputs,
+so changing or switching configuration files cannot rewrite provenance.
+Existing CLIs keep their explicit arguments; sourcing the files only removes
+repetitive shell setup.
 
 The conventional repository-local path is
-`work/configs/<design-id>--<product-profile-id>--<iteration>.env`.
+`work/configs/<design-id>--<product-profile-id>--vNN.env`. `init-config`
+derives this path from the design ID, product-profile ID, and positive version
+number so operators do not manually construct identity-bearing filenames.
 Mutable design-source files live separately at
 `work/design-inputs/<design-id>/`: the primary reference, provider-qualified
 prompts, optional supporting references, and optional font/layout reference
@@ -451,7 +462,8 @@ design-inputs/
     font-reference.json      # optional authoring evidence
     layout-reference.json    # optional authoring evidence
 configs/
-  <design-id>--<product-profile-id>--<iteration>.env
+  pawmarvel-shared.env
+  <design-id>--<product-profile-id>--vNN.env
 authoring/
   evaluation-protocols/<protocol-id>.json
   fixture-sets/<fixture-set-id>/
