@@ -20,6 +20,12 @@ from .config import load_layout, parse_layout
 from .font_catalog import FontCatalogError, discover_font_catalog
 from .font_license import resolve_ofl_license
 from .font_reference import FontReferenceError, load_font_reference
+from .fixture_set import (
+    FixtureSetError,
+    PetFixture,
+    load_fixture_selection,
+    load_fixture_set,
+)
 from .layout_reference import LayoutReferenceError, load_layout_reference
 from .layout_server import EditorConfig, serve_layout_editor
 from .print_upscale import (
@@ -672,23 +678,91 @@ def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
 
 
 def benchmark(*, experiment: Path, fixture_set: Path, evaluation_protocol: Path,
-              attempts_per_fixture: int, attempt_id_prefix: str) -> list[Path]:
-    fixtures = _json(fixture_set.expanduser().resolve()).get("fixtures")
-    if not isinstance(fixtures, list) or not fixtures:
-        raise AuthoringError("fixture set must contain a nonempty fixtures array")
+              attempts_per_fixture: int | None, attempt_id_prefix: str,
+              fixture_selection: Path) -> list[Path]:
+    experiment = experiment.expanduser().resolve()
+    experiment_meta = _json(experiment / "experiment.json")
+    if experiment_meta.get("kind") != "pet":
+        raise AuthoringError(
+            "fixture benchmarks require a pet experiment; "
+            f"experiment={experiment}; actual_kind={experiment_meta.get('kind')!r}"
+        )
+    if experiment_meta.get("status") == "discarded":
+        raise AuthoringError(f"cannot benchmark a discarded experiment: {experiment}")
+    _id(attempt_id_prefix, "attempt ID prefix")
+    try:
+        fixture_inventory = load_fixture_set(fixture_set)
+    except FixtureSetError as exc:
+        raise AuthoringError(str(exc)) from exc
+    repetitions = (
+        fixture_inventory.attempts_per_fixture
+        if attempts_per_fixture is None
+        else attempts_per_fixture
+    )
+    if repetitions != fixture_inventory.attempts_per_fixture:
+        raise AuthoringError(
+            "attempt count does not match the immutable fixture-set protocol; "
+            f"fixture_set={fixture_inventory.fixture_set_id}; "
+            f"expected={fixture_inventory.attempts_per_fixture}; actual={repetitions}"
+        )
+    try:
+        selected_fixtures = load_fixture_selection(
+            fixture_inventory, fixture_selection
+        )
+    except FixtureSetError as exc:
+        raise AuthoringError(str(exc)) from exc
     _json(evaluation_protocol.expanduser().resolve())
-    results = []
-    for fixture in fixtures:
-        if not isinstance(fixture, dict) or not isinstance(fixture.get("id"), str) or not isinstance(fixture.get("pet_image"), str):
-            raise AuthoringError("each fixture requires string id and pet_image")
-        pet = (fixture_set.expanduser().resolve().parent / fixture["pet_image"]).resolve()
-        for repetition in range(1, attempts_per_fixture + 1):
-            attempt_id = f"{attempt_id_prefix}-{fixture['id']}-{repetition:04d}"
+    results: list[Path] = []
+    failures: list[tuple[str, str]] = []
+    for fixture in selected_fixtures:
+        for repetition in range(1, repetitions + 1):
+            attempt_id = f"{attempt_id_prefix}-{fixture.id}-{repetition:04d}"
             try:
-                results.append(run_attempt(experiment=experiment, attempt_id=attempt_id, pet_image=pet, pet_name="PET"))
-            except AuthoringError:
-                results.append(experiment.expanduser().resolve() / "attempts" / attempt_id)
+                results.append(run_attempt(experiment=experiment, attempt_id=attempt_id, pet_image=fixture.image, pet_name="PET"))
+            except AuthoringError as exc:
+                failures.append((attempt_id, str(exc)))
+    if failures:
+        details = "; ".join(
+            f"{attempt_id}: {message}" for attempt_id, message in failures
+        )
+        raise AuthoringError(
+            "benchmark completed with failed attempts; "
+            f"experiment={experiment}; succeeded={len(results)}; "
+            f"failed={len(failures)}; failures=[{details}]"
+        )
     return results
+
+
+def _fixture_group_coverage(
+    fixtures: tuple[PetFixture, ...], passing_hashes: set[str]
+) -> dict[str, list[dict[str, Any]]]:
+    dimensions = {
+        "size_class": lambda fixture: (fixture.size_class,),
+        "morphology": lambda fixture: fixture.morphology,
+        "risk_tag": lambda fixture: fixture.risk_tags,
+    }
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for dimension, labels in dimensions.items():
+        members: dict[str, list[PetFixture]] = {}
+        for fixture in fixtures:
+            for label in labels(fixture):
+                members.setdefault(label, []).append(fixture)
+        groups[dimension] = [
+            {
+                "value": label,
+                "expected_fixtures": len(group),
+                "covered_fixtures": sum(
+                    fixture.image_sha256 in passing_hashes for fixture in group
+                ),
+                "status": (
+                    "passed"
+                    if all(fixture.image_sha256 in passing_hashes for fixture in group)
+                    else "failed"
+                ),
+            }
+            for label, group in sorted(members.items())
+        ]
+    return groups
 
 
 def _attempt_measurements(runs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -722,7 +796,8 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
             experiments: list[str], evaluation_protocol: Path, fixture_set: Path | None,
             art_attempt: Path | None, pet_experiment: Path | None,
             layout_attempt: Path | None, base_bundle_revision: int | None,
-            attempt_prefix: str | None = None) -> Path:
+            attempt_prefix: str | None = None,
+            fixture_selection: Path | None = None) -> Path:
     if kind not in {*KINDS, "assembly"}:
         raise AuthoringError("comparison kind must be art, pet, layout, or assembly")
     _id(review_id, "review ID")
@@ -734,16 +809,38 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
         raise AuthoringError(f"review already exists: {review}")
     if attempt_prefix is not None and not attempt_prefix:
         raise AuthoringError("attempt prefix must not be empty")
+    if kind != "pet" and fixture_selection is not None:
+        raise AuthoringError(
+            "fixture selection is supported only for pet comparisons"
+        )
+    if kind == "pet" and fixture_set and fixture_selection is None:
+        raise AuthoringError(
+            "pet comparisons with --fixture-set require --fixture-selection"
+        )
+    if kind == "pet" and fixture_selection is not None and not fixture_set:
+        raise AuthoringError(
+            "pet --fixture-selection requires --fixture-set"
+        )
     expected_fixture_hashes: set[str] = set()
-    if kind == "pet" and fixture_set:
-        fixture_path = fixture_set.expanduser().resolve()
-        fixtures = _json(fixture_path).get("fixtures")
-        if not isinstance(fixtures, list) or not fixtures:
-            raise AuthoringError("fixture set must contain a nonempty fixtures array")
-        for fixture in fixtures:
-            if not isinstance(fixture, dict) or not isinstance(fixture.get("pet_image"), str):
-                raise AuthoringError("each fixture requires string pet_image")
-            expected_fixture_hashes.add(sha256((fixture_path.parent / fixture["pet_image"]).resolve()))
+    fixture_inventory = None
+    selected_fixtures: tuple[PetFixture, ...] = ()
+    fixtures_by_hash: dict[str, PetFixture] = {}
+    if fixture_set:
+        try:
+            fixture_inventory = load_fixture_set(fixture_set)
+        except FixtureSetError as exc:
+            raise AuthoringError(str(exc)) from exc
+    if kind == "pet" and fixture_inventory:
+        try:
+            selected_fixtures = load_fixture_selection(
+                fixture_inventory, fixture_selection
+            )
+        except FixtureSetError as exc:
+            raise AuthoringError(str(exc)) from exc
+        fixtures_by_hash = {
+            fixture.image_sha256: fixture for fixture in selected_fixtures
+        }
+        expected_fixture_hashes = set(fixtures_by_hash)
     composition_template = None
     composition_pet_name = None
     if kind == "pet" and (art_attempt or layout_attempt):
@@ -785,6 +882,12 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
                 if attempt_prefix and not attempt.name.startswith(attempt_prefix):
                     continue
                 record = _attempt_record(attempt, require_success=False)
+                if (
+                    kind == "pet"
+                    and expected_fixture_hashes
+                    and record.get("input_pet_sha256") not in expected_fixture_hashes
+                ):
+                    continue
                 gates: dict[str, Any]
                 if kind in {"art", "pet"}:
                     filename = "art.png" if kind == "art" else "transformed-pet.png"
@@ -805,15 +908,22 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
                     except (OSError, ValueError):
                         gates = {"layout_v2": False, "preview_exists": False, "status": "failed"}
                         review_label = "unreadable layout"
+                input_pet_sha256 = record.get("input_pet_sha256")
+                fixture_labels = (
+                    fixtures_by_hash[input_pet_sha256].labels()
+                    if input_pet_sha256 in fixtures_by_hash
+                    else {}
+                )
                 runs.append({"attempt_id": attempt.name, "status": record.get("status"),
                              "duration_seconds": record.get("duration_seconds"),
-                             "input_pet_sha256": record.get("input_pet_sha256"),
+                             "input_pet_sha256": input_pet_sha256,
                              "representative_pet_sha256": record.get(
                                  "layout_fixture", {}
                              ).get("representative_pet_sha256"),
                              "pet_name": record.get("layout_fixture", {}).get("pet_name"),
                              "review_label": review_label if kind == "layout" else None,
-                             "hard_gates": gates})
+                             "hard_gates": gates,
+                             **fixture_labels})
             succeeded = [run for run in runs if run["status"] == "succeeded" and run["hard_gates"]["status"] == "passed"]
             passing_fixture_hashes = {
                 run["input_pet_sha256"]
@@ -831,6 +941,9 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
                         "passed"
                         if expected_fixture_hashes <= passing_fixture_hashes
                         else "failed"
+                    ),
+                    "groups": _fixture_group_coverage(
+                        selected_fixtures, passing_fixture_hashes
                     ),
                 }
             candidates.append({"experiment_id": experiment_id,
@@ -905,6 +1018,28 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
         "evaluation_protocol_id": protocol.get("evaluation_protocol_id"),
         "evaluation_protocol_sha256": sha256(evaluation_protocol.expanduser().resolve()),
         "fixture_set_sha256": sha256(fixture_set.expanduser().resolve()) if fixture_set else None,
+        "fixture_set_id": fixture_inventory.fixture_set_id if fixture_inventory else None,
+        "fixture_tier": fixture_inventory.tier if fixture_inventory else None,
+        "fixture_inventory": (
+            {
+                key: value
+                for key, value in fixture_inventory.summary().items()
+                if key != "fixture_set"
+            }
+            if fixture_inventory
+            else None
+        ),
+        "fixture_selection": (
+            {
+                "config_sha256": sha256(fixture_selection.expanduser().resolve()),
+                "selected_count": len(selected_fixtures),
+                "selected_fixture_ids": [
+                    fixture.id for fixture in selected_fixtures
+                ],
+            }
+            if selected_fixtures
+            else None
+        ),
         "attempt_id_prefix": attempt_prefix,
         "review_mode": "composed-preview" if composition_template else "source-output",
         "base_bundle_revision": base_bundle_revision, "created_at": utc_now(),

@@ -30,6 +30,36 @@ class AuthoringCliTests(unittest.TestCase):
         args = build_parser().parse_args(["init-shared-config"])
         self.assertEqual(args.project_root, DEFAULT_PROJECT_ROOT)
 
+    def test_prepare_benchmark_accepts_count_and_repeatable_fixture_filters(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "prepare-benchmark",
+                "--fixture-set", "fixtures.json",
+                "--fixture-count", "6",
+                "--fixture-filter", "size_class=large",
+                "--fixture-filter", "size_class=giant",
+                "--output", "selection.json",
+            ]
+        )
+        self.assertEqual(args.fixture_count, 6)
+        self.assertEqual(
+            args.fixture_filter,
+            ["size_class=large", "size_class=giant"],
+        )
+        self.assertEqual(args.output, Path("selection.json"))
+
+    def test_benchmark_requires_reviewed_fixture_selection(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "benchmark",
+                "--experiment", "experiment",
+                "--fixture-set", "fixtures.json",
+                "--fixture-selection", "selection.json",
+                "--evaluation-protocol", "protocol.json",
+            ]
+        )
+        self.assertEqual(args.fixture_selection, Path("selection.json"))
+
     def test_help_does_not_require_resolvable_current_user(self) -> None:
         output = io.StringIO()
         with (
@@ -75,6 +105,11 @@ class AuthoringCliTests(unittest.TestCase):
             self.assertIn(
                 "work/design-inputs/$PAWMARVEL_DESIGN_ID", contents
             )
+            self.assertIn("PAWMARVEL_SMOKE_FIXTURE_SET", contents)
+            self.assertIn("mvp-pets-smoke-v1/fixture-set.json", contents)
+            self.assertIn("PAWMARVEL_RELEASE_FIXTURE_SET", contents)
+            self.assertIn("mvp-pets-v1/fixture-set.json", contents)
+            self.assertIn("PAWMARVEL_BENCHMARK_SELECTION_ROOT", contents)
             design_input = root / "work" / "design-inputs" / "life-is-good"
             self.assertTrue(design_input.is_dir())
             self.assertEqual(os.stat(output).st_mode & 0o777, 0o600)

@@ -8,6 +8,7 @@ from PIL import Image
 from jsonschema import Draft202012Validator, FormatChecker
 
 from pawmarvel_generator.font_reference import load_font_reference
+from pawmarvel_generator.fixture_set import load_fixture_set
 from pawmarvel_generator.layout_reference import (
     load_layout_reference,
     map_reference_box,
@@ -32,8 +33,12 @@ class RepositoryExampleTests(unittest.TestCase):
                 "examples/authoring/evaluation-protocols/mvp-image-v1.json",
             ),
             (
-                "fixture-set-v1.schema.json",
+                "fixture-set-v2.schema.json",
                 "examples/authoring/fixture-sets/mvp-pets-v1/fixture-set.json",
+            ),
+            (
+                "fixture-set-v2.schema.json",
+                "examples/authoring/fixture-sets/mvp-pets-smoke-v1/fixture-set.json",
             ),
             (
                 "font-reference-v1.schema.json",
@@ -107,20 +112,37 @@ class RepositoryExampleTests(unittest.TestCase):
                     100,
                 )
 
-        pet_names = ("sausage-dog-puppy.png", "white-fluffy-dog.png")
+        pet_names = {
+            "australian-shepherd.png", "beagle.jpg", "bernese-mountain.png",
+            "doodle.png", "french-bulldog.jpg", "german-shepherd.jpg",
+            "golden-retriever.png", "great-dane.jpg", "greyhound.jpg",
+            "sausage-dog-puppy.png", "white-fluffy-dog.png",
+        }
         self.assertEqual(
             {
                 path.name
                 for path in (examples / "pet-inputs").iterdir()
-                if path.is_file() and not path.name.startswith(".")
+                if path.suffix.lower() in {".png", ".jpg", ".jpeg"}
             },
-            set(pet_names),
+            pet_names,
         )
-        for name in pet_names:
+        self.assertTrue((examples / "pet-inputs" / "ONLINE_FIXTURE_ATTRIBUTIONS.md").is_file())
+        for name in sorted(pet_names):
             with self.subTest(pet=name), Image.open(examples / "pet-inputs" / name) as image:
                 image.load()
                 self.assertGreater(image.width, 0)
                 self.assertGreater(image.height, 0)
+
+        smoke = load_fixture_set(
+            examples / "authoring/fixture-sets/mvp-pets-smoke-v1/fixture-set.json"
+        )
+        release = load_fixture_set(
+            examples / "authoring/fixture-sets/mvp-pets-v1/fixture-set.json"
+        )
+        self.assertEqual((smoke.tier, len(smoke.fixtures)), ("smoke", 3))
+        self.assertEqual((release.tier, len(release.fixtures)), ("release", 11))
+        self.assertEqual(smoke.attempts_per_fixture, 1)
+        self.assertEqual(release.attempts_per_fixture, 1)
 
         life_root = examples / "life-is-good"
         font_reference = load_font_reference(

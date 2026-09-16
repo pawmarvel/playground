@@ -424,11 +424,11 @@ tests/                       unit and contract tests
 
 Do not add production reference screenshots, production prompts, mutable work
 directories, customer pets, generated bundles, or production release payloads
-to Git. Keep one or two compact development-only source-design examples plus a
-minimal reusable pet input set for the guide and local tests. These images are
-not approved production fixtures and the repository does not assert production
-rights for them. Reviewed conformance bundles and production catalog releases
-are immutable S3 objects outside Git.
+to Git. Keep one or two compact development-only source-design examples plus
+the small tiered dog inventory used by the guide and local tests. Online
+fixtures retain source/license attribution; operator-provided fixtures are
+marked as unverified and remain development-only. Reviewed conformance bundles
+and production catalog releases are immutable S3 objects outside Git.
 
 ### 6.2 Private authoring storage
 
@@ -483,10 +483,6 @@ configs/
   pawmarvel-shared.env
   <design-id>--<product-profile-id>--vNN.env
 authoring/
-  evaluation-protocols/<protocol-id>.json
-  fixture-sets/<fixture-set-id>/
-    fixture-set.json
-    images/
   <design-id>/
     <product-profile-id>/
       experiments/
@@ -515,6 +511,8 @@ authoring/
         evaluation.json
         artifacts/
         decision.json
+      benchmark-selections/       # mutable reviewed run plans; never bundled
+        <selection-id>.json
       print-candidates/<candidate-id>/
         print-candidate.json
         outputs/
@@ -523,6 +521,34 @@ authoring/
         publications/<release-id>--<bundle-revision>.json
       scratch/                replaceable, never publishable
 ```
+
+Reusable pet fixtures are checked-in development inputs, separate from every
+design/product authoring tree:
+
+```text
+examples/
+  pet-inputs/                              # shared non-customer dog images
+  authoring/fixture-sets/
+    mvp-pets-smoke-v1/fixture-set.json     # 2-3 dogs, one attempt each
+    mvp-pets-v1/fixture-set.json           # 6-15 dogs per release run, one attempt each
+```
+
+The current manifests contain three smoke dogs and eleven release dogs. A v2
+fixture record pins image bytes and carries breed, size class, morphology,
+coat, capture conditions, risk tags, and source/license status. The validator
+rejects missing/changed images, duplicate IDs or bytes, invalid metadata, tier
+inventory counts outside the declared bounds, and any MVP attempt count other
+than one. Fixture selection is deliberately split from paid generation. A
+no-cost `prepare-benchmark` command applies an explicit count and repeatable
+`FIELD=VALUE` filters, then writes a mutable selection file containing the
+pinned manifest identity/hash and exact fixture IDs. The operator reviews or
+edits that file before `benchmark`; `compare` consumes the same file. A release
+selection must contain at least six dogs. Repeated values for one field are OR
+conditions; different fields are AND conditions. Evaluation records the
+selection-file hash and resolved fixture IDs, making the actual run set
+traceable without copying filters between commands. Fixture-set changes create
+a new manifest ID/version and invalidate prior draft selections; they never
+silently alter historical evaluation meaning.
 
 This path boundary is an invariant, not a naming preference:
 
@@ -1141,13 +1167,18 @@ and layout-attempt product-relative paths. For example:
 }
 ```
 
-A pet prompt/model comparison uses the same private, non-customer pet fixtures,
-ordered references, product profile, and normalization policy. The tool checks
+A pet prompt/model comparison uses the same non-customer pet fixtures, ordered
+references, product profile, and normalization policy. Prompt iteration first
+uses a two- or three-dog smoke tier; only shortlisted candidates incur a release
+run of six or more dogs selected from the eleven-dog inventory. Both use one
+attempt per dog. The tool checks
 successful calls, PNG dimensions, usable alpha, and elapsed time; the reviewer
 checks identity, style, pose/crop, unwanted background/text, and acceptable
-latency. Its contact sheet groups attempts by input-pet hash and labels the
-provider/model/quality configuration. With fewer than 20 successful calls, the
-tool reports minimum, maximum, and median but not p95. A later assembly
+latency. Its contact sheet groups attempts by input-pet hash and labels fixture
+ID, breed, size, and provider/model/quality. Evaluation output reports overall
+coverage plus size, morphology, and risk-tag group coverage. With fewer than 20
+successful calls, the tool reports minimum, maximum, and median but not p95 or
+repeat-run reliability. A later assembly
 evaluation with fixed art/layout remains required because isolated cutout
 quality does not prove the final composition.
 
@@ -1162,9 +1193,10 @@ requires assembly evaluation.
 Each candidate has independent attempt-count, success-rate, hard-gate-rate,
 latency, and fixture-coverage measurements. An optional attempt-ID prefix
 excludes ad hoc smoke runs from a controlled benchmark. A pet candidate cannot
-pass a fixture-backed evaluation unless all declared fixture hashes are covered;
-coverage requires at least one successful hard-gate-passing result per fixture.
-Operators additionally keep attempt counts equal when comparing latency.
+pass a fixture-backed evaluation unless every fixture in the recorded resolved
+selection is covered; coverage requires one successful hard-gate-passing result
+per selected fixture. Candidates compared for latency must use the identical
+fixture manifest, reviewed selection file, resolved IDs, and attempt count.
 
 Art comparison has the same machine gates for PNG geometry and alpha. The
 repeatable experiment input supports both within-experiment stability review
@@ -1430,9 +1462,13 @@ roles/order, and renderer/name semantics.
    hashes, component kinds,
    states, parent lineage, hard gates, and design/profile compatibility.
 3. **Provide a lightweight authoring lifecycle CLI.** Use one focused
-   `pawmarvel-author` command with `create-experiment`, `run-attempt`,
-   `benchmark`, `compare`, `prepare-print`, `graduate`, `trace`, `set-status`,
-   `record-publication`, and `cleanup` subcommands. `benchmark` creates the declared fixture attempts;
+   `pawmarvel-author` command with `validate-fixture-set`, `prepare-benchmark`,
+   `create-experiment`, `run-attempt`, `benchmark`, `compare`, `prepare-print`,
+   `graduate`, `trace`, `set-status`, `record-publication`, and `cleanup`
+   subcommands. `prepare-benchmark` creates the reviewed run plan without API
+   calls; `benchmark` preflights the pet experiment and run identity, creates
+   only its declared fixture attempts, continues after individual provider
+   failures, and exits nonzero with an aggregate failure report;
    `compare` reads completed attempts and never makes a paid call. The command
    orchestrates the existing focused CLIs; it does not duplicate image
    generation or rendering. A small independent `comparison_artifacts.py`

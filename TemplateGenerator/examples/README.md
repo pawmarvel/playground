@@ -1,17 +1,22 @@
 # Repository examples
 
 The repository intentionally carries exactly two small source-design examples
-and two reusable pet inputs. They demonstrate the operations guide and exercise
-development tests; they are not production catalog entries or approved
-production QA fixtures. The repository does not assert production-use or
-redistribution rights for these images. For the MVP trial, an operator performs
-a lightweight source/rights review before using an image in a catalog and uses
+and an eleven-dog reusable QA inventory. They demonstrate the operations guide
+and exercise development tests; they are not production catalog entries. For
+the MVP trial, an operator performs a lightweight source/rights review and uses
 only non-customer QA pets; formal license evidence is not a publication gate.
+Online additions retain their source and license metadata, while operator-
+provided images are explicitly marked as unverified development fixtures.
 The assets are separated by role so shared inputs are not mistaken for
 design-specific artifacts:
 
-- `pet-inputs/` contains only `sausage-dog-puppy.png` and
-  `white-fluffy-dog.png`; either may be tested against either design.
+- `pet-inputs/` contains the shared dog inventory. Five online additions are
+  attributed in `ONLINE_FIXTURE_ATTRIBUTIONS.md`; the fixture manifests pin all
+  image hashes and carry machine-readable trait and rights metadata.
+- `authoring/fixture-sets/mvp-pets-smoke-v1/` selects three diverse dogs for
+  fast prompt iteration. `mvp-pets-v1/` provides an eleven-dog inventory from
+  which an operator selects at least six for release QA. Both run exactly one
+  attempt per selected dog.
 - `life-is-good/` and `charlie-well-trained/` each contain that design's
   finished reference plus separate GPT and Gemini variants of the art-template
   and pet-transformation prompts.

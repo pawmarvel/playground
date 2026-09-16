@@ -17,6 +17,7 @@ from .authoring import (
     run_attempt, set_status, trace_graduation,
 )
 from .cli_errors import add_debug_argument, report_unexpected
+from .fixture_set import load_fixture_set, write_fixture_selection
 from .operation_config import write_operation_config, write_shared_config
 
 
@@ -86,6 +87,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="replace an existing design/product config",
     )
 
+    fixture = commands.add_parser(
+        "validate-fixture-set",
+        help="validate fixture metadata, tier size, image bytes, and pinned hashes",
+    )
+    fixture.add_argument("--fixture-set", type=_path_argument, required=True)
+
+    prepare_benchmark = commands.add_parser(
+        "prepare-benchmark",
+        help="write a no-cost, reviewable fixture selection for benchmark and compare",
+    )
+    prepare_benchmark.add_argument("--fixture-set", type=_path_argument, required=True)
+    prepare_benchmark.add_argument(
+        "--fixture-count",
+        type=int,
+        help="select the first N fixtures remaining after filters",
+    )
+    prepare_benchmark.add_argument(
+        "--fixture-filter",
+        action="append",
+        default=[],
+        metavar="FIELD=VALUE",
+        help=(
+            "filter by id, breed, size_class, morphology, or risk_tag; repeat "
+            "for OR within one field and AND across different fields"
+        ),
+    )
+    prepare_benchmark.add_argument("--output", type=_path_argument, required=True)
+    prepare_benchmark.add_argument(
+        "--force",
+        action="store_true",
+        help="replace an existing draft selection",
+    )
+
     create = commands.add_parser("create-experiment")
     create.add_argument("--kind", choices=("art", "pet", "layout"), required=True)
     create.add_argument("--experiment-id", required=True)
@@ -142,8 +176,13 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument("--experiment", type=_path_argument, required=True)
     bench.add_argument("--fixture-set", type=_path_argument, required=True)
     bench.add_argument("--evaluation-protocol", type=_path_argument, required=True)
-    bench.add_argument("--attempts-per-fixture", type=int, default=2)
+    bench.add_argument(
+        "--attempts-per-fixture",
+        type=int,
+        help="must match the manifest protocol (MVP default: 1)",
+    )
     bench.add_argument("--attempt-id-prefix", default="benchmark")
+    bench.add_argument("--fixture-selection", type=_path_argument, required=True)
 
     comparison = commands.add_parser("compare")
     comparison.add_argument("--kind", choices=("art", "pet", "layout", "assembly"), required=True)
@@ -161,6 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--evaluation-protocol", type=_path_argument, required=True
     )
     comparison.add_argument("--fixture-set", type=_path_argument)
+    comparison.add_argument("--fixture-selection", type=_path_argument)
     comparison.add_argument(
         "--attempt-prefix",
         help="include only attempt IDs with this prefix (useful for controlled benchmarks)",
@@ -271,6 +311,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 version_number=args.version_number,
                 force=args.force,
             )
+        elif args.command == "validate-fixture-set":
+            import json
+
+            print(json.dumps(load_fixture_set(args.fixture_set).summary(), indent=2))
+            return 0
+        elif args.command == "prepare-benchmark":
+            result = write_fixture_selection(
+                args.fixture_set,
+                output=args.output,
+                fixture_count=args.fixture_count,
+                filters=tuple(args.fixture_filter),
+                force=args.force,
+            )
         elif args.command == "create-experiment":
             result = create_experiment(
                 kind=args.kind,
@@ -297,11 +350,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                                  pet_name=args.pet_name, layout_file=args.layout_file,
                                  reference_text=args.reference_text)
         elif args.command == "benchmark":
-            if args.attempts_per_fixture < 1:
+            if args.attempts_per_fixture is not None and args.attempts_per_fixture < 1:
                 raise AuthoringError("attempts per fixture must be positive")
             results = benchmark(experiment=args.experiment, fixture_set=args.fixture_set,
                 evaluation_protocol=args.evaluation_protocol, attempts_per_fixture=args.attempts_per_fixture,
-                attempt_id_prefix=args.attempt_id_prefix)
+                attempt_id_prefix=args.attempt_id_prefix,
+                fixture_selection=args.fixture_selection)
             for result in results:
                 print(result)
             return 0
@@ -310,7 +364,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 experiments=args.experiment, evaluation_protocol=args.evaluation_protocol, fixture_set=args.fixture_set,
                 art_attempt=args.art_attempt, pet_experiment=args.pet_experiment, layout_attempt=args.layout_attempt,
                 base_bundle_revision=args.base_bundle_revision,
-                attempt_prefix=args.attempt_prefix)
+                attempt_prefix=args.attempt_prefix,
+                fixture_selection=args.fixture_selection)
         elif args.command == "record-decision":
             result = record_decision(
                 review=args.review,

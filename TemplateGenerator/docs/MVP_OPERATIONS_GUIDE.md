@@ -154,6 +154,11 @@ the design. Missing optional references are exported as empty values instead
 of invalid paths. For a private production design, copy its approved source
 files into the same folder; do not add them to `examples/` or Git.
 
+Configs created before the tiered fixture contract export the obsolete single
+`PAWMARVEL_FIXTURE_SET` variable. Create a new versioned config with
+`init-config --version-number <next>` and carry over intentional design settings;
+do not hand-edit an old config into an ambiguous partial migration.
+
 `PAWMARVEL_RELEASE_ID` is the identity of the release this iteration will
 create; it does not search for or select an older catalog. If you intend to
 publish an existing release, change it to that catalog's exact directory name
@@ -206,7 +211,12 @@ test -f "$PAWMARVEL_PET"
 test -f "$PAWMARVEL_PROFILE"
 test -d "$PAWMARVEL_FONT_CATALOG"
 test -f "$PAWMARVEL_EVALUATION_PROTOCOL"
-test -f "$PAWMARVEL_FIXTURE_SET"
+test -f "$PAWMARVEL_SMOKE_FIXTURE_SET"
+test -f "$PAWMARVEL_RELEASE_FIXTURE_SET"
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" validate-fixture-set \
+  --fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET"
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" validate-fixture-set \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET"
 test -z "${PAWMARVEL_FONT_REFERENCE:-}" || test -f "$PAWMARVEL_FONT_REFERENCE"
 test -z "${PAWMARVEL_LAYOUT_REFERENCE:-}" || test -f "$PAWMARVEL_LAYOUT_REFERENCE"
 test "$PAWMARVEL_ART_PROVIDER" != openai || test -n "${OPENAI_API_KEY:-}"
@@ -270,6 +280,7 @@ The king-blanket example evolves as follows:
 
 ```text
 work/authoring/life-is-good/blanket-king-9375x12375/
+  benchmark-selections/              # reviewed smoke/release run plans
   experiments/
     art/art-gpt-v01/
       experiment.json
@@ -557,10 +568,51 @@ the prior decision remains traceable.
 
 The primary MVP path uses GPT Image 2 because offline tests found Gemini's pet
 cutout and transparency behavior insufficiently reliable. A changed pet prompt
-or request configuration is a new experiment. Repeated runs of the same
-experiment measure stability, failure rate, and latency against fixed fixtures.
+or request configuration is a new experiment. The current one-attempt fixture
+tiers measure cross-dog coverage and comparative latency; they do not claim
+repeat-run reliability for any one dog.
 At runtime, the customer pet is always the first image and the finished-design
 references follow in recorded order.
+
+Use the two fixture tiers deliberately:
+
+- `mvp-pets-smoke-v1` has three morphology-diverse dogs and costs three calls
+  per experiment. Use it while editing prompts or request configuration.
+- `mvp-pets-v1` has an eleven-dog inventory spanning toy through giant sizes,
+  varied body shapes, coats, tones, and source-background difficulty. A release
+  run selects 6-11 of them and runs once per shortlisted experiment.
+
+Both manifests fix `attempts_per_fixture` at one. Fixture selection is a
+no-cost, two-step operation: `prepare-benchmark` applies the requested count
+and filters and writes a JSON draft; the operator reviews or edits its exact
+`selected_fixture_ids`; then both `benchmark` and `compare` consume that same
+file. This avoids duplicated filter arguments and makes the paid call set
+explicit before submission. Repeat `--fixture-filter FIELD=VALUE` while
+preparing the draft to narrow by `id`, `breed`, `size_class`, `morphology`, or
+`risk_tag`. Values repeated for one field are OR conditions; different fields
+are AND conditions. The fixture-set ID, tier, and manifest SHA-256 are pinned,
+so a stale selection is rejected. This stage measures coverage
+across dogs, not repeated stochastic reliability. If repeated-run stability is
+needed later, create a separate protocol and fixture-set version rather than
+silently changing the attempt count. The manifest pins every image SHA-256 and
+records breed, size, morphology, capture risks, source, and license status.
+
+The release inventory is intentionally coverage-oriented rather than a breed
+popularity ranking:
+
+| Fixture | Size | Primary coverage |
+| --- | --- | --- |
+| Dachshund | small | long body, short legs |
+| Pomeranian-type | toy | light, dense fluffy coat |
+| Australian Shepherd | medium | merle pattern, double coat |
+| Bernese Mountain Dog | large | dark dense coat, heavy build |
+| Doodle mix | medium | curly edges, environmental background |
+| Golden Retriever | large | light feathered coat |
+| French Bulldog | small | brachycephalic face, upright ears |
+| Greyhound | large | sighthound silhouette, thin legs |
+| Great Dane | giant | giant scale, long legs |
+| German Shepherd | large | dark coat, upright ears |
+| Beagle | medium | drop ears, tri-color markings |
 
 ```bash
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
@@ -576,6 +628,16 @@ references follow in recorded order.
   --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
 
 PAWMARVEL_PET_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/pet/pet-gpt-v01"
+PAWMARVEL_SMOKE_SELECTION="$PAWMARVEL_BENCHMARK_SELECTION_ROOT/pet-smoke-v01.json"
+
+# Step 1 (no API calls): create and inspect the exact smoke run.
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" prepare-benchmark \
+  --fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET" \
+  --fixture-count 3 \
+  --output "$PAWMARVEL_SMOKE_SELECTION"
+
+cat "$PAWMARVEL_SMOKE_SELECTION"
+${EDITOR:-vi} "$PAWMARVEL_SMOKE_SELECTION"
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
   --experiment "$PAWMARVEL_PET_EXPERIMENT" \
@@ -584,26 +646,87 @@ PAWMARVEL_PET_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/pet/pet-gpt-v
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" benchmark \
   --experiment "$PAWMARVEL_PET_EXPERIMENT" \
-  --fixture-set "$PAWMARVEL_FIXTURE_SET" \
+  --fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_SMOKE_SELECTION" \
   --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
-  --attempts-per-fixture 2 \
-  --attempt-id-prefix benchmark
+  --attempts-per-fixture 1 \
+  --attempt-id-prefix smoke
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
   --kind pet \
-  --review-id pet-gpt-baseline \
+  --review-id pet-gpt-smoke \
   --experiment pet-gpt-v01 \
-  --attempt-prefix benchmark- \
-  --fixture-set "$PAWMARVEL_FIXTURE_SET" \
+  --attempt-prefix smoke- \
+  --fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_SMOKE_SELECTION" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
+  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
+```
+
+Review `pet-gpt-smoke/artifacts/pet-comparison.png`. If the prompt is still
+changing, create a new experiment and repeat only the smoke tier. Once the
+candidate is shortlisted, prepare an exact release selection. This example
+deliberately includes the Dachshund and white fluffy dog used by later layout
+and bundle-consumption checks, plus four morphology/size complements:
+
+```bash
+PAWMARVEL_RELEASE_SELECTION="$PAWMARVEL_BENCHMARK_SELECTION_ROOT/pet-release-v01.json"
+
+# Step 1 (no API calls): filter into a reviewable draft.
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" prepare-benchmark \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --fixture-count 6 \
+  --fixture-filter id=sausage-dog \
+  --fixture-filter id=white-fluffy-dog \
+  --fixture-filter id=australian-shepherd \
+  --fixture-filter id=bernese-mountain-dog \
+  --fixture-filter id=doodle \
+  --fixture-filter id=great-dane \
+  --output "$PAWMARVEL_RELEASE_SELECTION"
+
+cat "$PAWMARVEL_RELEASE_SELECTION"
+${EDITOR:-vi} "$PAWMARVEL_RELEASE_SELECTION"
+
+# Step 2 (paid): run exactly the reviewed IDs, then compare the same set.
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" benchmark \
+  --experiment "$PAWMARVEL_PET_EXPERIMENT" \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_RELEASE_SELECTION" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
+  --attempts-per-fixture 1 \
+  --attempt-id-prefix release
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
+  --kind pet \
+  --review-id pet-gpt-release \
+  --experiment pet-gpt-v01 \
+  --attempt-prefix release- \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_RELEASE_SELECTION" \
   --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
   --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
 ```
 
 Review identity retention, pose/expression/crop, style, genuine transparency,
-failure rate, retries, and latency. A small benchmark reports minimum, maximum,
-and median; treat p95 as meaningful only with at least 20 successful calls.
-`--attempt-prefix benchmark-` excludes one-off smoke tests. Do not select the
-experiment until every fixture has a successful hard-gate-passing result.
+failure rate, and latency. The evaluation reports overall fixture coverage plus
+coverage grouped by size, morphology, and risk tag. A one-attempt-per-dog MVP
+benchmark reports minimum, maximum, and median; it does not establish p95 or
+repeat-run stability. Do not select the experiment until every fixture in the
+recorded release selection has a successful hard-gate-passing result.
+
+The draft records the original filters only as provenance. The reviewed
+`selected_fixture_ids` array is authoritative and may be reordered or edited
+before the paid run. IDs must be unique and present in the pinned manifest; a
+release selection must contain 6-15 dogs. Regenerate with `--force` when you
+intend to replace an existing draft. Use explicit `id=` filters when later
+steps require named fixtures, as in this example.
+
+Before the first provider call, `benchmark` verifies that the target is a pet
+experiment and that its attempt prefix, fixture set, selection, and protocol
+are valid. If an individual provider attempt fails, the batch continues so the
+remaining fixtures still produce evidence, then exits nonzero with every
+failed attempt ID and error. Fix the cause and use a new attempt prefix; failed
+attempt records are immutable.
 
 After reviewing the pet comparison, enter the winning review and runtime
 experiment once. Also choose one successful attempt from that experiment as
@@ -613,9 +736,9 @@ experiment will snapshot the representative attempt separately.
 
 ```bash
 # Operator selection inputs: edit only these three values.
-PAWMARVEL_PET_REVIEW_ID="pet-gpt-baseline"
+PAWMARVEL_PET_REVIEW_ID="pet-gpt-release"
 PAWMARVEL_PET_SELECTED_EXPERIMENT_ID="pet-gpt-v01"
-PAWMARVEL_PET_LAYOUT_ATTEMPT_ID="benchmark-sausage-dog-0001"
+PAWMARVEL_PET_LAYOUT_ATTEMPT_ID="release-sausage-dog-0001"
 
 PAWMARVEL_PET_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/pet/$PAWMARVEL_PET_REVIEW_ID"
 
@@ -791,7 +914,7 @@ Validate the same draft against a second pet and longer name before saving. The
 selected pet-runtime benchmark already produced the alternate fixture:
 
 ```bash
-PAWMARVEL_LAYOUT_ALT_PET="$PAWMARVEL_PET_EXPERIMENT/attempts/benchmark-white-fluffy-dog-0001/outputs/transformed-pet.png"
+PAWMARVEL_LAYOUT_ALT_PET="$PAWMARVEL_PET_EXPERIMENT/attempts/release-white-fluffy-dog-0001/outputs/transformed-pet.png"
 test -f "$PAWMARVEL_LAYOUT_ALT_PET"
 ```
 
@@ -926,6 +1049,31 @@ New layout experiments snapshot the expanded catalog automatically. Existing
 experiments remain immutable and continue using their original catalog
 snapshot.
 
+Before print preparation, render the selected release fixtures through the
+selected art and layout. This reuses the already-generated pet cutouts and does
+not make provider calls:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
+  --kind pet \
+  --review-id pet-release-composition \
+  --experiment "$PAWMARVEL_PET_SELECTED_EXPERIMENT_ID" \
+  --attempt-prefix release- \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_RELEASE_SELECTION" \
+  --art-attempt "$PAWMARVEL_ART_ATTEMPT" \
+  --layout-attempt "$PAWMARVEL_LAYOUT_ATTEMPT" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
+  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
+```
+
+Inspect
+`reviews/pet/pet-release-composition/artifacts/pet-composition-comparison.png`.
+It is the useful template-compatibility view: the selected final compositions
+labeled by fixture ID, breed, and size class. Reject the layout if any body shape is
+clipped, hidden by fixed art, or collides with the name region. This review is
+QA evidence, not another pet-runtime winner decision.
+
 Create the assembly review from the derived stage winners:
 
 ```bash
@@ -935,7 +1083,7 @@ Create the assembly review from the derived stage winners:
   --art-attempt "$PAWMARVEL_ART_ATTEMPT" \
   --pet-experiment "$PAWMARVEL_PET_EXPERIMENT" \
   --layout-attempt "$PAWMARVEL_LAYOUT_ATTEMPT" \
-  --fixture-set "$PAWMARVEL_FIXTURE_SET" \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
   --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
   --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
 ```
@@ -1088,7 +1236,7 @@ PAWMARVEL_ASSEMBLY_REVIEW_ID="assembly-winner-v01"
   --art-attempt "$PAWMARVEL_ART_ATTEMPT" \
   --pet-experiment "$PAWMARVEL_PET_EXPERIMENT" \
   --layout-attempt "$PAWMARVEL_LAYOUT_ATTEMPT" \
-  --fixture-set "$PAWMARVEL_FIXTURE_SET" \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
   --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
   --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
 ```
@@ -1606,18 +1754,20 @@ PAWMARVEL_PET_EXPERIMENT_GEMINI="$PAWMARVEL_AUTHORING_PRODUCT/experiments/pet/pe
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" benchmark \
   --experiment "$PAWMARVEL_PET_EXPERIMENT_GEMINI" \
-  --fixture-set "$PAWMARVEL_FIXTURE_SET" \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_RELEASE_SELECTION" \
   --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
-  --attempts-per-fixture 2 \
-  --attempt-id-prefix benchmark
+  --attempts-per-fixture 1 \
+  --attempt-id-prefix release
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
   --kind pet \
   --review-id pet-gpt-vs-gemini \
   --experiment pet-gpt-v01 \
   --experiment pet-gemini-v01 \
-  --attempt-prefix benchmark- \
-  --fixture-set "$PAWMARVEL_FIXTURE_SET" \
+  --attempt-prefix release- \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_RELEASE_SELECTION" \
   --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
   --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
 ```

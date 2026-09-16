@@ -74,6 +74,15 @@ def render_comparison_contact_sheet(
                         attempt.get("input_pet_sha256")
                         or attempt.get("representative_pet_sha256")
                     ),
+                    "fixture_label": " / ".join(
+                        str(value)
+                        for value in (
+                            attempt.get("fixture_id"),
+                            attempt.get("fixture_breed"),
+                            attempt.get("fixture_size_class"),
+                        )
+                        if value
+                    ),
                     "configuration": attempt.get("review_label")
                     or (
                         f"{generation.get('provider', '?')}/"
@@ -148,6 +157,12 @@ def render_comparison_contact_sheet(
             if isinstance(tile["duration_seconds"], (int, float)):
                 detail += f"  {float(tile['duration_seconds']):.1f}s"
             draw.text((left + 16, top + 44), detail, fill=(70, 70, 70))
+            if tile["fixture_label"]:
+                draw.text(
+                    (left + 16, top + 54),
+                    tile["fixture_label"][:56],
+                    fill=(70, 70, 70),
+                )
 
             checker = _checkerboard(image_size)
             with Image.open(tile["review_path"]) as source:

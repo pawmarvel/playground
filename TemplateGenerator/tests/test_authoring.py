@@ -14,10 +14,11 @@ from jsonschema import Draft202012Validator, FormatChecker
 from helpers import copy_font, layout_data, make_image, make_transparent_mark
 from pawmarvel_generator.artifact_io import sha256
 from pawmarvel_generator.authoring import (
-    AuthoringError, atomic_json, cleanup, compare, create_experiment,
+    AuthoringError, atomic_json, benchmark, cleanup, compare, create_experiment,
     graduate, prepare_print_candidate, record_decision, record_publication,
     run_attempt, set_status, trace_graduation,
 )
+from pawmarvel_generator.fixture_set import write_fixture_selection
 from pawmarvel_generator.bundle import BundleError
 from pawmarvel_generator.font_reference import font_reference_from_editor
 from pawmarvel_generator.layout_reference import layout_reference_from_editor
@@ -640,15 +641,62 @@ class AuthoringLifecycleTests(unittest.TestCase):
         self._fake_attempt(first, "smoke-0001", "transformed-pet.png", (816, 816))
         self._fake_attempt(first, "benchmark-pet-0001", "transformed-pet.png", (816, 816))
         self._fake_attempt(second, "benchmark-pet-0001", "transformed-pet.png", (816, 816))
+        second_fixture_pet = make_image(
+            self.root / "pet-two.png", color=(90, 100, 110, 255)
+        )
+        self._fake_attempt(
+            first, "benchmark-pet-two-0001", "transformed-pet.png", (816, 816),
+            pet_source=second_fixture_pet,
+        )
+        self._fake_attempt(
+            second, "benchmark-pet-two-0001", "transformed-pet.png", (816, 816),
+            pet_source=second_fixture_pet,
+        )
+        unselected_pet = make_image(
+            self.root / "pet-unselected.png", color=(20, 30, 40, 255)
+        )
+        self._fake_attempt(
+            first,
+            "benchmark-unselected-0001",
+            "transformed-pet.png",
+            (816, 816),
+            pet_source=unselected_pet,
+        )
         fixture_set = self.root / "fixture-set.json"
         atomic_json(
             fixture_set,
             {
-                "schema_version": 1,
-                "fixtures": [{"id": "pet", "pet_image": "pet.png"}],
+                "schema_version": 2,
+                "fixture_set_id": "test-smoke-v1",
+                "tier": "smoke",
+                "attempts_per_fixture": 1,
+                "fixtures": [
+                    {
+                        "id": fixture_id,
+                        "pet_image": image.name,
+                        "sha256": sha256(image),
+                        "breed": {"id": fixture_id, "label": label, "mixed": False},
+                        "size_class": size,
+                        "morphology": morphology,
+                        "coat": {"length": "short", "texture": "smooth", "tone": "medium"},
+                        "capture": {"framing": "full-body", "view": "front", "subject_coverage": "isolated", "background_complexity": "simple"},
+                        "risk_tags": risk_tags,
+                        "rights": {"source_kind": "test", "license": "test-only", "reviewed": False, "intended_use": "test"},
+                    }
+                    for fixture_id, image, label, size, morphology, risk_tags in (
+                        ("pet", self.pet, "Pet one", "small", ["compact"], ["light-edge-detail"]),
+                        ("pet-two", second_fixture_pet, "Pet two", "large", ["long-legs"], ["thin-legs"]),
+                    )
+                ],
             },
         )
         product = self.authoring / "life-is-good" / "test-blanket"
+        fixture_selection = write_fixture_selection(
+            fixture_set,
+            output=self.root / "pet-controlled-selection.json",
+            fixture_count=2,
+            filters=("id=pet", "id=pet-two"),
+        )
         evaluation = compare(
             kind="pet",
             review_id="pet-controlled-eval",
@@ -661,13 +709,129 @@ class AuthoringLifecycleTests(unittest.TestCase):
             layout_attempt=None,
             base_bundle_revision=None,
             attempt_prefix="benchmark-",
+            fixture_selection=fixture_selection,
         )
         record = json.loads(evaluation.read_text())
         self.assertEqual(record["attempt_id_prefix"], "benchmark-")
+        self.assertEqual(
+            record["fixture_selection"]["selected_fixture_ids"],
+            ["pet", "pet-two"],
+        )
+        self.assertEqual(
+            record["fixture_selection"]["config_sha256"],
+            sha256(fixture_selection),
+        )
         for candidate in record["candidates"]:
-            self.assertEqual(candidate["measurements"]["attempts"], 1)
+            self.assertEqual(candidate["measurements"]["attempts"], 2)
             self.assertEqual(candidate["measurements"]["success_rate"], 1.0)
             self.assertEqual(candidate["fixture_coverage"]["status"], "passed")
+            self.assertEqual(
+                {group["value"] for group in candidate["fixture_coverage"]["groups"]["size_class"]},
+                {"small", "large"},
+            )
+
+    def test_benchmark_runs_only_reviewed_fixture_selection(self) -> None:
+        experiment = self._experiment("pet", "pet-benchmark-v01", self.pet_prompt)
+        second_pet = make_image(self.root / "pet-two.png", color=(90, 100, 110, 255))
+        third_pet = make_image(self.root / "pet-three.png", color=(20, 30, 40, 255))
+        fixture_set = self.root / "fixture-set.json"
+        atomic_json(
+            fixture_set,
+            {
+                "schema_version": 2,
+                "fixture_set_id": "test-smoke-v1",
+                "tier": "smoke",
+                "attempts_per_fixture": 1,
+                "fixtures": [
+                    {
+                        "id": fixture_id,
+                        "pet_image": image.name,
+                        "sha256": sha256(image),
+                        "breed": {"id": fixture_id, "label": fixture_id, "mixed": False},
+                        "size_class": size,
+                        "morphology": ["compact"],
+                        "coat": {"length": "short", "texture": "smooth", "tone": "medium"},
+                        "capture": {"framing": "full-body", "view": "front", "subject_coverage": "isolated", "background_complexity": "simple"},
+                        "risk_tags": ["edge-detail"],
+                        "rights": {"source_kind": "test", "license": "test-only", "reviewed": False, "intended_use": "test"},
+                    }
+                    for fixture_id, image, size in (
+                        ("pet", self.pet, "small"),
+                        ("pet-two", second_pet, "medium"),
+                        ("pet-three", third_pet, "large"),
+                    )
+                ],
+            },
+        )
+        selection = write_fixture_selection(
+            fixture_set,
+            output=self.root / "benchmark-selection.json",
+            fixture_count=2,
+            filters=("id=pet", "id=pet-three"),
+        )
+        expected = [
+            experiment / "attempts" / "release-pet-0001",
+            experiment / "attempts" / "release-pet-three-0001",
+        ]
+        with patch(
+            "pawmarvel_generator.authoring.run_attempt",
+            side_effect=expected,
+        ) as mocked_run:
+            result = benchmark(
+                experiment=experiment,
+                fixture_set=fixture_set,
+                fixture_selection=selection,
+                evaluation_protocol=self.protocol,
+                attempts_per_fixture=1,
+                attempt_id_prefix="release",
+            )
+
+        self.assertEqual(result, expected)
+        self.assertEqual(
+            [call.kwargs["attempt_id"] for call in mocked_run.call_args_list],
+            ["release-pet-0001", "release-pet-three-0001"],
+        )
+        self.assertEqual(
+            [call.kwargs["pet_image"] for call in mocked_run.call_args_list],
+            [self.pet.resolve(), third_pet.resolve()],
+        )
+
+        with patch(
+            "pawmarvel_generator.authoring.run_attempt",
+            side_effect=[AuthoringError("provider failed"), expected[1]],
+        ) as mocked_run:
+            with self.assertRaisesRegex(
+                AuthoringError,
+                r"benchmark completed with failed attempts.*succeeded=1; failed=1.*provider failed",
+            ):
+                benchmark(
+                    experiment=experiment,
+                    fixture_set=fixture_set,
+                    fixture_selection=selection,
+                    evaluation_protocol=self.protocol,
+                    attempts_per_fixture=1,
+                    attempt_id_prefix="retry",
+                )
+        self.assertEqual(mocked_run.call_count, 2)
+
+    def test_benchmark_rejects_non_pet_experiment_before_paid_calls(self) -> None:
+        experiment = self._experiment("art", "art-benchmark-v01", self.art_prompt)
+        with (
+            patch("pawmarvel_generator.authoring.run_attempt") as mocked_run,
+            self.assertRaisesRegex(
+                AuthoringError,
+                r"fixture benchmarks require a pet experiment.*actual_kind='art'",
+            ),
+        ):
+            benchmark(
+                experiment=experiment,
+                fixture_set=self.root / "missing-fixture-set.json",
+                fixture_selection=self.root / "missing-selection.json",
+                evaluation_protocol=self.protocol,
+                attempts_per_fixture=1,
+                attempt_id_prefix="release",
+            )
+        mocked_run.assert_not_called()
 
     def test_same_design_uses_independent_product_workspaces(self) -> None:
         second_profile = write_product_profile(

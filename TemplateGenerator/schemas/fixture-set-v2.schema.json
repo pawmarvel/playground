@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pawmarvel.com/schemas/fixture-set-v2.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "fixture_set_id", "tier", "attempts_per_fixture", "fixtures"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "fixture_set_id": {"$ref": "#/$defs/id"},
+    "tier": {"enum": ["smoke", "release"]},
+    "attempts_per_fixture": {"const": 1},
+    "fixtures": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 15,
+      "items": {"$ref": "#/$defs/fixture"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"tier": {"const": "smoke"}}, "required": ["tier"]},
+      "then": {"properties": {"fixtures": {"minItems": 2, "maxItems": 3}}}
+    },
+    {
+      "if": {"properties": {"tier": {"const": "release"}}, "required": ["tier"]},
+      "then": {"properties": {"fixtures": {"minItems": 6, "maxItems": 15}}}
+    }
+  ],
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"},
+    "tagList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/id"}
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "pet_image", "sha256", "breed", "size_class", "morphology", "coat", "capture", "risk_tags", "rights"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "pet_image": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "breed": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "label", "mixed"],
+          "properties": {
+            "id": {"$ref": "#/$defs/id"},
+            "label": {"type": "string", "minLength": 1},
+            "mixed": {"type": "boolean"}
+          }
+        },
+        "size_class": {"enum": ["toy", "small", "medium", "large", "giant"]},
+        "morphology": {"$ref": "#/$defs/tagList"},
+        "coat": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["length", "texture", "tone"],
+          "properties": {
+            "length": {"enum": ["short", "medium", "long"]},
+            "texture": {"enum": ["smooth", "double", "curly", "wavy", "fluffy", "wire"]},
+            "tone": {"enum": ["light", "medium", "dark", "mixed"]}
+          }
+        },
+        "capture": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["framing", "view", "subject_coverage", "background_complexity"],
+          "properties": {
+            "framing": {"enum": ["full-body", "three-quarter", "head-and-shoulders"]},
+            "view": {"enum": ["front", "three-quarter", "side"]},
+            "subject_coverage": {"enum": ["isolated", "mostly-isolated", "environmental"]},
+            "background_complexity": {"enum": ["transparent", "simple", "complex"]}
+          }
+        },
+        "risk_tags": {"$ref": "#/$defs/tagList"},
+        "rights": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_kind", "license", "reviewed", "intended_use"],
+          "properties": {
+            "source_kind": {"type": "string", "minLength": 1},
+            "source_url": {"type": "string", "format": "uri"},
+            "license": {"type": "string", "minLength": 1},
+            "license_url": {"type": "string", "format": "uri"},
+            "creator": {"type": "string", "minLength": 1},
+            "modifications": {"type": "string", "minLength": 1},
+            "reviewed": {"type": "boolean"},
+            "intended_use": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    }
+  }
+}

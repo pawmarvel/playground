@@ -1,14 +1,85 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "fixture_set_id": "mvp-pets-v1",
+  "tier": "release",
+  "attempts_per_fixture": 1,
   "fixtures": [
     {
-      "id": "sausage-dog",
-      "pet_image": "../../../pet-inputs/sausage-dog-puppy.png"
+      "id": "sausage-dog", "pet_image": "../../../pet-inputs/sausage-dog-puppy.png", "sha256": "0d1cb80a75bc31422243b1a055f38fae21b9301bf85d2758a35688aaad732ed5",
+      "breed": {"id": "dachshund", "label": "Dachshund", "mixed": false}, "size_class": "small",
+      "morphology": ["long-body", "short-legs", "drop-ears"], "coat": {"length": "short", "texture": "smooth", "tone": "dark"},
+      "capture": {"framing": "full-body", "view": "three-quarter", "subject_coverage": "mostly-isolated", "background_complexity": "transparent"},
+      "risk_tags": ["long-silhouette", "short-legs"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
     },
     {
-      "id": "white-fluffy-dog",
-      "pet_image": "../../../pet-inputs/white-fluffy-dog.png"
+      "id": "white-fluffy-dog", "pet_image": "../../../pet-inputs/white-fluffy-dog.png", "sha256": "e162eadafb1bd8b7d6ca80977fec2104a98e31c1cca7cdabb2ac9c7a629971f6",
+      "breed": {"id": "pomeranian-type", "label": "Pomeranian-type", "mixed": false}, "size_class": "toy",
+      "morphology": ["compact", "pointed-ears", "dense-coat"], "coat": {"length": "long", "texture": "fluffy", "tone": "light"},
+      "capture": {"framing": "full-body", "view": "front", "subject_coverage": "mostly-isolated", "background_complexity": "transparent"},
+      "risk_tags": ["light-edge-detail", "dense-fur"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "australian-shepherd", "pet_image": "../../../pet-inputs/australian-shepherd.png", "sha256": "ab534b3575919d73b9d7d27360720a4ebc12a94f873794784a417c081efc5fc8",
+      "breed": {"id": "australian-shepherd", "label": "Australian Shepherd", "mixed": false}, "size_class": "medium",
+      "morphology": ["athletic", "pointed-ears", "dense-coat"], "coat": {"length": "medium", "texture": "double", "tone": "mixed"},
+      "capture": {"framing": "full-body", "view": "three-quarter", "subject_coverage": "isolated", "background_complexity": "transparent"},
+      "risk_tags": ["merle-pattern", "fine-fur-edge"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "bernese-mountain-dog", "pet_image": "../../../pet-inputs/bernese-mountain.png", "sha256": "9ccb922d09414e7cd67476393ae488e7dcf47e6cb6645d1a99f15912142ef508",
+      "breed": {"id": "bernese-mountain-dog", "label": "Bernese Mountain Dog", "mixed": false}, "size_class": "large",
+      "morphology": ["heavy-build", "drop-ears", "dense-coat"], "coat": {"length": "long", "texture": "double", "tone": "dark"},
+      "capture": {"framing": "full-body", "view": "front", "subject_coverage": "isolated", "background_complexity": "transparent"},
+      "risk_tags": ["dark-edge-detail", "dense-fur", "large-subject"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "doodle", "pet_image": "../../../pet-inputs/doodle.png", "sha256": "1bf9b100238ee294adef83985220db5e75d9326861ee0bf9fe9f6e575f90a2a7",
+      "breed": {"id": "doodle-mix", "label": "Doodle mix", "mixed": true}, "size_class": "medium",
+      "morphology": ["athletic", "drop-ears", "dense-coat"], "coat": {"length": "medium", "texture": "curly", "tone": "medium"},
+      "capture": {"framing": "full-body", "view": "front", "subject_coverage": "mostly-isolated", "background_complexity": "complex"},
+      "risk_tags": ["curly-edge-detail", "environmental-background"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "golden-retriever", "pet_image": "../../../pet-inputs/golden-retriever.png", "sha256": "30070432ce0a794f49d7feaf066cfa4b58d460aece9d6c30104240a17f3512ec",
+      "breed": {"id": "golden-retriever", "label": "Golden Retriever", "mixed": false}, "size_class": "large",
+      "morphology": ["athletic", "drop-ears", "feathered-coat"], "coat": {"length": "long", "texture": "wavy", "tone": "light"},
+      "capture": {"framing": "full-body", "view": "front", "subject_coverage": "isolated", "background_complexity": "transparent"},
+      "risk_tags": ["light-edge-detail", "feathered-fur", "large-subject"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "french-bulldog", "pet_image": "../../../pet-inputs/french-bulldog.jpg", "sha256": "c70bcf09684b557ff96e764a247a2b0f05115e2aba8e9672039cba35888097c9",
+      "breed": {"id": "french-bulldog", "label": "French Bulldog", "mixed": false}, "size_class": "small",
+      "morphology": ["brachycephalic", "compact", "upright-ears"], "coat": {"length": "short", "texture": "smooth", "tone": "dark"},
+      "capture": {"framing": "full-body", "view": "side", "subject_coverage": "environmental", "background_complexity": "complex"},
+      "risk_tags": ["flat-face", "environmental-background", "human-occlusion"], "rights": {"source_kind": "wikimedia-commons", "source_url": "https://commons.wikimedia.org/wiki/File:French_Bulldog_brindle_standing.jpg", "license": "CC-BY-2.0", "license_url": "https://creativecommons.org/licenses/by/2.0", "creator": "danny O.", "reviewed": true, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "greyhound", "pet_image": "../../../pet-inputs/greyhound.jpg", "sha256": "38b30231b1fb52a0c8d89e800c4463bc2526bf546c7958bd91cf7a87a1bbae0a",
+      "breed": {"id": "greyhound", "label": "Greyhound", "mixed": false}, "size_class": "large",
+      "morphology": ["sighthound", "deep-chest", "long-legs"], "coat": {"length": "short", "texture": "smooth", "tone": "medium"},
+      "capture": {"framing": "full-body", "view": "side", "subject_coverage": "mostly-isolated", "background_complexity": "simple"},
+      "risk_tags": ["thin-legs", "long-silhouette"], "rights": {"source_kind": "wikimedia-commons", "source_url": "https://commons.wikimedia.org/wiki/File:Greyhound_standing_side-on.jpg", "license": "CC-BY-SA-3.0", "license_url": "https://creativecommons.org/licenses/by-sa/3.0", "creator": "Chaoticfluffy", "reviewed": true, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "great-dane", "pet_image": "../../../pet-inputs/great-dane.jpg", "sha256": "b8bde12385a44171fa263dd2de5cb330a1a7dd47ec5c0b3416cf827d1e9c6d08",
+      "breed": {"id": "great-dane", "label": "Great Dane", "mixed": false}, "size_class": "giant",
+      "morphology": ["deep-chest", "long-legs", "upright-build"], "coat": {"length": "short", "texture": "smooth", "tone": "medium"},
+      "capture": {"framing": "full-body", "view": "side", "subject_coverage": "environmental", "background_complexity": "complex"},
+      "risk_tags": ["giant-subject", "thin-legs", "human-occlusion"], "rights": {"source_kind": "wikimedia-commons", "source_url": "https://commons.wikimedia.org/wiki/File:Dane-fawn1.jpg", "license": "CC-BY-SA-4.0", "license_url": "https://creativecommons.org/licenses/by-sa/4.0", "creator": "Canarian", "modifications": "Wikimedia thumbnail resized from 2423x1941 to 1280x1025; no other changes", "reviewed": true, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "german-shepherd", "pet_image": "../../../pet-inputs/german-shepherd.jpg", "sha256": "5bf9768dde3b7b38b69b5b830048558c37a5f850efc1320a674115d8dbfbca0f",
+      "breed": {"id": "german-shepherd", "label": "German Shepherd", "mixed": false}, "size_class": "large",
+      "morphology": ["athletic", "upright-ears", "deep-chest"], "coat": {"length": "medium", "texture": "double", "tone": "dark"},
+      "capture": {"framing": "full-body", "view": "side", "subject_coverage": "mostly-isolated", "background_complexity": "complex"},
+      "risk_tags": ["dark-edge-detail", "environmental-background"], "rights": {"source_kind": "wikimedia-commons", "source_url": "https://commons.wikimedia.org/wiki/File:Black-german-shepherd-29944091920.jpg", "license": "CC0-1.0", "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en", "creator": "Yama Zsuzsanna Márkus", "modifications": "Wikimedia thumbnail resized from 1920x1232 to 1280x821; no other changes", "reviewed": true, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "beagle", "pet_image": "../../../pet-inputs/beagle.jpg", "sha256": "798342b57a5dbb1071e29639b6826dbbce6c0c07809c75f9a1e8dcd512836424",
+      "breed": {"id": "beagle", "label": "Beagle", "mixed": false}, "size_class": "medium",
+      "morphology": ["compact", "drop-ears", "deep-chest"], "coat": {"length": "short", "texture": "smooth", "tone": "mixed"},
+      "capture": {"framing": "full-body", "view": "three-quarter", "subject_coverage": "mostly-isolated", "background_complexity": "complex"},
+      "risk_tags": ["tri-color-markings", "environmental-background"], "rights": {"source_kind": "wikimedia-commons", "source_url": "https://commons.wikimedia.org/wiki/File:Beagle_standing_alone.jpg", "license": "CC-BY-SA-4.0", "license_url": "https://creativecommons.org/licenses/by-sa/4.0", "creator": "Slyronit", "modifications": "Wikimedia thumbnail resized from 4032x3024 to 1280x960; no other changes", "reviewed": true, "intended_use": "offline-template-qa"}
     }
   ]
 }

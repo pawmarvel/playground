@@ -1,0 +1,26 @@
+{
+  "schema_version": 2,
+  "fixture_set_id": "mvp-pets-smoke-v1",
+  "tier": "smoke",
+  "attempts_per_fixture": 1,
+  "fixtures": [
+    {
+      "id": "sausage-dog", "pet_image": "../../../pet-inputs/sausage-dog-puppy.png", "sha256": "0d1cb80a75bc31422243b1a055f38fae21b9301bf85d2758a35688aaad732ed5",
+      "breed": {"id": "dachshund", "label": "Dachshund", "mixed": false}, "size_class": "small", "morphology": ["long-body", "short-legs", "drop-ears"],
+      "coat": {"length": "short", "texture": "smooth", "tone": "dark"}, "capture": {"framing": "full-body", "view": "three-quarter", "subject_coverage": "mostly-isolated", "background_complexity": "transparent"},
+      "risk_tags": ["long-silhouette", "short-legs"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "white-fluffy-dog", "pet_image": "../../../pet-inputs/white-fluffy-dog.png", "sha256": "e162eadafb1bd8b7d6ca80977fec2104a98e31c1cca7cdabb2ac9c7a629971f6",
+      "breed": {"id": "pomeranian-type", "label": "Pomeranian-type", "mixed": false}, "size_class": "toy", "morphology": ["compact", "pointed-ears", "dense-coat"],
+      "coat": {"length": "long", "texture": "fluffy", "tone": "light"}, "capture": {"framing": "full-body", "view": "front", "subject_coverage": "mostly-isolated", "background_complexity": "transparent"},
+      "risk_tags": ["light-edge-detail", "dense-fur"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "bernese-mountain-dog", "pet_image": "../../../pet-inputs/bernese-mountain.png", "sha256": "9ccb922d09414e7cd67476393ae488e7dcf47e6cb6645d1a99f15912142ef508",
+      "breed": {"id": "bernese-mountain-dog", "label": "Bernese Mountain Dog", "mixed": false}, "size_class": "large", "morphology": ["heavy-build", "drop-ears", "dense-coat"],
+      "coat": {"length": "long", "texture": "double", "tone": "dark"}, "capture": {"framing": "full-body", "view": "front", "subject_coverage": "isolated", "background_complexity": "transparent"},
+      "risk_tags": ["dark-edge-detail", "dense-fur", "large-subject"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
+    }
+  ]
+}
