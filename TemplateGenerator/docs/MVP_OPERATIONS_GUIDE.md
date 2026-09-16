@@ -1346,6 +1346,8 @@ literal values into application code.
 ```bash
 PAWMARVEL_SECOND_PET="$PAWMARVEL_PROJECT/examples/pet-inputs/white-fluffy-dog.png"
 PAWMARVEL_SECOND_RUN="$PAWMARVEL_PROJECT/work/consumer-tests/life-is-good--blanket-king-9375x12375/v000001/white-fluffy-dog"
+PAWMARVEL_SECOND_PET_QUALITY="$("$PAWMARVEL_PROJECT/.venv/bin/python" -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["runtime"]["request_parameters"]["quality"])' "$PAWMARVEL_BUNDLE/bundle.json")"
+test "$PAWMARVEL_SECOND_PET_QUALITY" = "$PAWMARVEL_PET_QUALITY"
 mkdir -p "$PAWMARVEL_SECOND_RUN/preview" "$PAWMARVEL_SECOND_RUN/print"
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-poc-run" \
@@ -1357,8 +1359,16 @@ mkdir -p "$PAWMARVEL_SECOND_RUN/preview" "$PAWMARVEL_SECOND_RUN/print"
   --model gpt-image-2 \
   --pet-name FLUFFY \
   --size 816x816 \
+  --quality "$PAWMARVEL_SECOND_PET_QUALITY" \
   --output-dir "$PAWMARVEL_SECOND_RUN/preview"
 ```
+
+For this guide, both quality values are `low`. The equality check catches drift
+between the earlier operation flow and the graduated bundle, while the command
+uses the immutable bundle contract as its source of truth. Always pass the
+selected pet quality explicitly in a consumer/debug run; do not rely on the
+`pawmarvel-poc-run` default, because a different value changes both latency and
+generation behavior.
 
 For a bundle with supporting references, repeat `--reference-design` in the
 exact order declared by `bundle.json.runtime.reference_assets`.
