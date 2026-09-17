@@ -109,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="FIELD=VALUE",
         help=(
-            "filter by id, breed, size_class, morphology, or risk_tag; repeat "
+            "filter by id, species, breed, size_class, morphology, or risk_tag; repeat "
             "for OR within one field and AND across different fields"
         ),
     )

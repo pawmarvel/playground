@@ -18,6 +18,7 @@ class FixtureSetError(ValueError):
 
 _ID = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 _TIERS = {"smoke": (2, 3), "release": (6, 15)}
+_SPECIES = {"cat", "dog"}
 _SIZES = {"toy", "small", "medium", "large", "giant"}
 _COAT_LENGTHS = {"short", "medium", "long"}
 _COAT_TEXTURES = {"smooth", "double", "curly", "wavy", "fluffy", "wire"}
@@ -33,6 +34,7 @@ class PetFixture:
     id: str
     image: Path
     image_sha256: str
+    species: str
     breed_id: str
     breed_label: str
     size_class: str
@@ -42,6 +44,7 @@ class PetFixture:
     def labels(self) -> dict[str, Any]:
         return {
             "fixture_id": self.id,
+            "fixture_species": self.species,
             "fixture_breed": self.breed_label,
             "fixture_size_class": self.size_class,
             "fixture_morphology": list(self.morphology),
@@ -67,6 +70,7 @@ class PetFixtureSet:
             "tier": self.tier,
             "fixture_count": len(self.fixtures),
             "attempts_per_fixture": self.attempts_per_fixture,
+            "species": values("species"),
             "size_classes": values("size_class"),
             "morphology": sorted(
                 {tag for fixture in self.fixtures for tag in fixture.morphology}
@@ -77,7 +81,7 @@ class PetFixtureSet:
         }
 
 
-_FILTER_FIELDS = {"id", "breed", "size_class", "morphology", "risk_tag"}
+_FILTER_FIELDS = {"id", "species", "breed", "size_class", "morphology", "risk_tag"}
 
 
 def select_fixtures(
@@ -108,6 +112,7 @@ def select_fixtures(
     def matches(fixture: PetFixture) -> bool:
         values = {
             "id": {fixture.id},
+            "species": {fixture.species},
             "breed": {fixture.breed_id},
             "size_class": {fixture.size_class},
             "morphology": set(fixture.morphology),
@@ -130,7 +135,7 @@ def select_fixtures(
     minimum, maximum = _TIERS[fixture_set.tier]
     if not minimum <= len(matched) <= maximum:
         raise FixtureSetError(
-            f"{fixture_set.tier} run must select {minimum}-{maximum} dogs; "
+            f"{fixture_set.tier} run must select {minimum}-{maximum} pets; "
             f"filters={list(filters)}; selected={len(matched)}; "
             f"available={len(fixture_set.fixtures)}"
         )
@@ -237,7 +242,7 @@ def load_fixture_selection(
     minimum, maximum = _TIERS[fixture_set.tier]
     if not minimum <= len(selected) <= maximum:
         raise FixtureSetError(
-            f"{fixture_set.tier} fixture selection must contain {minimum}-{maximum} dogs; "
+            f"{fixture_set.tier} fixture selection must contain {minimum}-{maximum} pets; "
             f"selection={selection_path}; selected={len(selected)}"
         )
     return selected
@@ -300,7 +305,7 @@ def load_fixture_set(path: Path) -> PetFixtureSet:
         or not minimum <= len(raw_fixtures) <= maximum
     ):
         raise FixtureSetError(
-            f"{tier} fixture set must contain {minimum}-{maximum} dogs; "
+            f"{tier} fixture set must contain {minimum}-{maximum} pets; "
             f"got {len(raw_fixtures) if isinstance(raw_fixtures, list) else 'non-array'}"
         )
 
@@ -386,6 +391,9 @@ def load_fixture_set(path: Path) -> PetFixtureSet:
                 id=fixture_id,
                 image=image,
                 image_sha256=actual_hash,
+                species=_choice(
+                    fixture.get("species"), _SPECIES, f"fixtures[{index}].species"
+                ),
                 breed_id=breed_id,
                 breed_label=breed_label.strip(),
                 size_class=_choice(

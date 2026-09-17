@@ -569,8 +569,8 @@ the prior decision remains traceable.
 The primary MVP path uses GPT Image 2 because offline tests found Gemini's pet
 cutout and transparency behavior insufficiently reliable. A changed pet prompt
 or request configuration is a new experiment. The current one-attempt fixture
-tiers measure cross-dog coverage and comparative latency; they do not claim
-repeat-run reliability for any one dog.
+tiers measure cross-pet coverage and comparative latency; they do not claim
+repeat-run reliability for any one pet.
 At runtime, the customer pet is always the first image and the finished-design
 references follow in recorded order.
 
@@ -578,9 +578,9 @@ Use the two fixture tiers deliberately:
 
 - `mvp-pets-smoke-v1` has three morphology-diverse dogs and costs three calls
   per experiment. Use it while editing prompts or request configuration.
-- `mvp-pets-v1` has an eleven-dog inventory spanning toy through giant sizes,
-  varied body shapes, coats, tones, and source-background difficulty. A release
-  run selects 6-11 of them and runs once per shortlisted experiment.
+- `mvp-pets-v1` has a fourteen-pet inventory with eleven dogs and three cats,
+  spanning varied body shapes, coats, tones, and source-background difficulty.
+  A release run selects 6-14 of them and runs once per shortlisted experiment.
 
 Both manifests fix `attempts_per_fixture` at one. Fixture selection is a
 no-cost, two-step operation: `prepare-benchmark` applies the requested count
@@ -588,11 +588,11 @@ and filters and writes a JSON draft; the operator reviews or edits its exact
 `selected_fixture_ids`; then both `benchmark` and `compare` consume that same
 file. This avoids duplicated filter arguments and makes the paid call set
 explicit before submission. Repeat `--fixture-filter FIELD=VALUE` while
-preparing the draft to narrow by `id`, `breed`, `size_class`, `morphology`, or
-`risk_tag`. Values repeated for one field are OR conditions; different fields
+preparing the draft to narrow by `id`, `species`, `breed`, `size_class`,
+`morphology`, or `risk_tag`. Values repeated for one field are OR conditions; different fields
 are AND conditions. The fixture-set ID, tier, and manifest SHA-256 are pinned,
 so a stale selection is rejected. This stage measures coverage
-across dogs, not repeated stochastic reliability. If repeated-run stability is
+across pets, not repeated stochastic reliability. If repeated-run stability is
 needed later, create a separate protocol and fixture-set version rather than
 silently changing the attempt count. The manifest pins every image SHA-256 and
 records breed, size, morphology, capture risks, source, and license status.
@@ -600,19 +600,22 @@ records breed, size, morphology, capture risks, source, and license status.
 The release inventory is intentionally coverage-oriented rather than a breed
 popularity ranking:
 
-| Fixture | Size | Primary coverage |
-| --- | --- | --- |
-| Dachshund | small | long body, short legs |
-| Pomeranian-type | toy | light, dense fluffy coat |
-| Australian Shepherd | medium | merle pattern, double coat |
-| Bernese Mountain Dog | large | dark dense coat, heavy build |
-| Doodle mix | medium | curly edges, environmental background |
-| Golden Retriever | large | light feathered coat |
-| French Bulldog | small | brachycephalic face, upright ears |
-| Greyhound | large | sighthound silhouette, thin legs |
-| Great Dane | giant | giant scale, long legs |
-| German Shepherd | large | dark coat, upright ears |
-| Beagle | medium | drop ears, tri-color markings |
+| Fixture | Species | Size | Primary coverage |
+| --- | --- | --- | --- |
+| Dachshund | dog | small | long body, short legs |
+| Pomeranian-type | dog | toy | light, dense fluffy coat |
+| Australian Shepherd | dog | medium | merle pattern, double coat |
+| Bernese Mountain Dog | dog | large | dark dense coat, heavy build |
+| Doodle mix | dog | medium | curly edges, environmental background |
+| Golden Retriever | dog | large | light feathered coat |
+| French Bulldog | dog | small | brachycephalic face, upright ears |
+| Greyhound | dog | large | sighthound silhouette, thin legs |
+| Great Dane | dog | giant | giant scale, long legs |
+| German Shepherd | dog | large | dark coat, upright ears |
+| Beagle | dog | medium | drop ears, tri-color markings |
+| Siamese | cat | medium | color-point coat, large ears, fine whiskers |
+| Maine Coon | cat | large | long fur, large build, full-body side view |
+| British Shorthair | cat | medium | compact build, round face, dense short coat |
 
 ```bash
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
@@ -667,7 +670,8 @@ Review `pet-gpt-smoke/artifacts/pet-comparison.png`. If the prompt is still
 changing, create a new experiment and repeat only the smoke tier. Once the
 candidate is shortlisted, prepare an exact release selection. This example
 deliberately includes the Dachshund and white fluffy dog used by later layout
-and bundle-consumption checks, plus four morphology/size complements:
+and bundle-consumption checks, plus one dog and all three cat morphology
+complements:
 
 ```bash
 PAWMARVEL_RELEASE_SELECTION="$PAWMARVEL_BENCHMARK_SELECTION_ROOT/pet-release-v01.json"
@@ -679,9 +683,9 @@ PAWMARVEL_RELEASE_SELECTION="$PAWMARVEL_BENCHMARK_SELECTION_ROOT/pet-release-v01
   --fixture-filter id=sausage-dog \
   --fixture-filter id=white-fluffy-dog \
   --fixture-filter id=australian-shepherd \
-  --fixture-filter id=bernese-mountain-dog \
-  --fixture-filter id=doodle \
-  --fixture-filter id=great-dane \
+  --fixture-filter id=siamese-cat \
+  --fixture-filter id=maine-coon-cat \
+  --fixture-filter id=british-shorthair-cat \
   --output "$PAWMARVEL_RELEASE_SELECTION"
 
 cat "$PAWMARVEL_RELEASE_SELECTION"
@@ -709,7 +713,7 @@ ${EDITOR:-vi} "$PAWMARVEL_RELEASE_SELECTION"
 
 Review identity retention, pose/expression/crop, style, genuine transparency,
 failure rate, and latency. The evaluation reports overall fixture coverage plus
-coverage grouped by size, morphology, and risk tag. A one-attempt-per-dog MVP
+coverage grouped by species, size, morphology, and risk tag. A one-attempt-per-pet MVP
 benchmark reports minimum, maximum, and median; it does not establish p95 or
 repeat-run stability. Do not select the experiment until every fixture in the
 recorded release selection has a successful hard-gate-passing result.
@@ -717,7 +721,7 @@ recorded release selection has a successful hard-gate-passing result.
 The draft records the original filters only as provenance. The reviewed
 `selected_fixture_ids` array is authoritative and may be reordered or edited
 before the paid run. IDs must be unique and present in the pinned manifest; a
-release selection must contain 6-15 dogs. Regenerate with `--force` when you
+release selection must contain 6-15 pets. Regenerate with `--force` when you
 intend to replace an existing draft. Use explicit `id=` filters when later
 steps require named fixtures, as in this example.
 

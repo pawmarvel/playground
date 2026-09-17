@@ -78,6 +78,7 @@ def render_comparison_contact_sheet(
                         str(value)
                         for value in (
                             attempt.get("fixture_id"),
+                            attempt.get("fixture_species"),
                             attempt.get("fixture_breed"),
                             attempt.get("fixture_size_class"),
                         )

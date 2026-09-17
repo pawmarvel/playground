@@ -11,6 +11,9 @@ manifest. Keep this file with the image inventory when copying the fixtures.
 | `great-dane.jpg` | [Dane-fawn1](https://commons.wikimedia.org/wiki/File:Dane-fawn1.jpg) | Canarian | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | Wikimedia thumbnail resized from 2423x1941 to 1280x1025; no other changes. |
 | `german-shepherd.jpg` | [Black German Shepherd](https://commons.wikimedia.org/wiki/File:Black-german-shepherd-29944091920.jpg) | Yama Zsuzsanna Márkus | [CC0 1.0](http://creativecommons.org/publicdomain/zero/1.0/deed.en) | Wikimedia thumbnail resized from 1920x1232 to 1280x821; no other changes. |
 | `beagle.jpg` | [Beagle standing alone](https://commons.wikimedia.org/wiki/File:Beagle_standing_alone.jpg) | Slyronit | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | Wikimedia thumbnail resized from 4032x3024 to 1280x960; no other changes. |
+| `siamese.jpg` | [Siamese cat HD](https://commons.wikimedia.org/wiki/File:Siamese_cat_HD.jpg) | Aquinassixthway | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/deed.en) | Wikimedia thumbnail resized to 1280x1918; no other changes. |
+| `maine-coon.jpg` | [Maine Coon Cat Atticus](https://commons.wikimedia.org/wiki/File:Maine_Coon_Cat_Atticus.jpg) | Hollakr | [Public domain](https://creativecommons.org/publicdomain/mark/1.0/) | Wikimedia thumbnail resized from 2856x2142 to 1280x960; no other changes. |
+| `british-shorthair.jpg` | [British Shorthair cat](https://commons.wikimedia.org/wiki/File:British_Shorthair_cat.jpg) | George E. Koronaios | [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0) | Wikimedia thumbnail resized from 5977x3984 to 1280x853; no other changes. |
 
 The remaining pet inputs were supplied directly by the operator. Their fixture
 records intentionally mark rights as unverified and limit use to offline MVP QA.

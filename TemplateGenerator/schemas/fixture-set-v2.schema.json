@@ -37,11 +37,12 @@
     "fixture": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "pet_image", "sha256", "breed", "size_class", "morphology", "coat", "capture", "risk_tags", "rights"],
+      "required": ["id", "pet_image", "sha256", "species", "breed", "size_class", "morphology", "coat", "capture", "risk_tags", "rights"],
       "properties": {
         "id": {"$ref": "#/$defs/id"},
         "pet_image": {"type": "string", "minLength": 1},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "species": {"enum": ["cat", "dog"]},
         "breed": {
           "type": "object",
           "additionalProperties": false,

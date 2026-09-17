@@ -46,10 +46,11 @@ Design folders such as [`examples/life-is-good`](examples/life-is-good) and
 [`examples/charlie-well-trained`](examples/charlie-well-trained) contain their
 finished reference plus independently editable `-gpt.md` and `-gemini.md` art
 and pet-transformation prompts.
-Reusable non-customer dog QA fixtures live in
+Reusable non-customer pet QA fixtures live in
 [`examples/pet-inputs`](examples/pet-inputs). Pet-transform QA uses a three-dog
 smoke tier during iteration and an operator-selected release run of at least six
-dogs from the eleven-dog inventory; both protocols run one attempt per dog.
+pets from the fourteen-pet dog-and-cat inventory; both protocols run one attempt
+per pet.
 These reference and pet images are development inputs for exercising the
 offline workflow; the repository does not assert production-use rights for
 them. Generated bundles remain outside Git and are shared with FE through the

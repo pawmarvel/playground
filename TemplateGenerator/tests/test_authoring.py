@@ -675,6 +675,7 @@ class AuthoringLifecycleTests(unittest.TestCase):
                         "id": fixture_id,
                         "pet_image": image.name,
                         "sha256": sha256(image),
+                        "species": "dog",
                         "breed": {"id": fixture_id, "label": label, "mixed": False},
                         "size_class": size,
                         "morphology": morphology,
@@ -729,6 +730,10 @@ class AuthoringLifecycleTests(unittest.TestCase):
                 {group["value"] for group in candidate["fixture_coverage"]["groups"]["size_class"]},
                 {"small", "large"},
             )
+            self.assertEqual(
+                candidate["fixture_coverage"]["groups"]["species"][0]["value"],
+                "dog",
+            )
 
     def test_benchmark_runs_only_reviewed_fixture_selection(self) -> None:
         experiment = self._experiment("pet", "pet-benchmark-v01", self.pet_prompt)
@@ -747,6 +752,7 @@ class AuthoringLifecycleTests(unittest.TestCase):
                         "id": fixture_id,
                         "pet_image": image.name,
                         "sha256": sha256(image),
+                        "species": "dog",
                         "breed": {"id": fixture_id, "label": fixture_id, "mixed": False},
                         "size_class": size,
                         "morphology": ["compact"],

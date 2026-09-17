@@ -737,6 +737,7 @@ def _fixture_group_coverage(
     fixtures: tuple[PetFixture, ...], passing_hashes: set[str]
 ) -> dict[str, list[dict[str, Any]]]:
     dimensions = {
+        "species": lambda fixture: (fixture.species,),
         "size_class": lambda fixture: (fixture.size_class,),
         "morphology": lambda fixture: fixture.morphology,
         "risk_tag": lambda fixture: fixture.risk_tags,

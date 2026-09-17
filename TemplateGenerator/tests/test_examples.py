@@ -116,7 +116,8 @@ class RepositoryExampleTests(unittest.TestCase):
             "australian-shepherd.png", "beagle.jpg", "bernese-mountain.png",
             "doodle.png", "french-bulldog.jpg", "german-shepherd.jpg",
             "golden-retriever.png", "great-dane.jpg", "greyhound.jpg",
-            "sausage-dog-puppy.png", "white-fluffy-dog.png",
+            "sausage-dog-puppy.png", "white-fluffy-dog.png", "siamese.jpg",
+            "maine-coon.jpg", "british-shorthair.jpg",
         }
         self.assertEqual(
             {
@@ -140,7 +141,8 @@ class RepositoryExampleTests(unittest.TestCase):
             examples / "authoring/fixture-sets/mvp-pets-v1/fixture-set.json"
         )
         self.assertEqual((smoke.tier, len(smoke.fixtures)), ("smoke", 3))
-        self.assertEqual((release.tier, len(release.fixtures)), ("release", 11))
+        self.assertEqual((release.tier, len(release.fixtures)), ("release", 14))
+        self.assertEqual(release.summary()["species"], ["cat", "dog"])
         self.assertEqual(smoke.attempts_per_fixture, 1)
         self.assertEqual(release.attempts_per_fixture, 1)
 

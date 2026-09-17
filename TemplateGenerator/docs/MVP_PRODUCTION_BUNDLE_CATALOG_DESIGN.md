@@ -425,7 +425,7 @@ tests/                       unit and contract tests
 Do not add production reference screenshots, production prompts, mutable work
 directories, customer pets, generated bundles, or production release payloads
 to Git. Keep one or two compact development-only source-design examples plus
-the small tiered dog inventory used by the guide and local tests. Online
+the small tiered pet inventory used by the guide and local tests. Online
 fixtures retain source/license attribution; operator-provided fixtures are
 marked as unverified and remain development-only. Reviewed conformance bundles
 and production catalog releases are immutable S3 objects outside Git.
@@ -527,14 +527,15 @@ design/product authoring tree:
 
 ```text
 examples/
-  pet-inputs/                              # shared non-customer dog images
+  pet-inputs/                              # shared non-customer dog and cat images
   authoring/fixture-sets/
-    mvp-pets-smoke-v1/fixture-set.json     # 2-3 dogs, one attempt each
-    mvp-pets-v1/fixture-set.json           # 6-15 dogs per release run, one attempt each
+    mvp-pets-smoke-v1/fixture-set.json     # 2-3 pets, one attempt each
+    mvp-pets-v1/fixture-set.json           # 6-15 pets per release run, one attempt each
 ```
 
-The current manifests contain three smoke dogs and eleven release dogs. A v2
-fixture record pins image bytes and carries breed, size class, morphology,
+The current manifests contain three smoke dogs and fourteen release pets
+(eleven dogs and three cats). A v2 fixture record pins image bytes and carries
+species, breed, size class, morphology,
 coat, capture conditions, risk tags, and source/license status. The validator
 rejects missing/changed images, duplicate IDs or bytes, invalid metadata, tier
 inventory counts outside the declared bounds, and any MVP attempt count other
@@ -543,7 +544,7 @@ no-cost `prepare-benchmark` command applies an explicit count and repeatable
 `FIELD=VALUE` filters, then writes a mutable selection file containing the
 pinned manifest identity/hash and exact fixture IDs. The operator reviews or
 edits that file before `benchmark`; `compare` consumes the same file. A release
-selection must contain at least six dogs. Repeated values for one field are OR
+selection must contain at least six pets. Repeated values for one field are OR
 conditions; different fields are AND conditions. Evaluation records the
 selection-file hash and resolved fixture IDs, making the actual run set
 traceable without copying filters between commands. Fixture-set changes create
@@ -1169,14 +1170,14 @@ and layout-attempt product-relative paths. For example:
 
 A pet prompt/model comparison uses the same non-customer pet fixtures, ordered
 references, product profile, and normalization policy. Prompt iteration first
-uses a two- or three-dog smoke tier; only shortlisted candidates incur a release
-run of six or more dogs selected from the eleven-dog inventory. Both use one
-attempt per dog. The tool checks
+uses a two- or three-pet smoke tier; only shortlisted candidates incur a release
+run of six or more pets selected from the fourteen-pet dog-and-cat inventory.
+Both use one attempt per pet. The tool checks
 successful calls, PNG dimensions, usable alpha, and elapsed time; the reviewer
 checks identity, style, pose/crop, unwanted background/text, and acceptable
 latency. Its contact sheet groups attempts by input-pet hash and labels fixture
-ID, breed, size, and provider/model/quality. Evaluation output reports overall
-coverage plus size, morphology, and risk-tag group coverage. With fewer than 20
+ID, species, breed, size, and provider/model/quality. Evaluation output reports
+overall coverage plus species, size, morphology, and risk-tag group coverage. With fewer than 20
 successful calls, the tool reports minimum, maximum, and median but not p95 or
 repeat-run reliability. A later assembly
 evaluation with fixed art/layout remains required because isolated cutout

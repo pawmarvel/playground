@@ -37,6 +37,7 @@ class FixtureSetTests(unittest.TestCase):
                     "id": f"dog-{index}",
                     "pet_image": image.name,
                     "sha256": sha256(image),
+                    "species": "dog",
                     "breed": {"id": f"breed-{index}", "label": f"Breed {index}", "mixed": False},
                     "size_class": ("toy", "medium", "large")[index - 1],
                     "morphology": ["compact" if index == 1 else "long-legs"],
@@ -64,6 +65,7 @@ class FixtureSetTests(unittest.TestCase):
         fixture_set = load_fixture_set(self._manifest())
         self.assertEqual(fixture_set.tier, "smoke")
         self.assertEqual(len(fixture_set.fixtures), 3)
+        self.assertEqual(fixture_set.summary()["species"], ["dog"])
         self.assertEqual(fixture_set.summary()["size_classes"], ["large", "medium", "toy"])
 
     def test_rejects_changed_image_bytes_with_actionable_path(self) -> None:
@@ -89,6 +91,12 @@ class FixtureSetTests(unittest.TestCase):
         )
         self.assertEqual([fixture.id for fixture in selected], ["dog-1", "dog-2"])
 
+        selected_by_species = select_fixtures(
+            fixture_set,
+            filters=("species=dog",),
+        )
+        self.assertEqual(len(selected_by_species), 3)
+
         with self.assertRaisesRegex(FixtureSetError, "smoke run must select 2-3"):
             select_fixtures(
                 fixture_set,
@@ -102,7 +110,7 @@ class FixtureSetTests(unittest.TestCase):
         with self.assertRaisesRegex(FixtureSetError, "smaller than the requested"):
             select_fixtures(fixture_set, fixture_count=4)
 
-    def test_release_inventory_and_run_require_at_least_six_dogs(self) -> None:
+    def test_release_inventory_and_run_require_at_least_six_pets(self) -> None:
         manifest = self._manifest()
         value = json.loads(manifest.read_text(encoding="utf-8"))
         value["tier"] = "release"
