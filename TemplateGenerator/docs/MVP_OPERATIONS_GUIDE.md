@@ -154,6 +154,80 @@ the design. Missing optional references are exported as empty values instead
 of invalid paths. For a private production design, copy its approved source
 files into the same folder; do not add them to `examples/` or Git.
 
+### 3.1 Configure one or more finished-design references
+
+`reference-design.png` is always the primary reference. It should show the
+complete finished design whose composition is being reproduced. Put optional
+supporting images under `reference-designs/`; descriptive filenames are useful
+to the operator, but array order—not filename sorting—defines model input order.
+
+```text
+work/design-inputs/<design-id>/
+  reference-design.png                     # primary complete finished design
+  reference-designs/
+    pet-style-closeup.png                   # optional style/detail evidence
+    pet-pose-and-crop.png                   # optional pose/crop evidence
+```
+
+Use supporting references only when they clarify the same design: for example,
+a higher-quality view of the pet treatment, a close-up of edge/brush detail, or
+another product screenshot that clearly shows the intended pose and crop. Do
+not mix different design variants, different desired poses, or contradictory
+background/text treatments. More references are not automatically better;
+ambiguous evidence usually reduces generation consistency.
+
+Define art and pet reference lists explicitly after sourcing the configuration.
+They may differ because art generation and pet transformation solve different
+problems. Keep the primary reference first. Pet experiments accept at most four
+finished-design references: one primary and up to three supporting references.
+
+```bash
+# Single-reference default. Add supporting paths only when they provide useful,
+# non-conflicting evidence for that generation task.
+PAWMARVEL_ART_REFERENCES=(
+  "$PAWMARVEL_SAMPLE"
+)
+
+PAWMARVEL_PET_REFERENCES=(
+  "$PAWMARVEL_SAMPLE"
+  # "$PAWMARVEL_DESIGN_INPUT/reference-designs/pet-style-closeup.png"
+  # "$PAWMARVEL_DESIGN_INPUT/reference-designs/pet-pose-and-crop.png"
+)
+
+test "${#PAWMARVEL_PET_REFERENCES[@]}" -le 4
+
+PAWMARVEL_ART_REFERENCE_ARGS=()
+for reference in "${PAWMARVEL_ART_REFERENCES[@]}"; do
+  test -f "$reference"
+  PAWMARVEL_ART_REFERENCE_ARGS+=(--reference-design "$reference")
+done
+
+PAWMARVEL_PET_REFERENCE_ARGS=()
+for reference in "${PAWMARVEL_PET_REFERENCES[@]}"; do
+  test -f "$reference"
+  PAWMARVEL_PET_REFERENCE_ARGS+=(--reference-design "$reference")
+done
+
+printf 'art references, in order:\n'
+printf '  %s\n' "${PAWMARVEL_ART_REFERENCES[@]}"
+printf 'pet references, in order:\n'
+printf '  %s\n' "${PAWMARVEL_PET_REFERENCES[@]}"
+```
+
+For transformed-pet generation, the API image order is always:
+
+1. the user pet supplied to `run-attempt --pet-image`;
+2. the primary finished-design reference; and
+3. each supporting finished-design reference in the recorded order.
+
+The pet prompt must describe those roles consistently. It should direct the
+model to preserve the first image's pet identity, use the following images only
+as pose/crop/style evidence, and output only the transformed pet on transparent
+background. Never put a finished-design reference before the user pet or treat
+a supporting image as another pet to combine. `create-experiment` snapshots the
+ordered references and hashes; later attempts and fixture benchmarks reuse that
+immutable order automatically.
+
 Configs created before the tiered fixture contract export the obsolete single
 `PAWMARVEL_FIXTURE_SET` variable. Create a new versioned config with
 `init-config --version-number <next>` and carry over intentional design settings;
@@ -180,6 +254,10 @@ source "$PAWMARVEL_CONFIG"
 printf 'loaded shared config: %s\n' "$PAWMARVEL_SHARED_CONFIG_FILE"
 printf 'loaded config: %s\n' "$PAWMARVEL_CONFIG_FILE"
 ```
+
+The reference arrays and derived argument arrays in section 3.1 are shell-local
+operator choices, not values stored in the generated config. Recreate them
+after sourcing the two config files in each new terminal.
 
 Configuration files under `work/` are ignored by Git. Never move one into an
 example, bundle, experiment, or release directory. Both initialization commands
@@ -213,6 +291,10 @@ test -d "$PAWMARVEL_FONT_CATALOG"
 test -f "$PAWMARVEL_EVALUATION_PROTOCOL"
 test -f "$PAWMARVEL_SMOKE_FIXTURE_SET"
 test -f "$PAWMARVEL_RELEASE_FIXTURE_SET"
+test "${#PAWMARVEL_ART_REFERENCES[@]}" -ge 1
+test "${#PAWMARVEL_PET_REFERENCES[@]}" -ge 1
+test "${#PAWMARVEL_PET_REFERENCES[@]}" -le 4
+for reference in "${PAWMARVEL_ART_REFERENCES[@]}" "${PAWMARVEL_PET_REFERENCES[@]}"; do test -f "$reference"; done
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" validate-fixture-set \
   --fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET"
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" validate-fixture-set \
@@ -255,6 +337,9 @@ Operator-supplied design sources are separate from generated experiments:
 ```text
 work/design-inputs/life-is-good/
   reference-design.png
+  reference-designs/                  # optional supporting finished-design views
+    pet-style-closeup.png
+    pet-pose-and-crop.png
   art-template-gpt.md
   pet-transform-gpt.md
   font-reference.json                 # optional
@@ -397,7 +482,7 @@ product profile, prompt, and ordered reference images.
   --experiment-id art-gpt-v01 \
   --design-id "$PAWMARVEL_DESIGN_ID" \
   --product-profile "$PAWMARVEL_PROFILE" \
-  --reference-design "$PAWMARVEL_SAMPLE" \
+  "${PAWMARVEL_ART_REFERENCE_ARGS[@]}" \
   --prompt-file "$PAWMARVEL_ART_PROMPT" \
   --provider "$PAWMARVEL_ART_PROVIDER" \
   --model "$PAWMARVEL_ART_MODEL" \
@@ -447,7 +532,7 @@ cp "$PAWMARVEL_ART_PROMPT" "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md
   --experiment-id art-gpt-v02 \
   --design-id "$PAWMARVEL_DESIGN_ID" \
   --product-profile "$PAWMARVEL_PROFILE" \
-  --reference-design "$PAWMARVEL_SAMPLE" \
+  "${PAWMARVEL_ART_REFERENCE_ARGS[@]}" \
   --prompt-file "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md" \
   --provider "$PAWMARVEL_ART_PROVIDER" \
   --model "$PAWMARVEL_ART_MODEL" \
@@ -497,7 +582,7 @@ same number of attempts, and add it to a new comparison:
   --experiment-id art-gpt-v02-low \
   --design-id "$PAWMARVEL_DESIGN_ID" \
   --product-profile "$PAWMARVEL_PROFILE" \
-  --reference-design "$PAWMARVEL_SAMPLE" \
+  "${PAWMARVEL_ART_REFERENCE_ARGS[@]}" \
   --prompt-file "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md" \
   --provider "$PAWMARVEL_ART_PROVIDER" \
   --model "$PAWMARVEL_ART_MODEL" \
@@ -574,6 +659,14 @@ repeat-run reliability for any one pet.
 At runtime, the customer pet is always the first image and the finished-design
 references follow in recorded order.
 
+When comparing pet prompts or models, hold the ordered reference list constant;
+otherwise the comparison changes two variables at once. If the purpose of an
+experiment is specifically to test whether an additional style or pose
+reference improves results, create a new pet experiment with the revised
+`PAWMARVEL_PET_REFERENCES` list, keep prompt/model/quality fixed, and compare it
+against the baseline. Record the winning experiment normally. Its snapshotted
+reference list becomes the runtime reference contract carried into the bundle.
+
 Use the two fixture tiers deliberately:
 
 - `mvp-pets-smoke-v1` has three morphology-diverse dogs and costs three calls
@@ -623,7 +716,7 @@ popularity ranking:
   --experiment-id pet-gpt-v01 \
   --design-id "$PAWMARVEL_DESIGN_ID" \
   --product-profile "$PAWMARVEL_PROFILE" \
-  --reference-design "$PAWMARVEL_SAMPLE" \
+  "${PAWMARVEL_PET_REFERENCE_ARGS[@]}" \
   --prompt-file "$PAWMARVEL_PET_PROMPT" \
   --provider "$PAWMARVEL_PET_PROVIDER" \
   --model "$PAWMARVEL_PET_MODEL" \
@@ -1522,8 +1615,32 @@ selected pet quality explicitly in a consumer/debug run; do not rely on the
 `pawmarvel-poc-run` default, because a different value changes both latency and
 generation behavior.
 
-For a bundle with supporting references, repeat `--reference-design` in the
-exact order declared by `bundle.json.runtime.reference_assets`.
+The command above is the single-reference form. If the manifest contains
+supporting references, use the following form instead; do not run both commands
+into the same output directory. Repeat `--reference-design` in the
+exact order declared by `bundle.json.runtime.reference_assets`. The first entry
+is the primary `reference-design.png`; later entries resolve under
+`reference-designs/`. For example, if the manifest declares two references:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-poc-run" \
+  --template-dir "$PAWMARVEL_BUNDLE" \
+  --pet-image "$PAWMARVEL_SECOND_PET" \
+  --reference-design "$PAWMARVEL_BUNDLE/reference-design.png" \
+  --reference-design "$PAWMARVEL_BUNDLE/reference-designs/reference-design-0002.png" \
+  --prompt-file "$PAWMARVEL_BUNDLE/pet-transform-gpt.md" \
+  --provider openai \
+  --model gpt-image-2 \
+  --pet-name FLUFFY \
+  --size 816x816 \
+  --quality "$PAWMARVEL_SECOND_PET_QUALITY" \
+  --output-dir "$PAWMARVEL_SECOND_RUN/preview"
+```
+
+This literal two-reference command is illustrative. FE and reusable diagnostics
+must read the ordered asset paths from the manifest rather than assume a count
+or synthesize numbered filenames. Passing a different order changes the model
+request and violates the bundle runtime contract.
 
 Scale only the approved customer pet and compose it with bundled print art:
 
@@ -1599,9 +1716,16 @@ PAWMARVEL_SCRATCH_TEMPLATE="$PAWMARVEL_SCRATCH_PRODUCT/template"
 PAWMARVEL_SCRATCH_RUN="$PAWMARVEL_SCRATCH_PRODUCT/runs/sausage-dog-puppy"
 PAWMARVEL_SCRATCH_PRINT="$PAWMARVEL_SCRATCH_RUN/print"
 
+# The scratch pipeline uses one shared ordered reference list for both art and
+# pet stages. Use manual experiments when those stages need different lists.
+PAWMARVEL_PIPELINE_REFERENCE_ARGS=()
+for reference in "${PAWMARVEL_PET_REFERENCES[@]}"; do
+  PAWMARVEL_PIPELINE_REFERENCE_ARGS+=(--sample-design "$reference")
+done
+
 pawmarvel_pipeline_debug() {
   "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-pipeline" \
-    --sample-design "$PAWMARVEL_SAMPLE" \
+    "${PAWMARVEL_PIPELINE_REFERENCE_ARGS[@]}" \
     --art-prompt "$PAWMARVEL_ART_PROMPT" \
     --pet-prompt "$PAWMARVEL_PET_PROMPT" \
     --pet-image "$PAWMARVEL_PET" \
@@ -1621,6 +1745,12 @@ pawmarvel_pipeline_debug() {
 pawmarvel_pipeline_debug --dry-run
 pawmarvel_pipeline_debug
 ```
+
+For a multi-reference scratch run, the pipeline stages and copies every
+`--sample-design` in array order. The first remains the primary layout
+reference. Do not use the scratch helper to validate a configuration where art
+and pet generation intentionally use different reference lists; the manual
+experiment flow preserves that distinction.
 
 `"$@"` forwards any arguments supplied to the shell function. It allows the
 same base command to run selective diagnostics:
@@ -1746,7 +1876,7 @@ and fixture set as the GPT baseline:
   --experiment-id pet-gemini-v01 \
   --design-id "$PAWMARVEL_DESIGN_ID" \
   --product-profile "$PAWMARVEL_PROFILE" \
-  --reference-design "$PAWMARVEL_SAMPLE" \
+  "${PAWMARVEL_PET_REFERENCE_ARGS[@]}" \
   --prompt-file "$PAWMARVEL_PET_PROMPT_GEMINI" \
   --provider gemini \
   --model gemini-3.1-flash-image \
