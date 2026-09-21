@@ -39,7 +39,7 @@ class TextRenderMetrics:
 @dataclass(frozen=True)
 class RenderedComposition:
     image: Image.Image
-    text: TextRenderMetrics
+    text: TextRenderMetrics | None
 
 
 def _open_rgba(source: Path | BinaryIO, label: str) -> Image.Image:
@@ -85,6 +85,13 @@ def _text_bbox(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFon
 def _select_font(
     draw: ImageDraw.ImageDraw, text: str, layout: Layout
 ) -> tuple[ImageFont.FreeTypeFont, tuple[int, int, int, int], TextRenderMetrics]:
+    if not layout.has_name:
+        raise RenderError("layout has no separate name layer")
+    assert layout.name_box is not None
+    assert layout.name_padding_px is not None
+    assert layout.font_path is not None
+    assert layout.font_size_px is not None
+    assert layout.min_font_size_px is not None
     available_width = layout.name_box.width - 2 * layout.name_padding_px
     available_height = layout.name_box.height - 2 * layout.name_padding_px
 
@@ -141,6 +148,11 @@ def _select_font(
 
 
 def _aligned_text_origin(layout: Layout, bounds: tuple[int, int, int, int]) -> tuple[int, int]:
+    if not layout.has_name:
+        raise RenderError("layout has no separate name layer")
+    assert layout.name_box is not None
+    assert layout.name_padding_px is not None
+    assert layout.horizontal_align is not None
     left, top, right, bottom = bounds
     width = right - left
     height = bottom - top
@@ -169,23 +181,35 @@ def _parse_rgba(value: str) -> tuple[int, int, int, int]:
 def render_composition(
     layout: Layout,
     pet_image: Path | BinaryIO,
-    pet_name: str,
+    pet_name: str | None,
     *,
     debug: bool = False,
 ) -> RenderedComposition:
-    pet_name = pet_name.strip()
-    if not pet_name:
-        raise RenderError("pet name must not be empty")
     canvas = _open_rgba(layout.art_path, "art")
     if canvas.size != (layout.canvas_width, layout.canvas_height):
         raise ConfigError("art dimensions changed after layout validation")
     pet = _open_rgba(pet_image, "pet")
     pet_bounds = _place_pet(canvas, pet, layout)
 
-    draw = ImageDraw.Draw(canvas)
-    font, text_bounds, text_metrics = _select_font(draw, pet_name, layout)
-    text_origin = _aligned_text_origin(layout, text_bounds)
-    draw.text(text_origin, pet_name, font=font, fill=_parse_rgba(layout.color))
+    text_metrics: TextRenderMetrics | None = None
+    if layout.has_name:
+        normalized_name = pet_name.strip() if pet_name is not None else ""
+        if not normalized_name:
+            raise RenderError(
+                "pet name must not be empty when layout.name is configured"
+            )
+        assert layout.color is not None
+        draw = ImageDraw.Draw(canvas)
+        font, text_bounds, text_metrics = _select_font(
+            draw, normalized_name, layout
+        )
+        text_origin = _aligned_text_origin(layout, text_bounds)
+        draw.text(
+            text_origin,
+            normalized_name,
+            font=font,
+            fill=_parse_rgba(layout.color),
+        )
 
     if debug:
         draw = ImageDraw.Draw(canvas)
@@ -195,18 +219,24 @@ def render_composition(
             width=2,
         )
         draw.rectangle(pet_bounds, outline=(255, 196, 0, 255), width=2)
-        draw.rectangle(
-            (layout.name_box.x, layout.name_box.y, layout.name_box.right - 1, layout.name_box.bottom - 1),
-            outline=(64, 192, 255, 255),
-            width=2,
-        )
+        if layout.name_box is not None:
+            draw.rectangle(
+                (
+                    layout.name_box.x,
+                    layout.name_box.y,
+                    layout.name_box.right - 1,
+                    layout.name_box.bottom - 1,
+                ),
+                outline=(64, 192, 255, 255),
+                width=2,
+            )
     return RenderedComposition(image=canvas, text=text_metrics)
 
 
 def render_with_layout(
     layout: Layout,
     pet_image: Path | BinaryIO,
-    pet_name: str,
+    pet_name: str | None,
     *,
     debug: bool = False,
 ) -> Image.Image:
@@ -232,7 +262,7 @@ def _png_bytes(
 def render_preview(
     template_dir: Path,
     pet_image: Path | BinaryIO,
-    pet_name: str,
+    pet_name: str | None = None,
     *,
     layout_path: Path | None = None,
 ) -> bytes:
@@ -244,7 +274,7 @@ def render_to_files(
     *,
     template_dir: Path,
     pet_image: Path,
-    pet_name: str,
+    pet_name: str | None,
     output: Path,
     debug_output: Path | None = None,
     layout_path: Path | None = None,

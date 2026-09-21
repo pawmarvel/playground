@@ -37,6 +37,11 @@
         </article>
       </section>
       <section class="controls">
+        <label class="preview-name-label">
+          <input id="name-layer-enabled" type="checkbox">
+          Render a separate pet-name text layer
+        </label>
+        <p class="font-help">Turn this off when the transformed-pet PNG already contains the artistic pet name. The saved layout will omit the <code>name</code> object and no font asset is required.</p>
         <fieldset>
           <legend>Pet box</legend>
           <label>
@@ -52,7 +57,7 @@
           <p class="font-help">Uploaded pets are temporary local QA inputs. They test this layout but do not change its pinned pet lineage or enter the bundle.</p>
           <div id="pet-controls" class="grid"></div>
         </fieldset>
-        <fieldset>
+        <fieldset id="name-layer-controls">
           <legend>Name box and text</legend>
           <p id="name-mode"></p>
           <label class="preview-name-label">

@@ -127,6 +127,10 @@ class PipelineCliTests(unittest.TestCase):
         )
 
     def test_font_pipeline_creates_template_and_tracked_run(self) -> None:
+        self.pet_prompt.write_text(
+            "Render {{PET_NAME}} as artistic lettering with the transformed pet.",
+            encoding="utf-8",
+        )
         client = CombinedClient()
 
         outputs = run_pipeline(
@@ -157,6 +161,10 @@ class PipelineCliTests(unittest.TestCase):
         self.assertEqual(
             [Path(file.name).name for file in client.images.calls[1]["image"]],
             ["input-pet.png", "source-reference-design.png"],
+        )
+        self.assertIn(
+            "Render SAUSAGE as artistic lettering",
+            client.images.calls[1]["prompt"],
         )
 
     def test_pipeline_preserves_and_forwards_ordered_reference_designs(self) -> None:

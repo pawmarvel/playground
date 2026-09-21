@@ -55,6 +55,16 @@ class RendererTests(unittest.TestCase):
         result = render_preview(self.root, self.pet, "BUDDY")
         self.assertTrue(result.startswith(b"\x89PNG"))
 
+    def test_render_without_separate_name_layer(self) -> None:
+        data = layout_data()
+        del data["name"]
+        (self.root / "layout.json").write_text(json.dumps(data), encoding="utf-8")
+
+        result = render_composition(load_layout(self.root), self.pet, None)
+
+        self.assertIsNone(result.text)
+        self.assertEqual(result.image.size, (200, 300))
+
     def test_empty_name_fails(self) -> None:
         with self.assertRaisesRegex(RenderError, "must not be empty"):
             render_preview(self.root, self.pet, "  ")

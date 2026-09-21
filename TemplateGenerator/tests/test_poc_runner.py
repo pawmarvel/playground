@@ -62,6 +62,10 @@ class PocRunnerTests(unittest.TestCase):
         )
 
     def test_runs_generation_and_rendering(self) -> None:
+        self.prompt.write_text(
+            "BACKGROUND = TRANSPARENT\nLetter {{PET_NAME}} with the portrait.",
+            encoding="utf-8",
+        )
         client = FakeClient()
         transformed, final, debug = run_poc(self.args(), client=client)
         self.assertEqual(client.images.call_count, 1)
@@ -72,6 +76,7 @@ class PocRunnerTests(unittest.TestCase):
             [Path(file.name).name for file in client.images.kwargs["image"]],
             ["pet.png", "reference.png"],
         )
+        self.assertIn("Letter BUDDY with the portrait", client.images.kwargs["prompt"])
 
     def test_forwards_multiple_reference_designs_in_order(self) -> None:
         supporting = make_image(self.root / "supporting.png")
@@ -128,6 +133,24 @@ class PocRunnerTests(unittest.TestCase):
         returned, final, debug = run_poc(args, client=client)
         self.assertEqual(returned, transformed.resolve())
         self.assertEqual(client.images.call_count, 0)
+        self.assertTrue(final.is_file())
+        self.assertTrue(debug.is_file())
+
+    def test_reuses_artistic_name_pet_without_layout_name_or_pet_name_arg(self) -> None:
+        data = layout_data()
+        del data["name"]
+        (self.template / "layout.json").write_text(
+            json.dumps(data), encoding="utf-8"
+        )
+        transformed = make_transparent_mark(self.root / "artistic-name-pet.png")
+        args = self.args()
+        args.pet_image = None
+        args.transformed_pet = transformed
+        args.layout = self.template / "layout.json"
+        args.pet_name = None
+
+        _, final, debug = run_poc(args, client=FakeClient())
+
         self.assertTrue(final.is_file())
         self.assertTrue(debug.is_file())
 

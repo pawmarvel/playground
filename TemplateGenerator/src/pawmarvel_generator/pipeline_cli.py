@@ -86,7 +86,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="design-specific prompt used with the user pet and finished reference",
     )
     parser.add_argument("--pet-image", type=Path, required=True)
-    parser.add_argument("--pet-name", required=True)
+    parser.add_argument(
+        "--pet-name",
+        help=(
+            "optional personalized name; replaces {{PET_NAME}} in the pet "
+            "prompt and is required only when the saved layout has a name layer"
+        ),
+    )
     parser.add_argument(
         "--reference-text",
         help="initial exact pet-name text visible in the primary reference design",
@@ -228,6 +234,7 @@ def _generation_args(
     *,
     reference_design: Sequence[Path] | Path | None,
     pet_image: Path | None,
+    pet_name: str | None,
     prompt_file: Path,
     api_key_file: Path | None,
     output_dir: Path,
@@ -241,6 +248,7 @@ def _generation_args(
     return argparse.Namespace(
         reference_design=reference_design,
         pet_image=pet_image,
+        pet_name=pet_name,
         prompt_file=prompt_file,
         api_key_file=api_key_file,
         output_dir=output_dir,
@@ -381,9 +389,7 @@ def run_pipeline(
         font_license = resolve_ofl_license(font, args.font_license) if font else None
     except FontLicenseError as exc:
         raise PipelineError(str(exc)) from exc
-    pet_name = args.pet_name.strip()
-    if not pet_name:
-        raise PipelineError("--pet-name must not be empty")
+    pet_name = (args.pet_name or "").strip() or None
     rerun_steps = tuple(dict.fromkeys(getattr(args, "rerun_step", [])))
     selective_rerun = bool(rerun_steps)
     if selective_rerun and args.force:
@@ -452,7 +458,9 @@ def run_pipeline(
     run_dir = (
         args.run_dir.expanduser().resolve()
         if args.run_dir is not None
-        else template_dir / "runs" / _slug(f"{pet_source.stem}-{pet_name}")
+        else template_dir
+        / "runs"
+        / _slug(f"{pet_source.stem}-{pet_name or 'no-name'}")
     )
     print_requested = args.print_dir is not None
     if print_requested and profile is None:
@@ -592,7 +600,9 @@ def run_pipeline(
     if reuse_layout:
         try:
             existing_layout = load_layout(template_dir, layout_path)
-            resolve_ofl_license(existing_layout.font_path)
+            if existing_layout.has_name:
+                assert existing_layout.font_path is not None
+                resolve_ofl_license(existing_layout.font_path)
         except (ConfigError, FontLicenseError) as exc:
             raise PipelineError(str(exc)) from exc
 
@@ -706,6 +716,7 @@ def run_pipeline(
             _generation_args(
                 reference_design=source_references,
                 pet_image=None,
+                pet_name=None,
                 prompt_file=art_prompt_source,
                 api_key_file=args.api_key_file,
                 output_dir=template_dir,
@@ -727,6 +738,7 @@ def run_pipeline(
             _generation_args(
                 reference_design=source_references,
                 pet_image=staged_pet,
+                pet_name=pet_name,
                 prompt_file=pet_prompt_source,
                 api_key_file=args.api_key_file,
                 output_dir=run_dir,
@@ -766,10 +778,19 @@ def run_pipeline(
             open_browser=not args.no_open,
         )
     active_layout = load_layout(template_dir, layout_path)
-    try:
-        active_font_license = resolve_ofl_license(active_layout.font_path)
-    except FontLicenseError as exc:
-        raise PipelineError(str(exc)) from exc
+    if active_layout.has_name and pet_name is None:
+        raise PipelineError(
+            "--pet-name is required because the selected layout contains a "
+            "separate name layer; provide a name or disable the name layer in "
+            "the layout editor"
+        )
+    active_font_license = None
+    if active_layout.has_name:
+        assert active_layout.font_path is not None
+        try:
+            active_font_license = resolve_ofl_license(active_layout.font_path)
+        except FontLicenseError as exc:
+            raise PipelineError(str(exc)) from exc
 
     announce("Render final preview and debug overlay")
     render_to_files(
@@ -837,8 +858,8 @@ def run_pipeline(
         "preview": str(preview),
         "preview_debug": str(preview_debug),
         "product_profile": str(staged_profile) if profile is not None else None,
-        "font": str(active_layout.font_path),
-        "font_license": str(active_font_license),
+        "font": str(active_layout.font_path) if active_layout.font_path else None,
+        "font_license": str(active_font_license) if active_font_license else None,
         "print_art": str(template_print_outputs.art) if template_print_outputs else None,
         "print_transformed_pet": str(pet_print_outputs.pet) if pet_print_outputs else None,
         "print_layout": str(template_print_outputs.layout) if template_print_outputs else None,

@@ -30,6 +30,15 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(layout.art_relative, "art.png")
         self.assertEqual(layout.schema_version, 2)
 
+    def test_loads_layout_without_separate_name_layer(self) -> None:
+        data = layout_data()
+        del data["name"]
+        layout = parse_layout(data, self.root)
+
+        self.assertFalse(layout.has_name)
+        self.assertIsNone(layout.font_path)
+        self.assertNotIn("name", layout.to_dict())
+
     def test_rejects_layout_v1(self) -> None:
         data = layout_data()
         data["schema_version"] = 1

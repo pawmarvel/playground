@@ -83,6 +83,80 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("input_fidelity", request)
         self.assertNotIn("service_tier", request)
 
+    def test_substitutes_pet_name_placeholder_before_api_call(self) -> None:
+        self.prompt.write_text(
+            "BACKGROUND = TRANSPARENT\nRender {{PET_NAME}} as artistic lettering.",
+            encoding="utf-8",
+        )
+        client = FakeClient()
+
+        generate(
+            self.args(
+                "--pet-name",
+                "  Cooper  ",
+                "--output-dir",
+                str(self.root / "output"),
+            ),
+            client=client,
+        )
+
+        self.assertIn("Render Cooper as artistic lettering", client.images.kwargs["prompt"])
+        self.assertNotIn("{{PET_NAME}}", client.images.kwargs["prompt"])
+
+    def test_pet_name_placeholder_requires_pet_name(self) -> None:
+        self.prompt.write_text(
+            "Render {{PET_NAME}} as artistic lettering.", encoding="utf-8"
+        )
+        client = FakeClient()
+
+        with self.assertRaisesRegex(UserInputError, "provide --pet-name"):
+            generate(self.args(), client=client)
+
+        self.assertEqual(client.images.call_count, 0)
+
+    def test_unused_pet_name_warns_and_does_not_block_api_call(self) -> None:
+        self.prompt.write_text(
+            "Transform only the pet cutout.", encoding="utf-8"
+        )
+        client = FakeClient()
+        stderr = io.StringIO()
+
+        with redirect_stderr(stderr):
+            generate(
+                self.args(
+                    "--pet-name",
+                    "Cooper",
+                    "--output-dir",
+                    str(self.root / "output"),
+                ),
+                client=client,
+            )
+
+        self.assertEqual(client.images.call_count, 1)
+        self.assertIn("Transform only the pet cutout.", client.images.kwargs["prompt"])
+        self.assertNotIn("Cooper", client.images.kwargs["prompt"])
+        self.assertIn("prompt contains no {{PET_NAME}} placeholder", stderr.getvalue())
+
+    def test_pet_name_placeholder_requires_pet_image(self) -> None:
+        self.prompt.write_text(
+            "Render {{PET_NAME}} as artistic lettering.", encoding="utf-8"
+        )
+        args = build_parser().parse_args(
+            [
+                "--reference-design",
+                str(self.sample),
+                "--pet-name",
+                "Cooper",
+                "--prompt-file",
+                str(self.prompt),
+                "--api-key-file",
+                str(self.api_key_file),
+            ]
+        )
+
+        with self.assertRaisesRegex(UserInputError, "transformed-pet generation"):
+            generate(args, client=FakeClient())
+
     def test_reference_only_generation_is_supported(self) -> None:
         client = FakeClient()
         args = build_parser().parse_args(

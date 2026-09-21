@@ -215,6 +215,21 @@ def validate_layout_pair(preview: Layout, print_layout: Layout) -> None:
                 actual=print_layout.pet_box,
             )
         )
+    if print_layout.has_name != preview.has_name:
+        raise BundleError(
+            mismatch(
+                "layout-print name-layer mode",
+                expected=preview.has_name,
+                actual=print_layout.has_name,
+            )
+        )
+    if not preview.has_name:
+        return
+    assert preview.name_box is not None
+    assert print_layout.name_box is not None
+    assert preview.font_size_px is not None
+    assert preview.min_font_size_px is not None
+    assert preview.name_padding_px is not None
     expected_name_box = _scaled_rect(preview.name_box, scale)
     if print_layout.name_box != expected_name_box:
         raise BundleError(

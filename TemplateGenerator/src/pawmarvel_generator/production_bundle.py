@@ -432,13 +432,18 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         "alpha_failure": "reject",
     }:
         raise BundleError("runtime normalization policy is unsupported")
-    if manifest.get("renderer") != {
+    expected_renderer = {
         "layout_schema_version": 2,
         "pet_fit": "contain-visible-alpha",
         "pet_anchor": "bottom-center",
-        "name_fit": "nominal-size-shrink-only-visible-ink-contain",
+        "name_mode": "layout-text" if preview.has_name else "embedded-in-pet",
         "version": 2,
-    }:
+    }
+    if preview.has_name:
+        expected_renderer["name_fit"] = (
+            "nominal-size-shrink-only-visible-ink-contain"
+        )
+    if manifest.get("renderer") != expected_renderer:
         raise BundleError("renderer semantics are unsupported")
     provenance = manifest.get("provenance")
     if not isinstance(provenance, dict):
@@ -568,6 +573,15 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         if not isinstance(descriptor, dict) or set(descriptor) != fields:
             raise BundleError(f"provenance.selected.{component} is invalid")
         for field, value in descriptor.items():
+            if component == "layout_font" and field == "font_sha256":
+                if preview.has_name:
+                    require_sha256(value, f"provenance.selected.{component}.{field}")
+                elif value is not None:
+                    raise BundleError(
+                        "provenance.selected.layout_font.font_sha256 must be null "
+                        "when layout.name is absent"
+                    )
+                continue
             if field.endswith("sha256"):
                 require_sha256(value, f"provenance.selected.{component}.{field}")
             else:
@@ -656,15 +670,23 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         art_prompt_name,
         pet_prompt_name,
         *refs,
-        preview.font_relative,
-        str(PurePosixPath(preview.font_relative).parent / "OFL.txt"),
         "qa/transformed-pet.png",
         "qa/input-pet.png",
         "qa/golden-preview.png",
         "qa/golden-preview-debug.png",
     }
+    if preview.has_name:
+        assert preview.font_relative is not None
+        required_assets.update(
+            {
+                preview.font_relative,
+                str(PurePosixPath(preview.font_relative).parent / "OFL.txt"),
+            }
+        )
     font_source = root / "fonts" / "source.json"
     font_metadata = root / "fonts" / "METADATA.pb"
+    if not preview.has_name and (font_source.exists() or font_metadata.exists()):
+        raise BundleError("font provenance is not allowed when layout.name is absent")
     if font_source.exists() != font_metadata.exists():
         raise BundleError(
             "remote font provenance requires both fonts/source.json and fonts/METADATA.pb"
@@ -692,6 +714,7 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
             not isinstance(family_id, str)
             or re.fullmatch(r"[a-z0-9]{2,80}", family_id) is None
             or source.get("source_url") != expected_source_url
+            or preview.font_path is None
             or source.get("font_filename") != preview.font_path.name
         ):
             raise BundleError(
@@ -728,10 +751,6 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
             selected["art"]["artifact_sha256"],
             root / "art.png",
         ),
-        "provenance.selected.layout_font.font_sha256": (
-            selected["layout_font"]["font_sha256"],
-            preview.font_path,
-        ),
         "provenance.representative_pet_sha256": (
             provenance["representative_pet_sha256"],
             root / "qa" / "transformed-pet.png",
@@ -741,6 +760,12 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
             root / "print" / "art.png",
         ),
     }
+    if preview.has_name:
+        assert preview.font_path is not None
+        provenance_hashes["provenance.selected.layout_font.font_sha256"] = (
+            selected["layout_font"]["font_sha256"],
+            preview.font_path,
+        )
     for label, (expected_hash, artifact) in provenance_hashes.items():
         actual_hash = sha256(artifact)
         if expected_hash != actual_hash:
@@ -759,12 +784,14 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
                 actual=print_layout.font_relative,
             )
         )
-    if re.fullmatch(r"fonts/[A-Za-z0-9._-]+\.ttf", preview.font_relative) is None:
-        raise BundleError("bundle layout font must use fonts/<filename>.ttf")
-    try:
-        resolve_ofl_license(preview.font_path)
-    except FontLicenseError as exc:
-        raise BundleError(str(exc)) from exc
+    if preview.has_name:
+        assert preview.font_relative is not None and preview.font_path is not None
+        if re.fullmatch(r"fonts/[A-Za-z0-9._-]+\.ttf", preview.font_relative) is None:
+            raise BundleError("bundle layout font must use fonts/<filename>.ttf")
+        try:
+            resolve_ofl_license(preview.font_path)
+        except FontLicenseError as exc:
+            raise BundleError(str(exc)) from exc
     validate_raster(
         root / "art.png",
         "art.png",
@@ -937,7 +964,7 @@ def build_from_selection(
     selected_art = art_attempt / "outputs" / "art.png"
     selected_layout = layout_attempt / "outputs" / "layout.json"
     selected_layout_value = load_layout(layout_attempt / "outputs")
-    hash_checks = (
+    hash_checks = [
         (
             "selection art hash",
             selected.get("art", {}).get("artifact_sha256"),
@@ -949,16 +976,20 @@ def build_from_selection(
             selected_layout,
         ),
         (
-            "selection font hash",
-            selected.get("layout_font", {}).get("font_sha256"),
-            selected_layout_value.font_path,
-        ),
-        (
             "selection pet runtime hash",
             selected.get("pet_runtime", {}).get("experiment_sha256"),
             pet_experiment / "experiment.json",
         ),
-    )
+    ]
+    if selected_layout_value.has_name:
+        assert selected_layout_value.font_path is not None
+        hash_checks.append(
+            (
+                "selection font hash",
+                selected.get("layout_font", {}).get("font_sha256"),
+                selected_layout_value.font_path,
+            )
+        )
     for label, expected_hash, artifact_path in hash_checks:
         actual_hash = sha256(artifact_path)
         if expected_hash != actual_hash:
@@ -1336,13 +1367,17 @@ def build_from_selection(
         for index, reference in enumerate(references, 1):
             validate_raster(reference, f"finished reference design {index}")
 
-        try:
-            font_license = resolve_ofl_license(preview_layout.font_path)
-        except FontLicenseError as exc:
-            raise BundleError(str(exc)) from exc
+        font_license = None
+        if preview_layout.has_name:
+            assert preview_layout.font_path is not None
+            try:
+                font_license = resolve_ofl_license(preview_layout.font_path)
+            except FontLicenseError as exc:
+                raise BundleError(str(exc)) from exc
         (partial / "print").mkdir()
         (partial / "qa").mkdir()
-        (partial / "fonts").mkdir()
+        if preview_layout.has_name:
+            (partial / "fonts").mkdir()
         shutil.copyfile(selected_art, partial / "art.png")
         shutil.copyfile(print_art, partial / "print" / "art.png")
         shutil.copyfile(
@@ -1358,21 +1393,23 @@ def build_from_selection(
         shutil.copyfile(profile_path, partial / "product-profile.json")
         shutil.copyfile(art_prompt, partial / art_prompt_name)
         shutil.copyfile(pet_prompt, partial / pet_prompt_name)
-        shutil.copyfile(
-            preview_layout.font_path,
-            partial / "fonts" / preview_layout.font_path.name,
-        )
-        shutil.copyfile(font_license, partial / "fonts" / "OFL.txt")
-        source_font_dir = preview_layout.font_path.parent
-        remote_source = source_font_dir / "source.json"
-        remote_metadata = source_font_dir / "METADATA.pb"
-        if remote_source.exists() != remote_metadata.exists():
-            raise BundleError(
-                "selected remote font requires both source.json and METADATA.pb"
+        if preview_layout.has_name:
+            assert preview_layout.font_path is not None and font_license is not None
+            shutil.copyfile(
+                preview_layout.font_path,
+                partial / "fonts" / preview_layout.font_path.name,
             )
-        if remote_source.is_file() and remote_metadata.is_file():
-            shutil.copyfile(remote_source, partial / "fonts" / "source.json")
-            shutil.copyfile(remote_metadata, partial / "fonts" / "METADATA.pb")
+            shutil.copyfile(font_license, partial / "fonts" / "OFL.txt")
+            source_font_dir = preview_layout.font_path.parent
+            remote_source = source_font_dir / "source.json"
+            remote_metadata = source_font_dir / "METADATA.pb"
+            if remote_source.exists() != remote_metadata.exists():
+                raise BundleError(
+                    "selected remote font requires both source.json and METADATA.pb"
+                )
+            if remote_source.is_file() and remote_metadata.is_file():
+                shutil.copyfile(remote_source, partial / "fonts" / "source.json")
+                shutil.copyfile(remote_metadata, partial / "fonts" / "METADATA.pb")
         for source, relative in zip(references, refs, strict=True):
             target = partial / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -1383,10 +1420,16 @@ def build_from_selection(
 
         preview_layout_data = preview_layout.to_dict()
         preview_layout_data["art"] = "art.png"
-        preview_layout_data["name"]["font"] = f"fonts/{preview_layout.font_path.name}"
         print_layout_data = print_layout_value.to_dict()
         print_layout_data["art"] = "print/art.png"
-        print_layout_data["name"]["font"] = f"fonts/{preview_layout.font_path.name}"
+        if preview_layout.has_name:
+            assert preview_layout.font_path is not None
+            preview_layout_data["name"]["font"] = (
+                f"fonts/{preview_layout.font_path.name}"
+            )
+            print_layout_data["name"]["font"] = (
+                f"fonts/{preview_layout.font_path.name}"
+            )
         atomic_json(partial / "layout.json", preview_layout_data)
         atomic_json(partial / "layout-print.json", print_layout_data)
         render_to_files(
@@ -1436,7 +1479,18 @@ def build_from_selection(
                 "layout_schema_version": 2,
                 "pet_fit": "contain-visible-alpha",
                 "pet_anchor": "bottom-center",
-                "name_fit": "nominal-size-shrink-only-visible-ink-contain",
+                "name_mode": (
+                    "layout-text" if preview_layout.has_name else "embedded-in-pet"
+                ),
+                **(
+                    {
+                        "name_fit": (
+                            "nominal-size-shrink-only-visible-ink-contain"
+                        )
+                    }
+                    if preview_layout.has_name
+                    else {}
+                ),
                 "version": 2,
             },
             "personalization": {"pet_name": name_policy},

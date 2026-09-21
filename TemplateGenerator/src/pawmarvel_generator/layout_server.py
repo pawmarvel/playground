@@ -221,9 +221,11 @@ def _validate_editor_config(
     additional_fonts: list[Path] = []
     if resolved.output.is_file():
         try:
-            additional_fonts.append(
-                load_layout(resolved.template_dir, resolved.output).font_path
-            )
+            existing_font = load_layout(
+                resolved.template_dir, resolved.output
+            ).font_path
+            if existing_font is not None:
+                additional_fonts.append(existing_font)
         except ConfigError:
             pass
     try:
@@ -456,7 +458,7 @@ def _ranking_response(
 
 
 def _preview_fingerprint(
-    layout: Layout, selected_font: FontCandidate, pet_name: str,
+    layout: Layout, selected_font: FontCandidate, pet_name: str | None,
     pet_sha256: str,
 ) -> str:
     canonical = json.dumps(
@@ -499,8 +501,6 @@ def _draft_layout(
     draft.pop("model", None)
     draft["schema_version"] = 2
     name = draft.get("name")
-    if not isinstance(name, dict):
-        raise ConfigError("layout.name must be an object")
     requested_font = payload.get("font_id")
     if requested_font is None:
         candidate = _candidate_for_layout(candidates, draft)
@@ -515,13 +515,16 @@ def _draft_layout(
         )
         if candidate is None:
             raise ConfigError("selected font is not in the eligible OFL catalog")
-    name["font"] = candidate.relative_name
+    if name is not None:
+        if not isinstance(name, dict):
+            raise ConfigError("layout.name must be an object when configured")
+        name["font"] = candidate.relative_name
     return (
         parse_layout(
             draft,
             config.template_dir,
             art_override=config.art,
-            font_override=candidate.font,
+            font_override=candidate.font if name is not None else None,
         ),
         candidate,
     )
@@ -550,12 +553,21 @@ def _make_handler(
         }
     initial_font_reference = _initial_font_reference(config)
     initial_layout_reference = _initial_layout_reference(config)
-    initial_layout = _initial_layout(
+    saved_initial_layout = _initial_layout(
         config, initial_font_reference, initial_layout_reference
     )
+    name_enabled = "name" in saved_initial_layout
+    if name_enabled:
+        initial_layout = saved_initial_layout
+    else:
+        initial_layout = _default_layout(
+            config, initial_font_reference, initial_layout_reference
+        )
+        initial_layout["art"] = saved_initial_layout["art"]
+        initial_layout["pet"] = saved_initial_layout["pet"]
     selected_candidate = _candidate_for_layout(candidates, initial_layout)
     initial_ranking: dict[str, Any] | None = None
-    if initial_font_reference is not None:
+    if name_enabled and initial_font_reference is not None:
         try:
             matches = rank_fonts(
                 config.reference, initial_font_reference, candidates
@@ -567,6 +579,7 @@ def _make_handler(
             initial_ranking = None
     if (
         config.auto_font
+        and name_enabled
         and not config.output.is_file()
         and initial_ranking
         and initial_ranking["recommendation"]["confidence_score"] > 0
@@ -606,7 +619,8 @@ def _make_handler(
             )
     initial_layout["name"]["font"] = selected_candidate.relative_name
     initial_font_confirmed = (
-        not config.auto_font
+        not name_enabled
+        or not config.auto_font
         or config.output.is_file()
         or bool(
             initial_ranking
@@ -615,6 +629,7 @@ def _make_handler(
     )
     bootstrap = {
         "layout": initial_layout,
+        "nameEnabled": name_enabled,
         "canvas": canvas,
         "petName": config.pet_name,
         "referenceDataUrl": _data_url(config.reference),
@@ -1042,6 +1057,12 @@ def _make_handler(
                     layout, selected_font = _draft_layout(
                         config, candidate_snapshot(), payload
                     )
+                    if not layout.has_name:
+                        raise ConfigError(
+                            "font-size calibration requires layout.name"
+                        )
+                    assert layout.name_box is not None
+                    assert layout.name_padding_px is not None
                     recommendation = recommend_font_size(
                         config.reference,
                         font_reference,
@@ -1073,9 +1094,11 @@ def _make_handler(
                     )
                     return
                 revision = _request_revision(payload)
-                pet_name = _request_pet_name(payload)
                 layout, selected_font = _draft_layout(
                     config, candidate_snapshot(), payload
+                )
+                pet_name = (
+                    _request_pet_name(payload) if layout.has_name else None
                 )
                 preview_pet, preview_pet_descriptor = selected_preview_pet(payload)
                 fingerprint = _preview_fingerprint(
@@ -1104,10 +1127,16 @@ def _make_handler(
                         _png_bytes(preview.image),
                         headers={
                             "X-PawMarvel-Preview-Revision": str(revision),
-                            "X-PawMarvel-Applied-Font-Size": str(
-                                preview.text.applied_font_size_px
+                            "X-PawMarvel-Applied-Font-Size": (
+                                str(preview.text.applied_font_size_px)
+                                if preview.text is not None
+                                else ""
                             ),
-                            "X-PawMarvel-Text-Fit": preview.text.fit,
+                            "X-PawMarvel-Text-Fit": (
+                                preview.text.fit
+                                if preview.text is not None
+                                else "not-applicable"
+                            ),
                         },
                     )
                     return
@@ -1125,7 +1154,7 @@ def _make_handler(
                 requested_font_reference = payload.get("font_reference")
                 font_reference = None
                 ranking = None
-                if requested_font_reference is not None:
+                if layout.has_name and requested_font_reference is not None:
                     font_reference = _request_font_reference(
                         payload, config.reference
                     )
@@ -1147,7 +1176,7 @@ def _make_handler(
                         raise ConfigError(
                             "layout reference name_region must match font reference region"
                         )
-                if config.auto_font:
+                if layout.has_name and config.auto_font:
                     if payload.get("font_selection_confirmed") is not True:
                         raise ConfigError(
                             "select a ranked font before saving the layout"
@@ -1187,21 +1216,24 @@ def _make_handler(
                 )
                 bundled_font = config.template_dir / selected_font.relative_name
                 bundled_license = config.template_dir / "fonts" / "OFL.txt"
-                bundled_font.parent.mkdir(parents=True, exist_ok=True)
-                if selected_font.font != bundled_font:
-                    _atomic_write_bytes(bundled_font, selected_font.font.read_bytes())
-                bundled_license.parent.mkdir(parents=True, exist_ok=True)
-                if selected_font.license != bundled_license:
-                    _atomic_write_bytes(
-                        bundled_license, selected_font.license.read_bytes()
-                    )
+                if layout.has_name:
+                    bundled_font.parent.mkdir(parents=True, exist_ok=True)
+                    if selected_font.font != bundled_font:
+                        _atomic_write_bytes(
+                            bundled_font, selected_font.font.read_bytes()
+                        )
+                    bundled_license.parent.mkdir(parents=True, exist_ok=True)
+                    if selected_font.license != bundled_license:
+                        _atomic_write_bytes(
+                            bundled_license, selected_font.license.read_bytes()
+                        )
                 with font_candidates_lock:
                     remote_source = remote_font_sources.get(
                         selected_font.candidate_id
                     )
                 source_output = config.template_dir / "fonts" / "source.json"
                 metadata_output = config.template_dir / "fonts" / "METADATA.pb"
-                if remote_source is not None:
+                if layout.has_name and remote_source is not None:
                     metadata_path = Path(str(remote_source["metadata_path"]))
                     public_source = {
                         key: value
@@ -1213,14 +1245,14 @@ def _make_handler(
                         (json.dumps(public_source, indent=2) + "\n").encode("utf-8"),
                     )
                     _atomic_write_bytes(metadata_output, metadata_path.read_bytes())
-                else:
+                elif layout.has_name:
                     source_output.unlink(missing_ok=True)
                     metadata_output.unlink(missing_ok=True)
                 saved_layout = parse_layout(
                     layout.to_dict(),
                     config.template_dir,
                     art_override=config.art,
-                    font_override=bundled_font,
+                    font_override=bundled_font if layout.has_name else None,
                 )
                 write_layout(config.output, saved_layout)
                 _atomic_write_bytes(
@@ -1231,9 +1263,10 @@ def _make_handler(
                 fixture = {
                     "schema_version": 1,
                     "pet_name": pet_name,
+                    "name_mode": (
+                        "layout-text" if layout.has_name else "embedded-in-pet"
+                    ),
                     "revision": revision,
-                    "applied_font_size_px": calibration.text.applied_font_size_px,
-                    "text_fit": calibration.text.fit,
                     "layout_sha256": hashlib.sha256(
                         config.output.read_bytes()
                     ).hexdigest(),
@@ -1241,6 +1274,11 @@ def _make_handler(
                     "transformed_pet": preview_pet_descriptor,
                     "tested_transformed_pets": tested_pet_descriptors,
                 }
+                if calibration.text is not None:
+                    fixture["applied_font_size_px"] = (
+                        calibration.text.applied_font_size_px
+                    )
+                    fixture["text_fit"] = calibration.text.fit
                 _atomic_write_bytes(
                     config.calibration_fixture_output,
                     (json.dumps(fixture, indent=2) + "\n").encode("utf-8"),
@@ -1253,7 +1291,7 @@ def _make_handler(
                             json.dumps(layout_reference.to_dict(), indent=2) + "\n"
                         ).encode("utf-8"),
                     )
-                if font_reference is not None and ranking is not None:
+                if layout.has_name and font_reference is not None and ranking is not None:
                     _atomic_write_bytes(
                         config.font_reference_output,
                         (
@@ -1310,11 +1348,20 @@ def _make_handler(
                     "revision": revision,
                     "layout_sha256": fixture["layout_sha256"],
                     "pet_name": pet_name,
-                    "text_metrics": calibration.text.to_dict(),
-                    "font": str(bundled_font),
-                    "font_license": str(bundled_license),
-                    "font_id": selected_font.candidate_id,
-                    "font_label": selected_font.label,
+                    "name_mode": fixture["name_mode"],
+                    "text_metrics": (
+                        calibration.text.to_dict()
+                        if calibration.text is not None
+                        else None
+                    ),
+                    "font": str(bundled_font) if layout.has_name else None,
+                    "font_license": (
+                        str(bundled_license) if layout.has_name else None
+                    ),
+                    "font_id": (
+                        selected_font.candidate_id if layout.has_name else None
+                    ),
+                    "font_label": selected_font.label if layout.has_name else None,
                     "font_reference": (
                         str(config.font_reference_output)
                         if font_reference is not None and ranking is not None

@@ -728,7 +728,8 @@ finished-design references. Before paying for a smoke benchmark, confirm:
   finished-design reference;
 - supporting references clarify style without overriding the primary reference;
 - the PNG contains only the transformed pet with usable transparency—no design
-  background, personalized text, template artwork, shadow, or mockup; and
+  background, template artwork, shadow, or mockup. It also contains no text
+  unless this experiment intentionally uses the artistic-name mode below; and
 - the profile dimensions and representative-call latency are acceptable.
 
 Once one result is credible, promote only the prompt text into a named candidate
@@ -751,6 +752,23 @@ the model or quality must change, update the corresponding config value and the
 candidate filename/experiment ID before promotion. The overwritten scratch
 states require no cleanup or retention; the immutable experiment is the first
 durable record.
+
+For a design whose personalized name must be generated as part of the same
+artistic pet layer, put the exact, case-sensitive token `{{PET_NAME}}` in the
+pet prompt and pass `--pet-name`. The generator normalizes and validates the
+name, replaces every occurrence before the API call, and records the value in
+the immutable pet-attempt `run.json`. A prompt containing the token is rejected
+before a paid call if `--pet-name` is absent. The argument is optional for a
+normal pet-only prompt. If `--pet-name` is supplied to a prompt without the
+token, the generator prints a warning, leaves the prompt unchanged, and
+continues the API call. This makes an accidentally unused name visible without
+blocking the run.
+
+Use artistic-name mode deliberately: its lettering is baked into
+`transformed-pet.png`. During layout authoring, turn off **Render a separate
+pet-name text layer**. The saved `layout.json` then omits `name`; preview and
+print rendering place the combined pet-and-lettering PNG without adding a
+second name. Keep the switch on for the standard deterministic OFL-font mode.
 
 Use the two fixture tiers deliberately:
 
@@ -994,6 +1012,14 @@ Use `--reference-text "CHARLIE"` only as an initial UI convenience when no saved
 region artifact exists. This value must match the visible text in the primary
 reference; it is separate from the `COOPER` personalized preview name.
 
+For an experiment whose selected transformed-pet output already contains its
+artistic name, turn off **Render a separate pet-name text layer** before drawing
+geometry. Select and apply only the pet region, which must contain both the pet
+and its generated lettering. Do not select a name region or font. The editor
+saves a layout with only `art` and `pet`, records `name_mode` as
+`embedded-in-pet`, and does not create `fonts/`, `qa/font-reference.json`, or
+`qa/font-recommendation.json`. The same preview renderer remains authoritative.
+
 The mapped boxes are initial recommendations. A screenshot can have a different
 aspect ratio, and generated art can reflow fixed decorations, so adjust the
 boxes against the actual art/pet output before saving. If fixed art elements
@@ -1073,18 +1099,22 @@ this editor session; they do not change the experiment's pinned pet and are not
 copied into the bundle. Switch back to **Pinned experiment pet** for the final
 calibration preview unless an alternate fixture is intentionally preferred.
 
-The name is QA input and is not saved in `layout.json`. The last successfully
+In separate-text mode, the name is QA input and is not saved in `layout.json`.
+The last successfully
 previewed name and active pet are saved in `qa/calibration-fixture.json`, along
 with the hashes of every transformed pet previewed during the session. These
-records are copied into the immutable attempt for traceability.
+records are copied into the immutable attempt for traceability. In
+artistic-name mode, that fixture stores `pet_name: null` because the lettering
+is already part of the transformed-pet pixels.
 
 The displayed image is always produced by the same Pillow renderer used by
 assembly. A changed control marks the old image stale, cancels the earlier
 request, and disables Save until the current revision finishes. The status
 shows whether the configured nominal size was used or the name was shrunk. The
-attempt owns its `layout.json`, selected font/OFL license, exact calibration
-preview, `qa/layout-reference.json`, `qa/font-reference.json`,
-`qa/font-recommendation.json`, preview, and debug preview.
+attempt owns its `layout.json`, exact calibration preview, preview, and debug
+preview. Separate-text mode additionally owns the selected font/OFL license,
+`qa/layout-reference.json`, `qa/font-reference.json`, and
+`qa/font-recommendation.json`.
 For a remotely explored selected face, `fonts/METADATA.pb` and
 `fonts/source.json` are also owned by the attempt.
 
@@ -1271,8 +1301,8 @@ print-candidates/print-finalist-0001/
     pet-print-manifest.json
     final-print.png
     final-print-debug.png
-    fonts/<selected-font>.ttf
-    fonts/OFL.txt
+    fonts/<selected-font>.ttf        # separate-text mode only
+    fonts/OFL.txt                    # separate-text mode only
 ```
 
 ### Optional reuse after a pet-only print change
@@ -1488,7 +1518,7 @@ s3://alphapaw-pod-designer-prod/Template/MVP-test/
           reference-design-0002.png
         print/
           art.png                           # high-resolution reusable print art
-        fonts/
+        fonts/                              # separate-text mode only
           <selected-font>.ttf
           OFL.txt
           METADATA.pb                       # only for a remotely explored font
@@ -1958,8 +1988,8 @@ work/scratch/cooper/blanket-king-9375x12375/
     product-profile.json
     art.png
     layout.json
-    fonts/<selected-font>.ttf
-    fonts/OFL.txt
+    fonts/<selected-font>.ttf        # separate-text mode only
+    fonts/OFL.txt                    # separate-text mode only
     fonts/METADATA.pb              # only for a remotely explored font
     fonts/source.json              # only for a remotely explored font
   runs/sausage-dog-puppy/

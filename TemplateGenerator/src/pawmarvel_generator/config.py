@@ -53,25 +53,39 @@ class Layout:
     canvas_width: int
     canvas_height: int
     pet_box: Rect
-    font_relative: str
-    font_path: Path
-    name_box: Rect
-    font_size_px: int
-    min_font_size_px: int
-    name_padding_px: int
-    name_fit: str
-    color: str
-    horizontal_align: str
+    font_relative: str | None = None
+    font_path: Path | None = None
+    name_box: Rect | None = None
+    font_size_px: int | None = None
+    min_font_size_px: int | None = None
+    name_padding_px: int | None = None
+    name_fit: str | None = None
+    color: str | None = None
+    horizontal_align: str | None = None
     schema_version: int = 2
 
+    @property
+    def has_name(self) -> bool:
+        return self.name_box is not None
+
     def to_dict(self) -> dict[str, Any]:
-        result = {
+        result: dict[str, Any] = {
             "schema_version": 2,
             "art": self.art_relative,
             "pet": {
                 "box": self.pet_box.to_dict(),
             },
-            "name": {
+        }
+        if self.has_name:
+            assert self.name_box is not None
+            assert self.font_relative is not None
+            assert self.font_size_px is not None
+            assert self.min_font_size_px is not None
+            assert self.name_padding_px is not None
+            assert self.name_fit is not None
+            assert self.color is not None
+            assert self.horizontal_align is not None
+            result["name"] = {
                 "box": self.name_box.to_dict(),
                 "font": self.font_relative,
                 "font_size_px": self.font_size_px,
@@ -80,8 +94,7 @@ class Layout:
                 "padding_px": self.name_padding_px,
                 "color": self.color.upper(),
                 "horizontal_align": self.horizontal_align,
-            },
-        }
+            }
         return result
 
 
@@ -169,12 +182,13 @@ def parse_layout(
 ) -> Layout:
     template_dir = template_dir.expanduser().resolve()
     data = _require_mapping(value, "layout")
-    required_keys = {"schema_version", "art", "pet", "name"}
+    required_keys = {"schema_version", "art", "pet"}
+    allowed_keys = required_keys | {"name"}
     missing = required_keys - set(data)
     schema_version = data.get("schema_version")
     if schema_version != 2:
         raise ConfigError("schema_version must be 2")
-    unknown = set(data) - required_keys
+    unknown = set(data) - allowed_keys
     if missing:
         raise ConfigError(f"layout is missing: {', '.join(sorted(missing))}")
     if unknown:
@@ -191,7 +205,20 @@ def parse_layout(
     _require_exact_keys(pet, {"box"}, "pet")
     pet_box = _parse_rect(pet["box"], "pet.box")
 
-    name = _require_mapping(data["name"], "name")
+    name_value = data.get("name")
+    if name_value is None:
+        _validate_rect_intersection(pet_box, canvas_width, canvas_height, "pet.box")
+        return Layout(
+            template_dir=template_dir,
+            art_relative=art_relative,
+            art_path=art_path,
+            canvas_width=canvas_width,
+            canvas_height=canvas_height,
+            pet_box=pet_box,
+            schema_version=schema_version,
+        )
+
+    name = _require_mapping(name_value, "name")
     _require_exact_keys(
         name,
         {

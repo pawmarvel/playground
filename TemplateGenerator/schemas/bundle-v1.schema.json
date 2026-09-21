@@ -102,7 +102,7 @@
     },
     "assets": {
       "type": "array",
-      "minItems": 14,
+      "minItems": 12,
       "maxItems": 19,
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/asset"}
@@ -175,14 +175,22 @@
     "renderer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["layout_schema_version", "pet_fit", "pet_anchor", "name_fit", "version"],
+      "required": ["layout_schema_version", "pet_fit", "pet_anchor", "name_mode", "version"],
       "properties": {
         "layout_schema_version": {"const": 2},
         "pet_fit": {"const": "contain-visible-alpha"},
         "pet_anchor": {"const": "bottom-center"},
+        "name_mode": {"enum": ["layout-text", "embedded-in-pet"]},
         "name_fit": {"const": "nominal-size-shrink-only-visible-ink-contain"},
         "version": {"const": 2}
-      }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"name_mode": {"const": "layout-text"}}},
+          "then": {"required": ["name_fit"]},
+          "else": {"not": {"required": ["name_fit"]}}
+        }
+      ]
     },
     "petNamePolicy": {
       "type": "object",
@@ -249,7 +257,12 @@
             "experiment_id": {"$ref": "#/$defs/nonEmptyString"},
             "attempt_id": {"$ref": "#/$defs/nonEmptyString"},
             "layout_sha256": {"$ref": "#/$defs/sha256"},
-            "font_sha256": {"$ref": "#/$defs/sha256"}
+            "font_sha256": {
+              "oneOf": [
+                {"$ref": "#/$defs/sha256"},
+                {"type": "null"}
+              ]
+            }
           }
         }
       }

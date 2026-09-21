@@ -10,6 +10,8 @@ const statusNode = document.querySelector("#status");
 const metricsNode = document.querySelector("#text-metrics");
 const fontReferenceStatus = document.querySelector("#font-reference-status");
 const petNameInput = document.querySelector("#preview-pet-name");
+const nameLayerToggle = document.querySelector("#name-layer-enabled");
+const nameLayerControls = document.querySelector("#name-layer-controls");
 const previewPetSelect = document.querySelector("#preview-pet");
 const previewPetUpload = document.querySelector("#preview-pet-upload");
 const referenceTextInput = document.querySelector("#reference-text");
@@ -35,6 +37,7 @@ referenceCanvas.width = boot.referenceCanvas.width;
 referenceCanvas.height = boot.referenceCanvas.height;
 
 let previewImage = null;
+let nameEnabled = boot.nameEnabled;
 let previewTimer = null;
 let previewController = null;
 let drag = null;
@@ -75,6 +78,7 @@ referenceImage.onload = () => {
 referenceImage.src = boot.referenceDataUrl;
 
 function currentFontReference() {
+  if (!nameEnabled) return null;
   if (!referenceRegion || !referenceTextInput.value.trim()) return null;
   return {
     region: structuredClone(referenceRegion),
@@ -83,6 +87,7 @@ function currentFontReference() {
 }
 
 function currentLayoutReference() {
+  if (!nameEnabled) return null;
   if (!petReferenceRegion || !referenceRegion) return null;
   return {
     pet_region: structuredClone(petReferenceRegion),
@@ -100,11 +105,13 @@ function setReferenceSelectionMode(mode) {
 }
 
 function setApplyReferenceEnabled() {
-  applyReferenceLayoutButton.disabled = editorLocked || !currentLayoutReference();
+  applyReferenceLayoutButton.disabled = editorLocked || (
+    nameEnabled ? !currentLayoutReference() : !petReferenceRegion
+  );
 }
 
 function canSave() {
-  const fontReady = !boot.autoFont ||
+  const fontReady = !nameEnabled || !boot.autoFont ||
     (fontSelectionConfirmed && rankedReferenceRevision === fontReferenceRevision);
   const referenceGeometryReady = !currentLayoutReference() || referenceGeometryApplied;
   return !editorLocked && renderedRevision === stateRevision && fontReady && referenceGeometryReady;
@@ -116,8 +123,30 @@ function setSaveEnabled() {
 
 function canCalibrateFontSize() {
   return Boolean(
-    fontRanking && selectedFontId && (!boot.autoFont || fontSelectionConfirmed)
+    nameEnabled && fontRanking && selectedFontId &&
+    (!boot.autoFont || fontSelectionConfirmed)
   );
+}
+
+function layoutForRequest() {
+  const layout = structuredClone(state);
+  if (!nameEnabled) delete layout.name;
+  return layout;
+}
+
+function syncNameLayerMode() {
+  nameLayerToggle.checked = nameEnabled;
+  nameLayerControls.disabled = !nameEnabled;
+  selectNameRegionButton.disabled = !nameEnabled || editorLocked;
+  referenceTextInput.disabled = !nameEnabled || editorLocked;
+  document.querySelector("#rank-fonts").disabled = !nameEnabled || editorLocked;
+  matchReferenceScaleButton.disabled = !nameEnabled || editorLocked ||
+    !canCalibrateFontSize();
+  applyReferenceLayoutButton.disabled = editorLocked ||
+    (nameEnabled ? !currentLayoutReference() : !petReferenceRegion);
+  metricsNode.textContent = nameEnabled
+    ? "Text metrics pending."
+    : "Separate text layer disabled; name is expected inside the transformed-pet image.";
 }
 
 function setEditorLocked(locked) {
@@ -126,9 +155,8 @@ function setEditorLocked(locked) {
     control.disabled = locked;
   }
   if (!locked) {
-    if (fontSelect) fontSelect.disabled = !fontRanking;
-    matchReferenceScaleButton.disabled = !canCalibrateFontSize();
-    setApplyReferenceEnabled();
+    syncNameLayerMode();
+    if (fontSelect) fontSelect.disabled = !nameEnabled || !fontRanking;
     setSaveEnabled();
   }
 }
@@ -175,9 +203,18 @@ function scaledReferenceBox(region) {
 }
 
 function applyReferenceGeometry() {
+  if (!petReferenceRegion) return;
+  state.pet.box = scaledReferenceBox(petReferenceRegion);
+  if (!nameEnabled) {
+    referenceGeometryApplied = true;
+    syncInputs();
+    markDirty();
+    draw();
+    schedulePreview();
+    return;
+  }
   const reference = currentLayoutReference();
   if (!reference) return;
-  state.pet.box = scaledReferenceBox(reference.pet_region);
   state.name.box = scaledReferenceBox(reference.name_region);
   state.name.font_size_px = state.name.box.height;
   state.name.min_font_size_px = Math.max(1, Math.round(state.name.box.height * 0.5));
@@ -618,7 +655,7 @@ function draw() {
   context.clearRect(0, 0, canvas.width, canvas.height);
   if (previewImage) context.drawImage(previewImage, 0, 0, canvas.width, canvas.height);
   drawBox(state.pet.box, "#ff4f4f");
-  drawBox(state.name.box, "#40c0ff");
+  if (nameEnabled) drawBox(state.name.box, "#40c0ff");
 }
 
 function drawReference() {
@@ -682,7 +719,7 @@ function hit(box, point) {
 canvas.addEventListener("pointerdown", event => {
   if (editorLocked) return;
   const point = pointInCanvas(event, canvas);
-  for (const section of ["name", "pet"]) {
+  for (const section of (nameEnabled ? ["name", "pet"] : ["pet"])) {
     const mode = hit(state[section].box, point);
     if (mode) {
       markDirty();
@@ -844,7 +881,7 @@ async function calibrateFontSize() {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
-        layout: structuredClone(state),
+        layout: layoutForRequest(),
         font_id: requestedFontId,
         font_reference: fontReference,
       }),
@@ -891,7 +928,7 @@ fontSearchQuery.addEventListener("keydown", event => {
 async function requestPreview() {
   clearTimeout(previewTimer);
   const requestedRevision = stateRevision;
-  const requestedLayout = structuredClone(state);
+  const requestedLayout = layoutForRequest();
   const requestedPetName = petNameInput.value;
   if (previewController) previewController.abort();
   const controller = new AbortController();
@@ -925,7 +962,9 @@ async function requestPreview() {
           renderedRevision = requestedRevision;
           canvas.classList.remove("stale");
           draw();
-          metricsNode.textContent = `Applied font size: ${appliedSize}px (${textFit}).`;
+          metricsNode.textContent = nameEnabled
+            ? `Applied font size: ${appliedSize}px (${textFit}).`
+            : "Separate text layer disabled; preview uses embedded artistic lettering.";
           statusNode.textContent = `Preview revision ${requestedRevision} ready.`;
           setSaveEnabled();
         }
@@ -962,18 +1001,18 @@ async function closeEditor() {
 
 async function save(overwrite = false, closeAfter = false) {
   if (renderedRevision !== stateRevision) throw new Error("preview the current revision before saving");
-  if (boot.autoFont && !fontSelectionConfirmed) {
+  if (nameEnabled && boot.autoFont && !fontSelectionConfirmed) {
     throw new Error("select a ranked font before saving");
   }
   const revision = stateRevision;
   const payload = {
     revision,
-    layout: structuredClone(state),
+    layout: layoutForRequest(),
     pet_name: petNameInput.value,
     preview_pet_id: selectedPreviewPetId,
     font_id: selectedFontId,
-    font_reference: currentFontReference(),
-    layout_reference: currentLayoutReference(),
+    font_reference: nameEnabled ? currentFontReference() : null,
+    layout_reference: nameEnabled ? currentLayoutReference() : null,
     font_selection_confirmed: fontSelectionConfirmed,
     overwrite,
   };
@@ -1010,6 +1049,16 @@ document.querySelector("#refresh").addEventListener("click", () => {
   markDirty();
   requestPreview();
 });
+nameLayerToggle.addEventListener("change", () => {
+  nameEnabled = nameLayerToggle.checked;
+  if (!nameEnabled && referenceSelectionMode === "name") {
+    setReferenceSelectionMode("pet");
+  }
+  syncNameLayerMode();
+  markDirty();
+  draw();
+  schedulePreview();
+});
 document.querySelector("#save").addEventListener("click", () => save().catch(error => {
   statusNode.textContent = `Save failed: ${error.message}`;
 }));
@@ -1023,4 +1072,5 @@ window.addEventListener("pagehide", () => {
 });
 
 setSaveEnabled();
+syncNameLayerMode();
 requestPreview();

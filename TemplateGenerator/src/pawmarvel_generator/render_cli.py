@@ -44,7 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="layout JSON (default: TEMPLATE_DIR/layout.json)",
     )
     parser.add_argument("--pet", type=Path, required=True, help="transformed pet PNG")
-    parser.add_argument("--pet-name", required=True)
+    parser.add_argument(
+        "--pet-name",
+        help="required only when layout.json contains a separate name layer",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--debug-output", type=Path)
     parser.add_argument(

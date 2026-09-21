@@ -231,6 +231,7 @@ class AuthoringLifecycleTests(unittest.TestCase):
                 "representative_pet_sha256"
             ],
         )
+
         composed_pet_evaluation = compare(
             kind="pet",
             review_id="pet-composed-eval",
@@ -501,6 +502,60 @@ class AuthoringLifecycleTests(unittest.TestCase):
         self.assertEqual(trace["status"], "valid")
         self.assertEqual(set(trace["reviews"]), {"art", "pet", "layout", "assembly"})
 
+    def test_layout_attempt_can_embed_name_in_transformed_pet(self) -> None:
+        art_exp = self._experiment("art", "art-gpt-v01", self.art_prompt)
+        pet_exp = self._experiment("pet", "pet-gpt-v01", self.pet_prompt)
+        art_attempt = self._fake_attempt(
+            art_exp, "attempt-0001", "art.png", (672, 1008)
+        )
+        pet_attempt = self._fake_attempt(
+            pet_exp, "attempt-0001", "transformed-pet.png", (816, 816)
+        )
+        layout_source = self.root / "embedded-name-layout"
+        make_transparent_mark(layout_source / "art.png", size=(672, 1008))
+        layout = layout_data()
+        del layout["name"]
+        (layout_source / "layout.json").write_text(
+            json.dumps(layout), encoding="utf-8"
+        )
+        layout_exp = create_experiment(
+            kind="layout",
+            experiment_id="layout-embedded-name-v01",
+            design_id="life-is-good",
+            product_profile=self.profile,
+            authoring_root=self.authoring,
+            references=[],
+            prompt_file=None,
+            provider=None,
+            model=None,
+            quality="high",
+            art_attempt=art_attempt,
+            pet_attempt=pet_attempt,
+            font_catalogs=[],
+            parent_experiment_id=None,
+            base_bundle_revision=None,
+            created_by="test",
+        )
+
+        attempt = run_attempt(
+            experiment=layout_exp,
+            attempt_id="attempt-0001",
+            pet_image=None,
+            pet_name="",
+            layout_file=layout_source / "layout.json",
+        )
+
+        saved = json.loads((attempt / "outputs" / "layout.json").read_text())
+        fixture = json.loads(
+            (attempt / "outputs" / "qa" / "calibration-fixture.json").read_text()
+        )
+        record = json.loads((attempt / "run.json").read_text())
+        self.assertNotIn("name", saved)
+        self.assertEqual(fixture["name_mode"], "embedded-in-pet")
+        self.assertIsNone(fixture["pet_name"])
+        self.assertEqual(record["layout_fixture"]["name_mode"], "embedded-in-pet")
+        self.assertFalse((attempt / "outputs" / "fonts").exists())
+
     def test_attempt_ids_are_immutable(self) -> None:
         art_exp = self._experiment("art", "art-gpt-v01", self.art_prompt)
         self._fake_attempt(art_exp, "attempt-0001", "art.png", (672, 1008))
@@ -562,6 +617,9 @@ class AuthoringLifecycleTests(unittest.TestCase):
         self.assertNotIn("experiment_path", record)
 
     def test_real_pet_attempt_runs_generation_adapter_and_records_input(self) -> None:
+        self.pet_prompt.write_text(
+            "Generate {{PET_NAME}} with the transformed pet.", encoding="utf-8"
+        )
         pet_exp = self._experiment("pet", "pet-gpt-v01", self.pet_prompt)
 
         def fake_generate(args) -> None:
@@ -572,16 +630,18 @@ class AuthoringLifecycleTests(unittest.TestCase):
 
         with patch(
             "pawmarvel_generator.authoring.generate", side_effect=fake_generate
-        ):
+        ) as generated:
             attempt = run_attempt(
                 experiment=pet_exp,
                 attempt_id="attempt-0001",
                 pet_image=self.pet,
-                pet_name="PET",
+                pet_name="  PET  ",
             )
+        self.assertEqual(generated.call_args.args[0].pet_name, "PET")
         record = json.loads((attempt / "run.json").read_text(encoding="utf-8"))
         self.assertEqual(record["status"], "succeeded")
         self.assertEqual(record["input_pet_sha256"], sha256(self.pet))
+        self.assertEqual(record["prompt_variables"], {"pet_name": "PET"})
         self.assertTrue((attempt / "inputs" / "input-pet.png").is_file())
 
     def test_pet_experiment_rejects_more_than_four_references(self) -> None:

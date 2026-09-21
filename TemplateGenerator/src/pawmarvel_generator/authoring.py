@@ -15,7 +15,11 @@ from PIL import Image
 from . import __version__
 from .artifact_io import atomic_json, mismatch, read_json, sha256, utc_now
 from .bundle import catalog_template_id
-from .cli import build_parser as build_generate_parser, generate
+from .cli import (
+    PET_NAME_PLACEHOLDER,
+    build_parser as build_generate_parser,
+    generate,
+)
 from .comparison_artifacts import render_comparison_contact_sheet
 from .config import load_layout, parse_layout
 from .font_catalog import FontCatalogError, discover_font_catalog
@@ -30,6 +34,7 @@ from .fixture_set import (
 )
 from .layout_reference import LayoutReferenceError, load_layout_reference
 from .layout_server import EditorConfig, serve_layout_editor
+from .personalization import PersonalizationError, pet_name_policy, validate_pet_name
 from .print_upscale import (
     TemplatePrintOutputs,
     prepare_print_pet,
@@ -452,7 +457,13 @@ def _relative_input(experiment: Path, descriptor: dict[str, Any]) -> Path:
     return experiment / str(descriptor["path"])
 
 
-def _run_generation(experiment: Path, meta: dict[str, Any], stage: Path, pet_image: Path | None) -> None:
+def _run_generation(
+    experiment: Path,
+    meta: dict[str, Any],
+    stage: Path,
+    pet_image: Path | None,
+    pet_name: str | None,
+) -> None:
     kind = str(meta["kind"])
     inputs = meta["inputs"]
     generation = meta["generation"]
@@ -473,6 +484,8 @@ def _run_generation(experiment: Path, meta: dict[str, Any], stage: Path, pet_ima
         pet_copy.parent.mkdir(parents=True)
         shutil.copyfile(pet_image.expanduser().resolve(), pet_copy)
         args.extend(["--pet-image", str(pet_copy)])
+        if pet_name is not None:
+            args.extend(["--pet-name", pet_name])
     for reference in inputs["references"]:
         args.extend(
             ["--reference-design", str(_relative_input(experiment, reference))]
@@ -509,22 +522,28 @@ def _run_layout(
         source_root = layout_file.expanduser().resolve().parent
         value = _json(layout_file.expanduser().resolve())
         source_layout = parse_layout(value, source_root)
-        fonts = outputs / "fonts"
-        fonts.mkdir()
-        shutil.copyfile(source_layout.font_path, fonts / source_layout.font_path.name)
-        shutil.copyfile(resolve_ofl_license(source_layout.font_path), fonts / "OFL.txt")
-        source_metadata = source_layout.font_path.parent / "source.json"
-        family_metadata = source_layout.font_path.parent / "METADATA.pb"
-        if source_metadata.exists() != family_metadata.exists():
-            raise AuthoringError(
-                "imported layout font requires both fonts/source.json and "
-                "fonts/METADATA.pb"
-            )
-        if source_metadata.is_file() and family_metadata.is_file():
-            shutil.copyfile(source_metadata, fonts / "source.json")
-            shutil.copyfile(family_metadata, fonts / "METADATA.pb")
         value["art"] = "art.png"
-        value["name"]["font"] = f"fonts/{source_layout.font_path.name}"
+        if source_layout.has_name:
+            assert source_layout.font_path is not None
+            fonts = outputs / "fonts"
+            fonts.mkdir()
+            shutil.copyfile(
+                source_layout.font_path, fonts / source_layout.font_path.name
+            )
+            shutil.copyfile(
+                resolve_ofl_license(source_layout.font_path), fonts / "OFL.txt"
+            )
+            source_metadata = source_layout.font_path.parent / "source.json"
+            family_metadata = source_layout.font_path.parent / "METADATA.pb"
+            if source_metadata.exists() != family_metadata.exists():
+                raise AuthoringError(
+                    "imported layout font requires both fonts/source.json and "
+                    "fonts/METADATA.pb"
+                )
+            if source_metadata.is_file() and family_metadata.is_file():
+                shutil.copyfile(source_metadata, fonts / "source.json")
+                shutil.copyfile(family_metadata, fonts / "METADATA.pb")
+            value["name"]["font"] = f"fonts/{source_layout.font_path.name}"
         parse_layout(value, outputs)
         atomic_json(outputs / "layout.json", value)
         if font_reference is not None:
@@ -546,8 +565,10 @@ def _run_layout(
             auto_font=True,
         ))
         fixture = _json(outputs / "qa" / "calibration-fixture.json")
-        pet_name = str(fixture.get("pet_name", "")).strip()
-        if not pet_name:
+        saved_layout = load_layout(outputs)
+        saved_pet_name = fixture.get("pet_name")
+        pet_name = str(saved_pet_name or "").strip()
+        if saved_layout.has_name and not pet_name:
             raise AuthoringError("layout editor did not save its QA pet name")
     render_to_files(template_dir=outputs, pet_image=outputs / "transformed-pet.png", pet_name=pet_name,
                     output=outputs / "preview.png", debug_output=outputs / "preview-debug.png")
@@ -557,14 +578,16 @@ def _run_layout(
         )
         fixture = {
             "schema_version": 1,
-            "pet_name": pet_name,
-            "applied_font_size_px": composition.text.applied_font_size_px,
-            "text_fit": composition.text.fit,
+            "pet_name": pet_name if composition.text is not None else None,
+            "name_mode": "layout-text" if composition.text else "embedded-in-pet",
             "layout_sha256": sha256(outputs / "layout.json"),
             "transformed_pet_sha256": sha256(
                 outputs / "transformed-pet.png"
             ),
         }
+        if composition.text is not None:
+            fixture["applied_font_size_px"] = composition.text.applied_font_size_px
+            fixture["text_fit"] = composition.text.fit
         atomic_json(outputs / "qa" / "calibration-fixture.json", fixture)
     saved_font_reference = outputs / "qa" / "font-reference.json"
     if saved_font_reference.is_file():
@@ -594,7 +617,7 @@ def _run_layout(
 
 
 def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
-                pet_name: str, layout_file: Path | None = None,
+                pet_name: str | None = None, layout_file: Path | None = None,
                 reference_text: str | None = None) -> Path:
     _id(attempt_id, "attempt ID")
     experiment = experiment.expanduser().resolve()
@@ -624,10 +647,28 @@ def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
     }
     if pet_image is not None:
         record["input_pet_sha256"] = sha256(pet_image.expanduser().resolve())
+    prompt_descriptor = meta.get("inputs", {}).get("prompt", {})
+    prompt_path = (
+        _relative_input(experiment, prompt_descriptor)
+        if isinstance(prompt_descriptor, dict) and "path" in prompt_descriptor
+        else None
+    )
+    if (
+        meta["kind"] == "pet"
+        and prompt_path is not None
+        and PET_NAME_PLACEHOLDER in prompt_path.read_text(encoding="utf-8")
+        and pet_name is not None
+    ):
+        try:
+            pet_name = validate_pet_name(pet_name, pet_name_policy(64))
+        except PersonalizationError as exc:
+            raise AuthoringError(f"invalid --pet-name: {exc}") from exc
+        record["prompt_variables"] = {"pet_name": pet_name}
     if meta["kind"] == "layout":
+        layout_pet_name = (pet_name or "").strip() or "PET"
         representative_pet = meta.get("inputs", {}).get("representative_pet", {})
         record["layout_fixture"] = {
-            "pet_name": pet_name.strip(),
+            "pet_name": layout_pet_name,
             "representative_pet_sha256": representative_pet.get("sha256"),
         }
     partial.mkdir(parents=True)
@@ -638,17 +679,27 @@ def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
         raise
     try:
         if meta["kind"] in {"art", "pet"}:
-            _run_generation(experiment, meta, partial, pet_image)
+            _run_generation(experiment, meta, partial, pet_image, pet_name)
         else:
             saved_fixture = _run_layout(
-                experiment, meta, partial, pet_name, layout_file, reference_text
+                experiment,
+                meta,
+                partial,
+                layout_pet_name,
+                layout_file,
+                reference_text,
             )
             record["layout_fixture"].update(
                 pet_name=saved_fixture["pet_name"],
-                applied_font_size_px=saved_fixture["applied_font_size_px"],
-                text_fit=saved_fixture["text_fit"],
+                name_mode=saved_fixture.get("name_mode", "layout-text"),
                 layout_sha256=saved_fixture["layout_sha256"],
             )
+            if "applied_font_size_px" in saved_fixture:
+                record["layout_fixture"]["applied_font_size_px"] = saved_fixture[
+                    "applied_font_size_px"
+                ]
+            if "text_fit" in saved_fixture:
+                record["layout_fixture"]["text_fit"] = saved_fixture["text_fit"]
             if "transformed_pet" in saved_fixture:
                 record["layout_fixture"]["calibration_pet"] = saved_fixture[
                     "transformed_pet"
@@ -683,7 +734,7 @@ def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
 
 def benchmark(*, experiment: Path, fixture_set: Path, evaluation_protocol: Path,
               attempts_per_fixture: int | None, attempt_id_prefix: str,
-              fixture_selection: Path) -> list[Path]:
+              fixture_selection: Path, pet_name: str | None = None) -> list[Path]:
     experiment = experiment.expanduser().resolve()
     experiment_meta = _json(experiment / "experiment.json")
     if experiment_meta.get("kind") != "pet":
@@ -722,7 +773,14 @@ def benchmark(*, experiment: Path, fixture_set: Path, evaluation_protocol: Path,
         for repetition in range(1, repetitions + 1):
             attempt_id = f"{attempt_id_prefix}-{fixture.id}-{repetition:04d}"
             try:
-                results.append(run_attempt(experiment=experiment, attempt_id=attempt_id, pet_image=fixture.image, pet_name="PET"))
+                results.append(
+                    run_attempt(
+                        experiment=experiment,
+                        attempt_id=attempt_id,
+                        pet_image=fixture.image,
+                        pet_name=pet_name,
+                    )
+                )
             except AuthoringError as exc:
                 failures.append((attempt_id, str(exc)))
     if failures:
@@ -914,13 +972,17 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
                         gates = {"layout_v2": layout.schema_version == 2,
                                  "preview_exists": (attempt / "outputs" / "preview.png").is_file()}
                         gates["status"] = "passed" if all(gates.values()) else "failed"
-                        review_label = (
-                            f"{layout.font_relative} "
-                            f"text={record.get('layout_fixture', {}).get('pet_name', '?')} "
-                            f"font={layout.font_size_px}px "
-                            f"applied={record.get('layout_fixture', {}).get('applied_font_size_px', '?')}px "
-                            f"name-box={layout.name_box.width}x{layout.name_box.height}"
-                        )
+                        if layout.has_name:
+                            assert layout.name_box is not None
+                            review_label = (
+                                f"{layout.font_relative} "
+                                f"text={record.get('layout_fixture', {}).get('pet_name', '?')} "
+                                f"font={layout.font_size_px}px "
+                                f"applied={record.get('layout_fixture', {}).get('applied_font_size_px', '?')}px "
+                                f"name-box={layout.name_box.width}x{layout.name_box.height}"
+                            )
+                        else:
+                            review_label = "embedded artistic name; no layout text layer"
                     except (OSError, ValueError):
                         gates = {"layout_v2": False, "preview_exists": False, "status": "failed"}
                         review_label = "unreadable layout"
@@ -1000,7 +1062,8 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
         assembly_pet_name = str(
             layout_record.get("layout_fixture", {}).get("pet_name", "")
         ).strip()
-        if not assembly_pet_name:
+        assembly_layout = load_layout(layout_attempt / "outputs")
+        if assembly_layout.has_name and not assembly_pet_name:
             raise AuthoringError(
                 "layout attempt does not record its fixture pet name; create a new layout attempt"
             )
@@ -1902,8 +1965,12 @@ def graduate(*, graduation_id: str, print_candidate: Path,
         "selected": {
             "art": {"experiment_id": art_experiment.name, "attempt_id": art_attempt.name, "artifact_sha256": sha256(art_file)},
             "pet_runtime": {"experiment_id": pet_experiment.name, "experiment_sha256": sha256(pet_experiment / "experiment.json")},
-            "layout_font": {"experiment_id": layout_experiment.name, "attempt_id": layout_attempt.name,
-                            "layout_sha256": sha256(layout_file), "font_sha256": sha256(layout.font_path)},
+            "layout_font": {
+                "experiment_id": layout_experiment.name,
+                "attempt_id": layout_attempt.name,
+                "layout_sha256": sha256(layout_file),
+                "font_sha256": sha256(layout.font_path) if layout.font_path else None,
+            },
         },
         "sources": {
             "art_attempt": _product_relative(art_attempt, root),

@@ -374,12 +374,18 @@ def verify_print_bundle(
     if not isinstance(print_data, Mapping) or not isinstance(hashes, Mapping):
         raise PrintUpscaleError("print manifest lacks print paths or output checksums")
 
+    font_value = print_data.get("font")
+    font_license_value = print_data.get("font_license")
     expected_paths: dict[str, Path | None] = {
         "art": root / str(print_data.get("art")),
         "transformed_pet": root / str(print_data.get("transformed_pet")),
         "layout": root / str(print_data.get("layout")),
-        "font": root / str(print_data.get("font")),
-        "font_license": root / str(print_data.get("font_license")),
+        "font": root / font_value if isinstance(font_value, str) else None,
+        "font_license": (
+            root / font_license_value
+            if isinstance(font_license_value, str)
+            else None
+        ),
         "product_profile": root / PRINT_PROFILE_NAME,
     }
     supplied_paths: dict[str, Path | None] = {
@@ -441,11 +447,17 @@ def _verify_split_print_bundle(
     hashes = template_manifest.get("output_sha256")
     if not isinstance(print_data, Mapping) or not isinstance(hashes, Mapping):
         raise PrintUpscaleError("template print manifest lacks paths or output checksums")
-    template_paths = {
+    font_value = print_data.get("font")
+    font_license_value = print_data.get("font_license")
+    template_paths: dict[str, Path | None] = {
         "art": root / str(print_data.get("art")),
         "layout": root / str(print_data.get("layout")),
-        "font": root / str(print_data.get("font")),
-        "font_license": root / str(print_data.get("font_license")),
+        "font": root / font_value if isinstance(font_value, str) else None,
+        "font_license": (
+            root / font_license_value
+            if isinstance(font_license_value, str)
+            else None
+        ),
         "product_profile": root / PRINT_PROFILE_NAME,
     }
     supplied_template_paths = {
@@ -457,6 +469,16 @@ def _verify_split_print_bundle(
     }
     for label, expected in template_paths.items():
         supplied = supplied_template_paths[label]
+        if expected is None and supplied is None:
+            if hashes.get(label) is not None:
+                raise PrintUpscaleError(
+                    f"template-print {label} checksum must be null when the asset is absent"
+                )
+            continue
+        if expected is None or supplied is None:
+            raise PrintUpscaleError(
+                f"template-print {label} path presence does not match its manifest"
+            )
         if expected.resolve() != supplied:
             raise PrintUpscaleError(
                 f"final render {label} is not the prepared template-print artifact"
@@ -583,6 +605,28 @@ def _scaled_print_layout(
     art_relative: str = PRINT_ART_NAME,
 ) -> Layout:
     scale = _validated_scale(layout, target_size)
+    name_fields: dict[str, Any] = {}
+    if layout.has_name:
+        assert layout.font_relative is not None
+        assert layout.name_box is not None
+        assert layout.font_size_px is not None
+        assert layout.min_font_size_px is not None
+        assert layout.name_padding_px is not None
+        name_fields = {
+            "font_relative": layout.font_relative,
+            "font_path": output_dir / layout.font_relative,
+            "name_box": _scale_rect(layout.name_box, scale, scale),
+            "font_size_px": max(1, round_half_up(layout.font_size_px * scale)),
+            "min_font_size_px": max(
+                1, round_half_up(layout.min_font_size_px * scale)
+            ),
+            "name_padding_px": max(
+                0, round_half_up(layout.name_padding_px * scale)
+            ),
+            "name_fit": layout.name_fit,
+            "color": layout.color,
+            "horizontal_align": layout.horizontal_align,
+        }
     return Layout(
         template_dir=output_dir,
         art_relative=art_relative,
@@ -590,18 +634,8 @@ def _scaled_print_layout(
         canvas_width=target_size[0],
         canvas_height=target_size[1],
         pet_box=_scale_rect(layout.pet_box, scale, scale),
-        font_relative=layout.font_relative,
-        font_path=output_dir / layout.font_relative,
-        name_box=_scale_rect(layout.name_box, scale, scale),
-        font_size_px=max(1, round_half_up(layout.font_size_px * scale)),
-        min_font_size_px=max(
-            1, round_half_up(layout.min_font_size_px * scale)
-        ),
-        name_padding_px=max(0, round_half_up(layout.name_padding_px * scale)),
-        name_fit=layout.name_fit,
-        color=layout.color,
-        horizontal_align=layout.horizontal_align,
         schema_version=2,
+        **name_fields,
     )
 
 
@@ -615,18 +649,7 @@ def _assert_scaled_layout(preview: Layout, print_layout: Layout) -> float:
         target_size=(print_layout.canvas_width, print_layout.canvas_height),
         art_relative=print_layout.art_relative,
     )
-    compared = (
-        "pet_box",
-        "font_relative",
-        "name_box",
-        "font_size_px",
-        "min_font_size_px",
-        "name_padding_px",
-        "name_fit",
-        "color",
-        "horizontal_align",
-        "schema_version",
-    )
+    compared = tuple(expected.__dataclass_fields__)
     if any(getattr(expected, field) != getattr(print_layout, field) for field in compared):
         raise PrintUpscaleError(
             "print layout is not the uniformly scaled form of the preview layout"
@@ -662,10 +685,13 @@ def prepare_print_template(
     layout_path = layout_path.expanduser().resolve() if layout_path else None
     product_profile = product_profile.expanduser().resolve() if product_profile else None
     layout = load_layout(template_dir, layout_path=layout_path)
-    try:
-        font_license = resolve_ofl_license(layout.font_path)
-    except FontLicenseError as exc:
-        raise PrintUpscaleError(str(exc)) from exc
+    font_license = None
+    if layout.has_name:
+        assert layout.font_path is not None
+        try:
+            font_license = resolve_ofl_license(layout.font_path)
+        except FontLicenseError as exc:
+            raise PrintUpscaleError(str(exc)) from exc
     scale = _validated_scale(layout, target_size)
     art_source = _open_image(layout.art_path, "art")
     bria_increase, provider = _upscale_provider(
@@ -681,11 +707,14 @@ def prepare_print_template(
         manifest=output_dir / TEMPLATE_PRINT_MANIFEST_NAME,
         product_profile=output_dir / PRINT_PROFILE_NAME if product_profile else None,
     )
-    font_output = output_dir / layout.font_relative
-    font_license_output = font_output.parent / "OFL.txt"
-    _reject_existing(
-        list(outputs.paths()) + [font_output, font_license_output], force=force
+    font_output = (
+        output_dir / layout.font_relative
+        if layout.font_relative is not None
+        else None
     )
+    font_license_output = font_output.parent / "OFL.txt" if font_output else None
+    font_targets = [font_output, font_license_output] if font_output else []
+    _reject_existing(list(outputs.paths()) + font_targets, force=force)
     art_bytes = _render_upscaled_layer(
         label="art",
         source=art_source,
@@ -718,20 +747,20 @@ def prepare_print_template(
             "art": PRINT_ART_NAME,
             "layout": PRINT_LAYOUT_NAME,
             "font": layout.font_relative,
-            "font_license": "fonts/OFL.txt",
+            "font_license": "fonts/OFL.txt" if layout.has_name else None,
         },
         "source_sha256": {
             "art": _file_sha256(layout.art_path),
             "layout": _file_sha256(source_layout),
-            "font": _file_sha256(layout.font_path),
-            "font_license": _file_sha256(font_license),
+            "font": _file_sha256(layout.font_path) if layout.font_path else None,
+            "font_license": _file_sha256(font_license) if font_license else None,
             "product_profile": _file_sha256(product_profile) if product_profile else None,
         },
         "output_sha256": {
             "art": _sha256(art_bytes),
             "layout": _sha256(layout_bytes),
-            "font": _file_sha256(layout.font_path),
-            "font_license": _file_sha256(font_license),
+            "font": _file_sha256(layout.font_path) if layout.font_path else None,
+            "font_license": _file_sha256(font_license) if font_license else None,
             "product_profile": _file_sha256(product_profile) if product_profile else None,
         },
     }
@@ -743,14 +772,16 @@ def prepare_print_template(
     )
     if outputs.product_profile is not None and product_profile is not None:
         _atomic_write_bytes(outputs.product_profile, product_profile.read_bytes())
-    font_output.parent.mkdir(parents=True, exist_ok=True)
-    temporary_font = font_output.with_name(f".{font_output.name}.tmp")
-    try:
-        shutil.copyfile(layout.font_path, temporary_font)
-        os.replace(temporary_font, font_output)
-    finally:
-        temporary_font.unlink(missing_ok=True)
-    _atomic_write_bytes(font_license_output, font_license.read_bytes())
+    if font_output is not None and font_license_output is not None:
+        assert layout.font_path is not None and font_license is not None
+        font_output.parent.mkdir(parents=True, exist_ok=True)
+        temporary_font = font_output.with_name(f".{font_output.name}.tmp")
+        try:
+            shutil.copyfile(layout.font_path, temporary_font)
+            os.replace(temporary_font, font_output)
+        finally:
+            temporary_font.unlink(missing_ok=True)
+        _atomic_write_bytes(font_license_output, font_license.read_bytes())
     load_layout(output_dir, layout_path=outputs.layout)
     return outputs
 
@@ -867,10 +898,13 @@ def prepare_print_assets(
         product_profile.expanduser().resolve() if product_profile else None
     )
     layout = load_layout(template_dir, layout_path=layout_path)
-    try:
-        font_license = resolve_ofl_license(layout.font_path)
-    except FontLicenseError as exc:
-        raise PrintUpscaleError(str(exc)) from exc
+    font_license = None
+    if layout.has_name:
+        assert layout.font_path is not None
+        try:
+            font_license = resolve_ofl_license(layout.font_path)
+        except FontLicenseError as exc:
+            raise PrintUpscaleError(str(exc)) from exc
 
     target_width, target_height = target_size
     if target_width <= layout.canvas_width or target_height <= layout.canvas_height:
@@ -898,9 +932,15 @@ def prepare_print_assets(
         manifest=output_dir / PRINT_MANIFEST_NAME,
         product_profile=(output_dir / PRINT_PROFILE_NAME if product_profile else None),
     )
-    font_output = output_dir / layout.font_relative
-    font_license_output = font_output.parent / "OFL.txt"
-    targets = list(outputs.paths()) + [font_output, font_license_output]
+    font_output = (
+        output_dir / layout.font_relative
+        if layout.font_relative is not None
+        else None
+    )
+    font_license_output = font_output.parent / "OFL.txt" if font_output else None
+    targets = list(outputs.paths()) + (
+        [font_output, font_license_output] if font_output else []
+    )
     if len(set(targets)) != len(targets):
         raise PrintUpscaleError("print output paths collide with the configured font path")
     existing = [path for path in targets if path.exists()]
@@ -967,27 +1007,10 @@ def prepare_print_assets(
                 result.putalpha(source.getchannel("A").resize(size, Image.Resampling.LANCZOS))
         rendered[label] = _png_bytes(result, icc_profile=source.info.get("icc_profile"))
 
-    print_layout = Layout(
-        template_dir=output_dir,
-        art_relative=PRINT_ART_NAME,
-        art_path=outputs.art,
-        canvas_width=target_width,
-        canvas_height=target_height,
-        pet_box=_scale_rect(layout.pet_box, scale_x, scale_y),
-        font_relative=layout.font_relative,
-        font_path=font_output,
-        name_box=_scale_rect(layout.name_box, scale_x, scale_y),
-        font_size_px=max(1, round_half_up(layout.font_size_px * scale_x)),
-        min_font_size_px=max(
-            1, round_half_up(layout.min_font_size_px * scale_x)
-        ),
-        name_padding_px=max(
-            0, round_half_up(layout.name_padding_px * scale_x)
-        ),
-        name_fit=layout.name_fit,
-        color=layout.color,
-        horizontal_align=layout.horizontal_align,
-        schema_version=2,
+    print_layout = _scaled_print_layout(
+        layout,
+        output_dir=output_dir,
+        target_size=target_size,
     )
     layout_bytes = (json.dumps(print_layout.to_dict(), indent=2) + "\n").encode("utf-8")
     manifest = {
@@ -1024,7 +1047,7 @@ def prepare_print_assets(
             "transformed_pet": PRINT_PET_NAME,
             "layout": PRINT_LAYOUT_NAME,
             "font": layout.font_relative,
-            "font_license": "fonts/OFL.txt",
+            "font_license": "fonts/OFL.txt" if layout.has_name else None,
             "layer_dimensions": {
                 key: {"width": value[0], "height": value[1]}
                 for key, value in layer_sizes.items()
@@ -1035,16 +1058,16 @@ def prepare_print_assets(
             "art": _file_sha256(layout.art_path),
             "transformed_pet": _file_sha256(transformed_pet),
             "layout": _file_sha256(layout_path or template_dir / "layout.json"),
-            "font": _file_sha256(layout.font_path),
-            "font_license": _file_sha256(font_license),
+            "font": _file_sha256(layout.font_path) if layout.font_path else None,
+            "font_license": _file_sha256(font_license) if font_license else None,
             "product_profile": _file_sha256(product_profile) if product_profile else None,
         },
         "output_sha256": {
             "art": _sha256(rendered["art"]),
             "transformed_pet": _sha256(rendered["pet"]),
             "layout": _sha256(layout_bytes),
-            "font": _file_sha256(layout.font_path),
-            "font_license": _file_sha256(font_license),
+            "font": _file_sha256(layout.font_path) if layout.font_path else None,
+            "font_license": _file_sha256(font_license) if font_license else None,
             "product_profile": _file_sha256(product_profile) if product_profile else None,
         },
     }
@@ -1057,14 +1080,16 @@ def prepare_print_assets(
     _atomic_write_bytes(outputs.manifest, manifest_bytes)
     if outputs.product_profile is not None and product_profile is not None:
         _atomic_write_bytes(outputs.product_profile, product_profile.read_bytes())
-    font_output.parent.mkdir(parents=True, exist_ok=True)
-    temporary_font = font_output.with_name(f".{font_output.name}.tmp")
-    try:
-        shutil.copyfile(layout.font_path, temporary_font)
-        os.replace(temporary_font, font_output)
-    finally:
-        temporary_font.unlink(missing_ok=True)
-    _atomic_write_bytes(font_license_output, font_license.read_bytes())
+    if font_output is not None and font_license_output is not None:
+        assert layout.font_path is not None and font_license is not None
+        font_output.parent.mkdir(parents=True, exist_ok=True)
+        temporary_font = font_output.with_name(f".{font_output.name}.tmp")
+        try:
+            shutil.copyfile(layout.font_path, temporary_font)
+            os.replace(temporary_font, font_output)
+        finally:
+            temporary_font.unlink(missing_ok=True)
+        _atomic_write_bytes(font_license_output, font_license.read_bytes())
 
     # Validate the completed bundle with the same parser used by the renderer.
     load_layout(output_dir, layout_path=outputs.layout)

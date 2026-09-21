@@ -120,6 +120,19 @@ class AuthoringCliTests(unittest.TestCase):
             ]
         )
         self.assertEqual(args.fixture_selection, Path("selection.json"))
+        self.assertIsNone(args.pet_name)
+
+    def test_run_attempt_pet_name_is_optional_without_an_implicit_value(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "run-attempt",
+                "--experiment", "experiment",
+                "--attempt-id", "attempt-0001",
+                "--pet-image", "pet.png",
+            ]
+        )
+
+        self.assertIsNone(args.pet_name)
 
     def test_help_does_not_require_resolvable_current_user(self) -> None:
         output = io.StringIO()

@@ -118,6 +118,28 @@ class PrintUpscaleTests(unittest.TestCase):
             hashlib.sha256(template_outputs.layout.read_bytes()).hexdigest(),
         )
 
+    def test_prepares_scaled_assets_without_separate_name_or_font(self) -> None:
+        data = layout_data()
+        del data["name"]
+        (self.template / "layout.json").write_text(
+            json.dumps(data), encoding="utf-8"
+        )
+
+        outputs = prepare_print_assets(
+            template_dir=self.template,
+            transformed_pet=self.pet,
+            target_size=(400, 600),
+            output_dir=self.output,
+        )
+
+        layout = load_layout(self.output, layout_path=outputs.layout)
+        manifest = json.loads(outputs.manifest.read_text(encoding="utf-8"))
+        self.assertFalse(layout.has_name)
+        self.assertNotIn("name", layout.to_dict())
+        self.assertIsNone(manifest["print"]["font"])
+        self.assertIsNone(manifest["print"]["font_license"])
+        self.assertFalse((self.output / "fonts").exists())
+
     def test_pet_upscale_rejects_layout_not_derived_from_preview(self) -> None:
         template_outputs = prepare_print_template(
             template_dir=self.template,

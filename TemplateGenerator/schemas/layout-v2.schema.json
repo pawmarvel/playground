@@ -4,7 +4,7 @@
   "title": "PawMarvel preview and print composition layout",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "art", "pet", "name"],
+  "required": ["schema_version", "art", "pet"],
   "properties": {
     "schema_version": {"const": 2},
     "art": {"type": "string", "minLength": 1},

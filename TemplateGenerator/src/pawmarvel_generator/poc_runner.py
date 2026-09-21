@@ -37,7 +37,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="reuse an approved transformed pet and skip the paid image API call",
     )
-    parser.add_argument("--pet-name", required=True)
+    parser.add_argument(
+        "--pet-name",
+        help=(
+            "pet name for prompt substitution and/or the separate layout text "
+            "layer; optional when neither is used"
+        ),
+    )
     parser.add_argument(
         "--api-key-file",
         type=Path,
@@ -133,8 +139,10 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
             raise UserInputError(
                 f"pet transformation prompt does not exist: {prompt_file}"
             )
-    if not args.pet_name.strip():
-        raise UserInputError("pet name must not be empty")
+    if layout.has_name and not (args.pet_name or "").strip():
+        raise UserInputError(
+            "--pet-name is required because layout.json contains a name layer"
+        )
     targets = (
         (final, debug)
         if supplied_transformed is not None
@@ -177,6 +185,7 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
         generation_args = argparse.Namespace(
             reference_design=reference_designs,
             pet_image=pet_image,
+            pet_name=args.pet_name,
             prompt_file=prompt_file,
             api_key_file=args.api_key_file,
             provider=provider,

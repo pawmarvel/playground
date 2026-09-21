@@ -138,6 +138,7 @@ class BundleContractTests(unittest.TestCase):
                 "layout_schema_version": 2,
                 "pet_fit": "contain-visible-alpha",
                 "pet_anchor": "bottom-center",
+                "name_mode": "layout-text",
                 "name_fit": "nominal-size-shrink-only-visible-ink-contain",
                 "version": 2,
             },
@@ -263,6 +264,42 @@ class BundleContractTests(unittest.TestCase):
         )
         self.assertEqual(manifest["template_id"], "life-is-good--test-blanket")
         self.assertEqual(manifest["runtime"]["input_image_order"][0], "user_pet")
+
+    def test_validates_artistic_name_bundle_without_name_or_font_assets(self) -> None:
+        for name in ("layout.json", "layout-print.json"):
+            path = self.bundle / name
+            layout = json.loads(path.read_text(encoding="utf-8"))
+            del layout["name"]
+            path.write_text(json.dumps(layout), encoding="utf-8")
+        for path in (self.bundle / "fonts").iterdir():
+            path.unlink()
+        (self.bundle / "fonts").rmdir()
+
+        manifest_path = self.bundle / "bundle.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["renderer"] = {
+            "layout_schema_version": 2,
+            "pet_fit": "contain-visible-alpha",
+            "pet_anchor": "bottom-center",
+            "name_mode": "embedded-in-pet",
+            "version": 2,
+        }
+        selected_layout = manifest["provenance"]["selected"]["layout_font"]
+        selected_layout["layout_sha256"] = _sha256(self.bundle / "layout.json")
+        selected_layout["font_sha256"] = None
+        manifest["provenance"]["print_derivation"]["layout_sha256"] = _sha256(
+            self.bundle / "layout-print.json"
+        )
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
+        self._refresh_assets()
+
+        validated = validate_production_bundle(self.bundle)
+
+        _validate_schema(validated, "bundle-v1.schema.json")
+        self.assertEqual(validated["renderer"]["name_mode"], "embedded-in-pet")
+        self.assertFalse((self.bundle / "fonts").exists())
 
     def test_validates_optional_remote_font_provenance(self) -> None:
         metadata = self.bundle / "fonts" / "METADATA.pb"

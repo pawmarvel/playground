@@ -189,7 +189,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--experiment", type=_path_argument, required=True)
     run.add_argument("--attempt-id", required=True)
     run.add_argument("--pet-image", type=_path_argument)
-    run.add_argument("--pet-name", default="PET")
+    run.add_argument(
+        "--pet-name",
+        help=(
+            "optional value for {{PET_NAME}} in a pet prompt, or initial "
+            "preview text for a layout attempt (layout default: PET)"
+        ),
+    )
     run.add_argument(
         "--reference-text",
         help="initial exact text visible in the reference font region",
@@ -211,6 +217,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     bench.add_argument("--attempt-id-prefix", default="benchmark")
     bench.add_argument("--fixture-selection", type=_path_argument, required=True)
+    bench.add_argument(
+        "--pet-name",
+        help=(
+            "optional value for {{PET_NAME}} in the pet prompt during every "
+            "selected fixture attempt"
+        ),
+    )
 
     comparison = commands.add_parser("compare")
     comparison.add_argument("--kind", choices=("art", "pet", "layout", "assembly"), required=True)
@@ -384,7 +397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             results = benchmark(experiment=args.experiment, fixture_set=args.fixture_set,
                 evaluation_protocol=args.evaluation_protocol, attempts_per_fixture=args.attempts_per_fixture,
                 attempt_id_prefix=args.attempt_id_prefix,
-                fixture_selection=args.fixture_selection)
+                fixture_selection=args.fixture_selection, pet_name=args.pet_name)
             for result in results:
                 print(result)
             return 0

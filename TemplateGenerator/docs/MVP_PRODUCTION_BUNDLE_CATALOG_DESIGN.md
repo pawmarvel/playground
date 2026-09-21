@@ -93,10 +93,10 @@ s3://<bucket>/<environment-prefix>/
       reference-design-0002.png
     art-template-{gpt|gemini}.md          # offline provenance artifact
     pet-transform-gpt.md                  # MVP production pet-transform prompt
-    fonts/<selected-font>.ttf
-    fonts/OFL.txt
+    fonts/<selected-font>.ttf              # layout-text mode only
+    fonts/OFL.txt                          # layout-text mode only
     fonts/METADATA.pb                      # optional remote-font provenance
-    fonts/source.json                      # optional remote-font source + hashes
+    fonts/source.json                      # optional remote-font provenance
     qa/input-pet.png                     # operator-reviewed non-customer replay fixture
     qa/transformed-pet.png               # representative QA only
     qa/golden-preview.png                 # human conformance aid only
@@ -113,17 +113,20 @@ fields and canonical paths, never filename scanning or authoring conventions.
 
 | Phase | FE/application reads from bundle | FE/application supplies or creates |
 | --- | --- | --- |
-| Import | `bundle.json`, asset inventory, profile, layouts, prompt, references, font/license | Verified immutable application copy/cache and draft record |
+| Import | `bundle.json`, asset inventory, profile, layouts, prompt, references, and conditional font/license | Verified immutable application copy/cache and draft record |
 | Pet transform | `runtime.provider`, `runtime.model`, `runtime.transport`, closed `runtime.request_parameters`, `runtime.prompt`, ordered `runtime.reference_assets`, output/normalization policy | Customer pet as image 1; declared references afterward; transformed-pet PNG |
-| Preview | `art.png`, `layout.json`, selected OFL font, renderer and `personalization.pet_name` semantics | Validated customer name and transformed pet |
-| Approved print | `print/art.png`, `layout-print.json`, profile, font, renderer semantics | Upscaled approved transformed pet and final print composition |
+| Preview | `art.png`, `layout.json`, renderer and `personalization.pet_name` semantics; selected OFL font only in `layout-text` mode | Validated customer name and transformed pet |
+| Approved print | `print/art.png`, `layout-print.json`, profile, renderer semantics, and conditional font | Upscaled approved transformed pet and final print composition |
 
 Preview and print must use the same bundle revision and customer values. FE
 must not regenerate or upscale template art. Model calls, private asset access,
 customer-image handling, and print rendering run in a trusted application
 backend/job, not browser code.
 
-Layout V2 is a closed composition contract. `name.font_size_px` is the nominal
+Layout V2 is a closed composition contract with an optional top-level `name`.
+Its absence means the personalized lettering is already embedded in the
+transformed-pet pixels; the renderer composes only `art` and `pet`, and the
+bundle omits font assets. When `name` is present, `name.font_size_px` is the nominal
 preview size, `name.min_font_size_px` is the smallest allowed fallback,
 `name.fit` is `shrink_only`, and `name.padding_px` is a uniform inset. Short
 names stay at nominal size; longer names shrink only as needed. Print layout
@@ -146,7 +149,7 @@ glyph width.
 5. Validate preview/print canvas dimensions against `product-profile.json` and
    verify that `layout-print.json` is the permitted scale of `layout.json`.
 6. Reject unsupported provider/model/transport/request fields, prompt-category mismatches,
-   missing ordered references, missing OFL font/license, or invalid renderer
+   missing ordered references, missing required OFL font/license, or invalid renderer
    semantics.
 7. Create or update only an application draft. Activation remains an explicit
    application-owner action.
@@ -693,8 +696,8 @@ s3://<bucket>/<environment-prefix>/
         reference-designs/reference-design-0002.png
         pet-transform-gpt.md
         art-template-{gpt|gemini}.md
-        fonts/<font>.ttf
-        fonts/OFL.txt
+        fonts/<font>.ttf                  # layout-text mode only
+        fonts/OFL.txt                     # layout-text mode only
         fonts/METADATA.pb                 # optional remote-font provenance
         fonts/source.json                 # optional remote-font source + hashes
         qa/input-pet.png
@@ -870,6 +873,7 @@ not a viable fallback.
     "layout_schema_version": 2,
     "pet_fit": "contain-visible-alpha",
     "pet_anchor": "bottom-center",
+    "name_mode": "layout-text",
     "name_fit": "nominal-size-shrink-only-visible-ink-contain",
     "version": 2
   },
@@ -950,6 +954,20 @@ the inclusive minimum is one and the per-bundle maximum is authored with
 preview generation and reuses the exact normalized value for preview and
 print. UAX #29 grapheme counting can replace code-point counting only in a
 future bundle schema version.
+
+The selected runtime pet prompt may contain the exact, case-sensitive
+`{{PET_NAME}}` token. When present, the trusted runtime adapter must replace
+every occurrence with that same normalized, policy-valid pet name before
+submitting the image request; unresolved tokens are a hard error. A prompt
+without the token is sent unchanged. The offline generator accepts an optional
+pet-name argument; when a name is supplied but the prompt has no token, it
+emits a diagnostic warning and continues without modifying the prompt. This is
+literal substitution only—there is no general-purpose prompt-template
+language. If the prompt generates the name inside the transformed-pet pixels,
+`layout.json` omits `name` and
+`bundle.json.renderer.name_mode` is `embedded-in-pet`. Otherwise the layout
+contains `name`, the bundle carries its OFL assets, and `name_mode` is
+`layout-text`. The application must reject disagreement between these fields.
 
 ### 8.3 Runtime provider and model scope
 
@@ -1044,9 +1062,11 @@ version.
 
 ### 8.6 Layout-v2 and renderer semantics
 
-Production bundles use composition layout schema version 2. Preserve pixel
-coordinates, the nominal/minimum font sizes, uniform padding, RGBA name color,
-horizontal alignment, fit policy, and relative font path. Keep
+Production bundles use composition layout schema version 2. Always preserve
+pet geometry. When the optional `name` object exists, also preserve its
+coordinates, nominal/minimum font sizes, uniform padding, RGBA color,
+horizontal alignment, fit policy, and relative font path. When it is absent,
+do not render text or require font assets. Keep
 `model`, provider, prompt, API transport, reference order, and output
 normalization out of the layout. The renderer begins at `font_size_px`, shrinks
 only as needed to contain visible text ink inside the padded name box, and
@@ -1059,7 +1079,9 @@ Only layout schema version 2 is accepted. All authoring attempts, fixtures,
 preview layouts, and print layouts use this shape directly; there is no
 compatibility branch or migration command. `layout-print.json` mechanically scales rectangle edges,
 font sizes, and padding with round-half-up while preserving dimensionless
-values. `bundle.json.renderer` pins renderer semantics version 2.
+values. `layout-print.json` must use the same name-layer mode as its preview
+layout. `bundle.json.renderer.name_mode` exposes the choice directly and
+`renderer.version` pins renderer semantics version 2.
 
 Renderer semantics are pinned by `bundle.json.renderer.version`. Because the
 bundle contract has not been released, bundle schema version 1 directly requires
@@ -1247,8 +1269,9 @@ the source for full-resolution judgment. The reviewer checks fixed-art
 completeness, unwanted personalized content, style, and consistency. Layout
 comparison checks layout-v2 and preview existence and creates a sheet labeling
 font and name-box dimensions; the reviewer checks placement, representative
-name containment, readability, and the ranked font choice. Each layout
-experiment exposes and records the top 15 scored fonts from its immutable OFL
+name containment, readability, and the ranked font choice when the separate
+name layer is enabled. Each separate-text layout experiment exposes and records
+the top 15 scored fonts from its immutable OFL
 catalog snapshot. Ranking uses a hash-bound, operator-confirmed screenshot text
 region and that region's exact visible wording. Similarity is not presented as
 selection certainty, and medium/low confidence requires explicit confirmation.
@@ -1329,6 +1352,9 @@ Operators do not repeat component source paths on the command line:
   }
 }
 ```
+
+For an `embedded-in-pet` layout, `selected.layout_font.font_sha256` is `null`;
+the layout hash remains mandatory and pins the absence of the `name` object.
 
 The pet runtime selection pins a prompt, provider, model, API transport,
 reference order, output policy, and normalization

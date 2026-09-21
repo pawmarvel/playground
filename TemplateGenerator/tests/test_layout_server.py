@@ -166,6 +166,25 @@ class LayoutServerTests(unittest.TestCase):
         with self.post("/heartbeat", {}) as response:
             self.assertEqual(response.status, 204)
 
+    def test_saves_layout_without_separate_name_layer_or_font_assets(self) -> None:
+        layout = layout_data()
+        del layout["name"]
+        payload = {"layout": layout, "font_id": self.font_candidates[0].candidate_id}
+
+        with self.post("/preview", payload), self.post("/save", payload):
+            pass
+
+        saved = json.loads(self.output.read_text(encoding="utf-8"))
+        fixture = json.loads(
+            (self.root / "qa" / "calibration-fixture.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertNotIn("name", saved)
+        self.assertEqual(fixture["name_mode"], "embedded-in-pet")
+        self.assertIsNone(fixture["pet_name"])
+        self.assertFalse((self.root / "fonts").exists())
+
     def test_remote_ofl_font_can_be_explored_and_saved(self) -> None:
         family = RemoteFontFamily("remotetest", "Remote Test")
 
