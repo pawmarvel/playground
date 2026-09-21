@@ -424,8 +424,10 @@ tests/                       unit and contract tests
 
 Do not add production reference screenshots, production prompts, mutable work
 directories, customer pets, generated bundles, or production release payloads
-to Git. Keep one or two compact development-only source-design examples plus
-the small tiered pet inventory used by the guide and local tests. Online
+to Git. Keep exactly three bounded development-only source-design examples plus
+the small tiered pet inventory used by the guide and local tests. Adding a
+fourth example requires replacing an existing example or an explicit repository
+policy review. Online
 fixtures retain source/license attribution; operator-provided fixtures are
 marked as unverified and remain development-only. Reviewed conformance bundles
 and production catalog releases are immutable S3 objects outside Git.
@@ -602,11 +604,14 @@ UTC timestamp and short label, but identity comes from `experiment.json` plus
 input and output hashes. A rerun creates another attempt or another experiment;
 it never replaces comparison evidence. Only `scratch/` permits replacement.
 
-Art prompts normally have design-product scope because the profile defines the
-art canvas. Pet prompts may later be shared across compatible product profiles,
-but the MVP snapshots them inside each experiment to avoid implicit reuse.
-References may remain design-scoped; every experiment still records their
-exact hashes, roles, and order.
+Art prompts have design-product scope because the profile defines the art
+canvas. Pet-transform development is also product-specific in the MVP. An
+operator may copy prompt text as the starting point for another profile, but
+must create and evaluate a new pet experiment in that profile's workspace;
+experiments, attempts, generated pets, and decisions are never shared across
+product roots. References may remain design-scoped; every experiment still
+records their exact hashes, roles, and order. Cross-product component reuse is
+a post-MVP optimization, not part of the bundle-authoring contract.
 
 Failed or discarded experiments may be removed by the cleanup policy in
 section 6.5. Draft experiments are never removed automatically. Published

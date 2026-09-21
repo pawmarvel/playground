@@ -42,10 +42,13 @@ The MVP provides:
 - [MVP architecture and bundle contract](docs/MVP_PRODUCTION_BUNDLE_CATALOG_DESIGN.md)
 - [Future iterations](docs/FUTURE_PERSONALIZATION_ITERATIONS.md)
 
-Design folders such as [`examples/life-is-good`](examples/life-is-good) and
-[`examples/charlie-well-trained`](examples/charlie-well-trained) contain their
-finished reference plus independently editable `-gpt.md` and `-gemini.md` art
-and pet-transformation prompts.
+The three development design folders are
+[`examples/life-is-good`](examples/life-is-good),
+[`examples/charlie-well-trained`](examples/charlie-well-trained), and
+[`examples/cooper`](examples/cooper). Cooper is the operations-guide example
+for ordered supporting references. Each folder contains its finished reference
+and provider-specific art and pet-transformation prompts; provider coverage may
+differ by example.
 Reusable non-customer pet QA fixtures live in
 [`examples/pet-inputs`](examples/pet-inputs). Pet-transform QA uses a three-dog
 smoke tier during iteration and an operator-selected release run of at least six

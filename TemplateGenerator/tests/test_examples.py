@@ -73,7 +73,7 @@ class RepositoryExampleTests(unittest.TestCase):
     def test_repository_fixtures_are_complete_and_decodable(self) -> None:
         project = Path(__file__).resolve().parents[1]
         examples = project / "examples"
-        design_fixtures = ("life-is-good", "charlie-well-trained")
+        design_fixtures = ("life-is-good", "charlie-well-trained", "cooper")
         self.assertEqual(
             {
                 path.name
@@ -88,29 +88,31 @@ class RepositoryExampleTests(unittest.TestCase):
         )
         for fixture in design_fixtures:
             root = examples / fixture
+            prompts = ["art-template-gpt.md", "pet-transform-gpt.md"]
+            if fixture != "cooper":
+                prompts.extend(["art-template-gemini.md", "pet-transform-gemini.md"])
             self.assertTrue(
-                {
-                    "reference-design.png",
-                    "art-template-gpt.md",
-                    "art-template-gemini.md",
-                    "pet-transform-gpt.md",
-                    "pet-transform-gemini.md",
-                }.issubset({path.name for path in root.iterdir()}),
+                {"reference-design.png", *prompts}.issubset(
+                    {path.name for path in root.iterdir()}
+                ),
             )
             with Image.open(root / "reference-design.png") as image:
                 image.load()
                 self.assertGreater(image.width, 0)
                 self.assertGreater(image.height, 0)
-            for prompt in (
-                "art-template-gpt.md",
-                "art-template-gemini.md",
-                "pet-transform-gpt.md",
-                "pet-transform-gemini.md",
-            ):
+            for prompt in prompts:
                 self.assertGreater(
                     len((root / prompt).read_text(encoding="utf-8").strip()),
                     100,
                 )
+            if fixture == "cooper":
+                supporting = sorted((root / "reference-designs").glob("*.png"))
+                self.assertEqual(len(supporting), 2)
+                for reference in supporting:
+                    with Image.open(reference) as image:
+                        image.load()
+                        self.assertGreater(image.width, 0)
+                        self.assertGreater(image.height, 0)
 
         pet_names = {
             "australian-shepherd.png", "beagle.jpg", "bernese-mountain.png",

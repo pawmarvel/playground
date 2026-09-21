@@ -300,6 +300,36 @@ def _validate_image(path: Path, label: str) -> Path:
     return path
 
 
+def _warn_art_reference_aspect_mismatch(
+    samples: Sequence[Path], requested_size: str
+) -> None:
+    """Warn when screenshot geometry differs from the authoritative art canvas."""
+    if not re.fullmatch(r"\d+x\d+", requested_size):
+        return
+    target_width, target_height = (
+        int(value) for value in requested_size.split("x", 1)
+    )
+    for index, sample in enumerate(samples, start=1):
+        try:
+            with Image.open(sample) as image:
+                source_width, source_height = image.size
+        except (OSError, UnidentifiedImageError):
+            # This diagnostic must not introduce a new image-validation contract.
+            continue
+        if source_width * target_height == target_width * source_height:
+            continue
+        print(
+            "Warning: sample design "
+            f"{index} has aspect ratio {source_width}x{source_height}, but the "
+            f"authoritative product-profile art canvas is {requested_size}. "
+            "The output will use the product-profile dimensions and map the "
+            "reference composition by normalized coordinates; review the result "
+            "for unintended crop, stretching, or reflow.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 def _read_prompt(path: Path) -> tuple[Path, str]:
     path = _validate_regular_file(path, "prompt file")
     try:
@@ -441,19 +471,28 @@ def _api_prompt(user_prompt: str, samples: list[Path], pet: Path | None) -> str:
             "- USER PET: the first supplied image; use it only for the customer's identity."
         )
         roles.append(
-            "- REFERENCE DESIGN: the second supplied image; use its pet depiction "
-            "for style, pose, expression, crop, and treatment, never identity."
+            "- PRIMARY REFERENCE DESIGN: the second supplied image; use it for "
+            "crop, composition, palette, and artistic treatment, never pet "
+            "identity or facial expression."
         )
         if len(samples) > 1:
             roles.append(
                 "- ADDITIONAL REFERENCE DESIGNS: all remaining images, in "
-                "supplied order; use them only as supporting treatment evidence."
+                "supplied order; use them only to clarify style and detail, "
+                "never to override primary geometry, palette, or content."
             )
     elif samples:
         roles.append(
-            "- SAMPLE DESIGNS: all supplied images, in supplied order; use them for "
-            "style, pose, expression, and treatment."
+            "- PRIMARY REFERENCE DESIGN: the first supplied image; it is "
+            "authoritative for geometry, crop, composition, palette, fixed "
+            "content, and treatment."
         )
+        if len(samples) > 1:
+            roles.append(
+                "- ADDITIONAL REFERENCE DESIGNS: all remaining images, in "
+                "supplied order; use them only to clarify style and detail, "
+                "never to override the primary geometry, palette, or content."
+            )
     elif pet is not None:
         roles.append(
             "- USER PET: the supplied image; use it only for the customer's identity."
@@ -750,6 +789,8 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         )
     except ImageSizeError as exc:
         raise UserInputError(str(exc)) from exc
+    if profile_layer == "art":
+        _warn_art_reference_aspect_mismatch(samples, request_size)
     api_key_file, api_key = _resolve_api_key(args.api_key_file, provider=provider)
     api_output_format = _api_output_format(args.output_format)
     primary_input = samples[0] if samples else pet

@@ -21,6 +21,10 @@ selection, or print-candidate paths.
 
 - Scope every authoring workspace by both design and product profile:
   `authoring/<design-id>/<product-profile-id>/`.
+- For the MVP, develop art and pet transformation independently inside each
+  design-product workspace. Do not bind another product profile's selected art
+  or pet experiment into this workspace; differing geometry and product QA are
+  validated through a complete product-specific authoring flow.
 - Treat an experiment as one prompt/model/configuration candidate.
 - Treat an attempt as one immutable execution. A stochastic rerun gets a new
   attempt ID; changing prompt, model, references, or generation settings gets a
@@ -106,16 +110,15 @@ Then prepare the private design inputs and generate one configuration for this
 design/product iteration:
 
 ```bash
-PAWMARVEL_DESIGN_ID="life-is-good"
+PAWMARVEL_DESIGN_ID="cooper"
 PAWMARVEL_PRODUCT_PROFILE_ID="blanket-king-9375x12375"
 PAWMARVEL_DESIGN_INPUT="$PAWMARVEL_PROJECT/work/design-inputs/$PAWMARVEL_DESIGN_ID"
 
-mkdir -p "$PAWMARVEL_DESIGN_INPUT"
-cp "$PAWMARVEL_PROJECT/examples/life-is-good/reference-design.png" "$PAWMARVEL_DESIGN_INPUT/"
-cp "$PAWMARVEL_PROJECT/examples/life-is-good/art-template-gpt.md" "$PAWMARVEL_DESIGN_INPUT/"
-cp "$PAWMARVEL_PROJECT/examples/life-is-good/pet-transform-gpt.md" "$PAWMARVEL_DESIGN_INPUT/"
-cp "$PAWMARVEL_PROJECT/examples/life-is-good/font-reference.json" "$PAWMARVEL_DESIGN_INPUT/"
-cp "$PAWMARVEL_PROJECT/examples/life-is-good/layout-reference.json" "$PAWMARVEL_DESIGN_INPUT/"
+mkdir -p "$PAWMARVEL_DESIGN_INPUT/reference-designs"
+cp "$PAWMARVEL_PROJECT/examples/cooper/reference-design.png" "$PAWMARVEL_DESIGN_INPUT/"
+cp "$PAWMARVEL_PROJECT/examples/cooper/reference-designs/"*.png "$PAWMARVEL_DESIGN_INPUT/reference-designs/"
+cp "$PAWMARVEL_PROJECT/examples/cooper/art-template-gpt.md" "$PAWMARVEL_DESIGN_INPUT/"
+cp "$PAWMARVEL_PROJECT/examples/cooper/pet-transform-gpt.md" "$PAWMARVEL_DESIGN_INPUT/"
 
 PAWMARVEL_CONFIG="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" init-config \
   --design-id "$PAWMARVEL_DESIGN_ID" \
@@ -123,6 +126,7 @@ PAWMARVEL_CONFIG="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" init-config 
 
 "${EDITOR:-vi}" "$PAWMARVEL_CONFIG"
 source "$PAWMARVEL_CONFIG"
+export PAWMARVEL_PET_NAME="COOPER"
 ```
 
 `init-shared-config` derives and prints the fixed absolute path
@@ -249,9 +253,10 @@ intended file when opening a new terminal:
 ```bash
 PAWMARVEL_PROJECT="/Users/qbit/Documents/PawMarvel/Code/playground/TemplateGenerator"
 PAWMARVEL_SHARED_CONFIG="$PAWMARVEL_PROJECT/work/configs/pawmarvel-shared.env"
-PAWMARVEL_CONFIG="$PAWMARVEL_PROJECT/work/configs/life-is-good--blanket-king-9375x12375--v01.env"
+PAWMARVEL_CONFIG="$PAWMARVEL_PROJECT/work/configs/cooper--blanket-king-9375x12375--v01.env"
 source "$PAWMARVEL_SHARED_CONFIG"
 source "$PAWMARVEL_CONFIG"
+export PAWMARVEL_PET_NAME="COOPER"
 printf 'loaded shared config: %s\n' "$PAWMARVEL_SHARED_CONFIG_FILE"
 printf 'loaded config: %s\n' "$PAWMARVEL_CONFIG_FILE"
 ```
@@ -328,18 +333,21 @@ inputs to its successor experiment.
 The profile controls preview art size, transformed-pet canvas, and print size.
 The screenshot supplies visual evidence only. Its normalized region ratios may
 seed layout authoring, but its pixel dimensions are never authoritative product
-or print geometry.
+or print geometry. When a design reference and the profile art canvas have
+different aspect ratios, `pawmarvel-generate` prints a warning for every
+mismatched reference. The call continues using the profile dimensions; inspect
+the generated art for unintended cropping, stretching, or reflow.
 
 ## 4. Artifact lifecycle
 
 Operator-supplied design sources are separate from generated experiments:
 
 ```text
-work/design-inputs/life-is-good/
+work/design-inputs/cooper/
   reference-design.png
   reference-designs/                  # optional supporting finished-design views
-    pet-style-closeup.png
-    pet-pose-and-crop.png
+    01-reference-design.png
+    02-reference-design.png
   art-template-gpt.md
   pet-transform-gpt.md
   font-reference.json                 # optional
@@ -350,21 +358,23 @@ This ignored folder is mutable operator input. Every experiment snapshots the
 exact files it consumes under its own `inputs/` directory, so later source
 edits cannot silently alter an existing attempt.
 
-One reference design used for two products creates two independent roots:
+One reference design used for two products creates two independent roots. In
+the MVP, run art and pet experimentation separately in both roots even when
+their prompts begin with the same source text:
 
 ```text
-work/authoring/life-is-good/
+work/authoring/cooper/
   blanket-king-9375x12375/
   blanket-twin-full-7875x9375/
 ```
 
-Do not place generated files directly under `authoring/life-is-good/`. The
+Do not place generated files directly under `authoring/cooper/`. The
 design directory is a namespace, not a selectable workspace.
 
 The king-blanket example evolves as follows:
 
 ```text
-work/authoring/life-is-good/blanket-king-9375x12375/
+work/authoring/cooper/blanket-king-9375x12375/
   benchmark-selections/              # reviewed smoke/release run plans
   experiments/
     art/art-gpt-v01/
@@ -412,14 +422,14 @@ work/authoring/life-is-good/blanket-king-9375x12375/
       print-candidate.json
       outputs/
   graduations/
-    life-is-good-blanket-king-v01/
+    cooper-blanket-king-v01/
       selection.json                  # final hash-bound approval and bundle input
       publications/2026-09-13.001--v000001.json
   scratch/                            # replaceable and never publishable
 
 work/exchange/
   bundles/
-    life-is-good--blanket-king-9375x12375/
+    cooper--blanket-king-9375x12375/
       v000001/                        # immutable FE input
   releases/
     <release-id>/catalog.json         # local immutable S3 staging index
@@ -888,24 +898,10 @@ default is `PET`. The value in the **Preview pet name** field at Save time
 becomes the QA fixture recorded for this immutable attempt. It is deliberately
 independent from the exact lettering in the finished reference.
 
-The checked-in LifeIsGood `layout-reference.json` identifies separate pet and
-personalized-name regions in the screenshot and binds them to the screenshot
-hash. On a new layout, the editor maps the regions' normalized edges to the
-product-profile art canvas. For this 242×265 reference and 800×1056 preview it
-seeds the pet box at approximately `162,143,479,590` and the name box at
-approximately `40,713,720,215`. Screenshot pixels remain authoring guidance,
-not the print contract.
-
-The checked-in LifeIsGood `font-reference.json` identifies the screenshot
-rectangle containing `CHARLIE`, records that exact visible text, and binds both
-to the reference image hash. The editor renders `CHARLIE` through every
-candidate font for a like-for-like comparison; it never compares `SAUSAGE` to
-the screenshot's `CHARLIE` or projects the product-layout name box back onto the
-screenshot. This artifact is authoring evidence only and is not included in
-the production bundle.
-
-For a new design, omit both `--layout-reference` and `--font-reference` on the
-first layout experiment. In the reference canvas, use **Select pet region** to
+The Cooper example intentionally starts without checked-in layout or font
+reference JSON. In its first layout experiment, omit both
+`--layout-reference` and `--font-reference`. In the reference canvas, use
+**Select pet region** to
 draw the intended replaceable-pet placement envelope. Then use **Select name
 region** to draw a tight rectangle around the complete personalized-name line,
 type the exact visible characters in **Reference text as shown**, and select
@@ -913,15 +909,16 @@ type the exact visible characters in **Reference text as shown**, and select
 Pillow preview before saving. Saving writes `qa/layout-reference.json` and
 `qa/font-reference.json`; pass both files to later layout experiments using the
 same reference bytes. Both artifacts deliberately use the same name region.
-Use `--reference-text "CHARLIE"` only as an initial UI convenience when no
-saved region artifact exists.
+Use `--reference-text "CHARLIE"` only as an initial UI convenience when no saved
+region artifact exists. This value must match the visible text in the primary
+reference; it is separate from the `COOPER` personalized preview name.
 
 The mapped boxes are initial recommendations. A screenshot can have a different
 aspect ratio, and generated art can reflow fixed decorations, so adjust the
 boxes against the actual art/pet output before saving. If fixed art elements
-such as the LifeIsGood title, rainbow, paws, or tagline differ materially from
-the reference, reject or rerun the art experiment; do not disguise an upstream
-art failure by moving the pet or name box.
+differ materially from the Cooper reference, reject or rerun the art
+experiment; do not disguise an upstream art failure by moving the pet or name
+box.
 
 The compositor alpha-trims the representative pet, contains it without
 distortion, and
@@ -940,8 +937,7 @@ nominal and minimum sizes. Similarity measures glyph
 shape; confidence is conservative evidence for choosing the winner, not a
 probability. A high-confidence winner may be selected automatically. Medium or
 low confidence still uses rank one for the initial preview but requires an
-explicit operator selection before Save; this is the
-expected LifeIsGood behavior because distressed screenshot lettering is noisy.
+explicit operator selection before Save.
 Changing the reference region or reference text invalidates the ranking and
 reruns it.
 
@@ -1015,7 +1011,7 @@ PAWMARVEL_LAYOUT_ALT_PET="$PAWMARVEL_PET_EXPERIMENT/attempts/release-white-fluff
 test -f "$PAWMARVEL_LAYOUT_ALT_PET"
 ```
 
-Choose that file from **Add transformed pet for QA**, test both `SAUSAGE` and
+Choose that file from **Add transformed pet for QA**, test both `COOPER` and
 `MARSHMALLOW`, switch between the alternate and pinned pet, and save once the
 same geometry works for both. A temporary alternate pet does not require a new
 layout experiment.
@@ -1038,7 +1034,7 @@ temporary GUI pet switching does not.
 Inspect
 `reviews/layout/layout-fixture/artifacts/layout-comparison.png`. It labels the
 experiment, pet name, font, and name-box dimensions. Confirm that pet placement
-and nominal-size/shrink-only name fitting work for both the SAUSAGE and
+and nominal-size/shrink-only name fitting work for both the COOPER and
 MARSHMALLOW fixtures.
 
 After review, enter the winning review, experiment, and attempt once. The block
@@ -1298,7 +1294,7 @@ paths, and records the reviewer directly in `selection.json`. There is no
 separate reusable approval file.
 
 ```bash
-PAWMARVEL_GRADUATION_ID="life-is-good-blanket-king-v01"
+PAWMARVEL_GRADUATION_ID="cooper-blanket-king-v01"
 PAWMARVEL_ASSEMBLY_REVIEW="$(dirname "$PAWMARVEL_ASSEMBLY_DECISION")"
 
 PAWMARVEL_SELECTION="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" graduate \
@@ -1452,12 +1448,12 @@ aws sts get-caller-identity --profile "$AWS_PROFILE" --region "$AWS_REGION"
 After a successful publication, the immutable S3 objects follow the same
 relative paths as `work/exchange/`. For example, with bucket
 `alphapaw-pod-designer-prod`, prefix `Template/MVP-test`, release
-`2026-09-13.001`, and one Life Is Good blanket bundle, S3 contains:
+`2026-09-13.001`, and one Cooper blanket bundle, S3 contains:
 
 ```text
 s3://alphapaw-pod-designer-prod/Template/MVP-test/
   bundles/
-    life-is-good--blanket-king-9375x12375/
+    cooper--blanket-king-9375x12375/
       v000001/
         bundle.json                         # FE contract and asset inventory
         product-profile.json
@@ -1590,7 +1586,7 @@ literal values into application code.
 
 ```bash
 PAWMARVEL_SECOND_PET="$PAWMARVEL_PROJECT/examples/pet-inputs/white-fluffy-dog.png"
-PAWMARVEL_SECOND_RUN="$PAWMARVEL_PROJECT/work/consumer-tests/life-is-good--blanket-king-9375x12375/v000001/white-fluffy-dog"
+PAWMARVEL_SECOND_RUN="$PAWMARVEL_PROJECT/work/consumer-tests/cooper--blanket-king-9375x12375/v000001/white-fluffy-dog"
 PAWMARVEL_SECOND_PET_QUALITY="$("$PAWMARVEL_PROJECT/.venv/bin/python" -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["runtime"]["request_parameters"]["quality"])' "$PAWMARVEL_BUNDLE/bundle.json")"
 test "$PAWMARVEL_SECOND_PET_QUALITY" = "$PAWMARVEL_PET_QUALITY"
 mkdir -p "$PAWMARVEL_SECOND_RUN/preview" "$PAWMARVEL_SECOND_RUN/print"
@@ -1768,7 +1764,7 @@ product geometry change.
 Scratch output looks like this:
 
 ```text
-work/scratch/life-is-good/blanket-king-9375x12375/
+work/scratch/cooper/blanket-king-9375x12375/
   template/
     source-reference-design.png
     product-profile.json

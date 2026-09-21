@@ -72,7 +72,10 @@ class CliTests(unittest.TestCase):
             ["pet.png", "template.png"],
         )
         self.assertIn("USER PET", request["prompt"])
-        self.assertIn("REFERENCE DESIGN", request["prompt"])
+        self.assertIn("PRIMARY REFERENCE DESIGN", request["prompt"])
+        self.assertIn(
+            "never pet identity or facial expression", request["prompt"]
+        )
         self.assertIn("Create the requested asset", request["prompt"])
         self.assertNotIn("ADDITIONAL REFERENCE DESIGNS", request["prompt"])
         self.assertNotIn("Input image 1", request["prompt"])
@@ -97,6 +100,30 @@ class CliTests(unittest.TestCase):
         generate(args, client=client)
         self.assertEqual(len(client.images.kwargs["image"]), 1)
         self.assertNotIn("USER PET", client.images.kwargs["prompt"])
+        self.assertIn("PRIMARY REFERENCE DESIGN", client.images.kwargs["prompt"])
+
+    def test_sample_only_multiple_references_preserve_primary_role(self) -> None:
+        second = make_image(self.root / "second.png")
+        client = FakeClient()
+        args = build_parser().parse_args(
+            [
+                "--sample-design",
+                str(self.sample),
+                "--sample-design",
+                str(second),
+                "--prompt-file",
+                str(self.prompt),
+                "--api-key-file",
+                str(self.api_key_file),
+                "--output-dir",
+                str(self.root / "output"),
+            ]
+        )
+        generate(args, client=client)
+        api_prompt = client.images.kwargs["prompt"]
+        self.assertIn("PRIMARY REFERENCE DESIGN", api_prompt)
+        self.assertIn("ADDITIONAL REFERENCE DESIGNS", api_prompt)
+        self.assertIn("never to override the primary geometry", api_prompt)
 
     def test_pet_only_generation_is_supported(self) -> None:
         client = FakeClient()
@@ -166,8 +193,36 @@ class CliTests(unittest.TestCase):
             "--product-profile", str(profile),
             "--profile-layer", "art",
         )
-        generate(args, client=client)
+        diagnostics = io.StringIO()
+        with redirect_stderr(diagnostics):
+            generate(args, client=client)
         self.assertEqual(client.images.kwargs["size"], "800x1056")
+        self.assertIn(
+            "authoritative product-profile art canvas is 800x1056",
+            diagnostics.getvalue(),
+        )
+        self.assertIn("review the result", diagnostics.getvalue())
+
+    def test_matching_art_reference_aspect_ratio_does_not_warn(self) -> None:
+        self.sample = make_image(self.sample, size=(800, 1056))
+        profile = write_product_profile(
+            self.root / "product-profile.json",
+            create_product_profile(
+                profile_id="blanket-king-9375x12375",
+                print_size=ImageSize(9375, 12375),
+            ),
+        )
+        diagnostics = io.StringIO()
+        with redirect_stderr(diagnostics):
+            generate(
+                self.args(
+                    "--output-dir", str(self.root / "output"),
+                    "--product-profile", str(profile),
+                    "--profile-layer", "art",
+                ),
+                client=FakeClient(),
+            )
+        self.assertNotIn("aspect ratio", diagnostics.getvalue())
 
     def test_product_profile_derives_transformed_pet_generation_size(self) -> None:
         profile = write_product_profile(
