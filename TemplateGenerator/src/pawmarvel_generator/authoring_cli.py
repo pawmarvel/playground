@@ -26,6 +26,32 @@ from .operation_config import write_operation_config, write_shared_config
 DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+class _HelpfulArgumentParser(argparse.ArgumentParser):
+    """Reject invisible empty argv entries with shell-specific correction help."""
+
+    def parse_args(
+        self,
+        args: Sequence[str] | None = None,
+        namespace: argparse.Namespace | None = None,
+    ) -> argparse.Namespace:
+        values = list(sys.argv[1:] if args is None else args)
+        empty_positions = [
+            index + 1
+            for index, value in enumerate(values)
+            if value == "" and (index == 0 or not values[index - 1].startswith("--"))
+        ]
+        if empty_positions:
+            positions = ", ".join(str(position) for position in empty_positions)
+            self.error(
+                "received an empty command-line argument at argv position(s) "
+                f"{positions}. This commonly happens in zsh when an unset optional "
+                "array is expanded as \"${ARRAY[@]}\". Initialize the array first "
+                "(for layout references: PAWMARVEL_LAYOUT_REFERENCE_ARGS=()), "
+                "populate it only when optional files exist, or omit the expansion."
+            )
+        return super().parse_args(values, namespace)
+
+
 def _path_argument(value: str) -> Path:
     if not value.strip():
         raise argparse.ArgumentTypeError(
@@ -42,7 +68,7 @@ def _current_user() -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _HelpfulArgumentParser(
         prog="pawmarvel-author",
         description="Manage immutable template authoring experiments.",
     )

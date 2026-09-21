@@ -336,13 +336,18 @@ argument list once after sourcing the config:
 ```bash
 printf 'font reference:   <%s>\n' "$PAWMARVEL_FONT_REFERENCE"
 printf 'layout reference: <%s>\n' "$PAWMARVEL_LAYOUT_REFERENCE"
+typeset -a PAWMARVEL_LAYOUT_REFERENCE_ARGS
 PAWMARVEL_LAYOUT_REFERENCE_ARGS=()
 test -z "$PAWMARVEL_FONT_REFERENCE" || PAWMARVEL_LAYOUT_REFERENCE_ARGS+=(--font-reference "$PAWMARVEL_FONT_REFERENCE")
 test -z "$PAWMARVEL_LAYOUT_REFERENCE" || PAWMARVEL_LAYOUT_REFERENCE_ARGS+=(--layout-reference "$PAWMARVEL_LAYOUT_REFERENCE")
 ```
 
 For the first layout experiment of a new design, omit both options instead of
-passing empty strings. Save the regions in the editor, then use that attempt's
+passing empty strings. The `typeset` and `=()` lines are required even when both
+references are absent: in zsh, expanding an unset optional array as
+`"${PAWMARVEL_LAYOUT_REFERENCE_ARGS[@]}"` supplies one invisible empty argument,
+while an initialized empty array supplies no arguments. Save the regions in the
+editor, then use that attempt's
 `outputs/qa/font-reference.json` and `outputs/qa/layout-reference.json` as the
 inputs to its successor experiment.
 
@@ -947,6 +952,9 @@ attempts. The entire OFL catalog is snapshotted so later local font changes
 cannot alter the experiment.
 
 ```bash
+# Safe when the optional-reference setup block was skipped in a new shell.
+typeset -a PAWMARVEL_LAYOUT_REFERENCE_ARGS
+
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
   --kind layout \
   --experiment-id layout-v01 \
@@ -1895,6 +1903,7 @@ PAWMARVEL_SCRATCH_RUN="$PAWMARVEL_SCRATCH_PRODUCT/runs/sausage-dog-puppy"
 PAWMARVEL_SCRATCH_PRINT="$PAWMARVEL_SCRATCH_RUN/print"
 
 pawmarvel_pipeline_debug() {
+  typeset -a PAWMARVEL_LAYOUT_REFERENCE_ARGS
   "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-pipeline" \
     "${PAWMARVEL_REFERENCE_ARGS[@]}" \
     --art-prompt "$PAWMARVEL_ART_PROMPT" \

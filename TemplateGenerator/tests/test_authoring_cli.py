@@ -15,6 +15,27 @@ from pawmarvel_generator.authoring_cli import DEFAULT_PROJECT_ROOT, build_parser
 
 
 class AuthoringCliTests(unittest.TestCase):
+    def test_empty_optional_array_argument_has_actionable_error(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            build_parser().parse_args(
+                [
+                    "create-experiment",
+                    "--kind", "layout",
+                    "--experiment-id", "layout-v01",
+                    "--design-id", "cooper",
+                    "--product-profile", "profile.json",
+                    "",
+                    "--authoring-root", "work/authoring",
+                ]
+            )
+
+        self.assertEqual(raised.exception.code, 2)
+        message = stderr.getvalue()
+        self.assertIn("received an empty command-line argument", message)
+        self.assertIn("argv position(s) 10", message)
+        self.assertIn("PAWMARVEL_LAYOUT_REFERENCE_ARGS=()", message)
+
     def test_compare_prints_recorded_coverage_warnings(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             evaluation = Path(temporary) / "evaluation.json"
