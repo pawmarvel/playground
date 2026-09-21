@@ -1023,14 +1023,18 @@ Changing the reference region or reference text invalidates the ranking and
 reruns it.
 
 If the catalog has no acceptable match, enter an exact family name under
-**Explore another OFL font** and select **Search**. The editor offers matching
-local faces first. Only when no exact local family/file match exists does it
-query the official Google Fonts `ofl/` collection; fuzzy local suggestions
-remain visible alongside the remote results. Select a family, download it, and
-compare its available TTF faces with the authoritative Pillow preview. This is
-a bounded OFL-only lookup, not a general web-font search. It requires network
+**Explore another OFL font** and select **Search**. Curated style and family
+aliases are also supported for common cases; for example, `Bodoni`,
+`Didone-style serif`, and `high-contrast serif` resolve to verified OFL options
+such as Bodoni Moda and Libre Bodoni. The editor offers matching local faces
+first, then checks only the resolved exact families in the official Google Fonts
+`ofl/` collection. It does not download GitHub's full font tree or perform
+unbounded filename fuzzy matching. Select a family, download it, and compare its
+available TTF faces with the authoritative Pillow preview. This requires network
 access; `GITHUB_TOKEN` may be set in the shared private environment if
-unauthenticated GitHub API requests are rate-limited.
+unauthenticated GitHub API requests are rate-limited. Transient upstream errors
+are retried once and are returned as actionable messages in both the browser and
+layout CLI terminal.
 
 Downloaded families live only in the editor's temporary session cache. Saving
 a downloaded face copies the selected TTF, its `OFL.txt`, `METADATA.pb`, and

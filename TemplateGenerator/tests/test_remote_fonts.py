@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +16,7 @@ from pawmarvel_generator.remote_fonts import (
     normalize_google_font_family,
     search_google_ofl,
 )
+from pawmarvel_generator import remote_fonts
 
 
 class RemoteFontTests(unittest.TestCase):
@@ -30,26 +33,57 @@ class RemoteFontTests(unittest.TestCase):
         self.assertEqual(result, (RemoteFontFamily("amaticsc", "Amatic SC"),))
         listing.assert_called_once_with("amaticsc")
 
-    def test_fuzzy_search_is_limited_to_ofl_metadata_paths(self) -> None:
-        tree = {
-            "truncated": False,
-            "tree": [
-                {"path": "ofl/amaticsc/METADATA.pb"},
-                {"path": "ofl/assistant/METADATA.pb"},
-                {"path": "apache/roboto/METADATA.pb"},
-            ],
-        }
-        with (
-            patch(
-                "pawmarvel_generator.remote_fonts._family_listing",
-                side_effect=RemoteFontError("font family was not found in Google Fonts OFL"),
-            ),
-            patch("pawmarvel_generator.remote_fonts._request_json", return_value=tree),
-            patch("pawmarvel_generator.remote_fonts._tree_family_ids", None),
-        ):
-            result = search_google_ofl("amaticc")
-        self.assertEqual(result[0].family_id, "amaticsc")
-        self.assertNotIn("roboto", {item.family_id for item in result})
+    def test_bodoni_and_didone_aliases_resolve_to_verified_ofl_families(self) -> None:
+        with patch(
+            "pawmarvel_generator.remote_fonts._family_listing", return_value=[]
+        ) as listing:
+            bodoni = search_google_ofl("Bodoni")
+            didone = search_google_ofl("Didone-style serif")
+
+        self.assertEqual(
+            [family.family_id for family in bodoni],
+            ["bodonimoda", "librebodoni", "bodonimodasc"],
+        )
+        self.assertEqual(
+            [family.family_id for family in didone],
+            ["bodonimoda", "librebodoni", "bodonimodasc"],
+        )
+        self.assertEqual(listing.call_count, 6)
+
+    def test_unknown_family_does_not_download_the_global_google_fonts_tree(self) -> None:
+        with patch(
+            "pawmarvel_generator.remote_fonts._family_listing",
+            side_effect=RemoteFontError("font family was not found in Google Fonts OFL"),
+        ) as listing, patch(
+            "pawmarvel_generator.remote_fonts._request_json"
+        ) as request_json:
+            result = search_google_ofl("not a known family")
+
+        self.assertEqual(result, ())
+        listing.assert_called_once_with("notaknownfamily")
+        request_json.assert_not_called()
+
+    def test_json_request_retries_protocol_failure_and_returns_data(self) -> None:
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit: int) -> bytes:
+                return json.dumps({"ok": True}).encode("utf-8")
+
+        failure = urllib.error.URLError("connection reset")
+        with patch(
+            "pawmarvel_generator.remote_fonts.urllib.request.urlopen",
+            side_effect=[failure, Response()],
+        ) as urlopen, patch("pawmarvel_generator.remote_fonts.time.sleep") as sleep:
+            result = remote_fonts._request_json("https://api.github.com/test")
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once()
 
     def test_import_downloads_ttf_license_and_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

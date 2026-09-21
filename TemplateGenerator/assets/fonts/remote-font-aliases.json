@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "aliases": {
+    "bodoni": [
+      {"family_id": "bodonimoda", "label": "Bodoni Moda"},
+      {"family_id": "librebodoni", "label": "Libre Bodoni"},
+      {"family_id": "bodonimodasc", "label": "Bodoni Moda SC"}
+    ],
+    "bodonistyleserif": [
+      {"family_id": "bodonimoda", "label": "Bodoni Moda"},
+      {"family_id": "librebodoni", "label": "Libre Bodoni"},
+      {"family_id": "bodonimodasc", "label": "Bodoni Moda SC"}
+    ],
+    "didone": [
+      {"family_id": "bodonimoda", "label": "Bodoni Moda"},
+      {"family_id": "librebodoni", "label": "Libre Bodoni"},
+      {"family_id": "bodonimodasc", "label": "Bodoni Moda SC"}
+    ],
+    "didonestyleserif": [
+      {"family_id": "bodonimoda", "label": "Bodoni Moda"},
+      {"family_id": "librebodoni", "label": "Libre Bodoni"},
+      {"family_id": "bodonimodasc", "label": "Bodoni Moda SC"}
+    ],
+    "highcontrastserif": [
+      {"family_id": "bodonimoda", "label": "Bodoni Moda"},
+      {"family_id": "librebodoni", "label": "Libre Bodoni"},
+      {"family_id": "bodonimodasc", "label": "Bodoni Moda SC"}
+    ]
+  }
+}

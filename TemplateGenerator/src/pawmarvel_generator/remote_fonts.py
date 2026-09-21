@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import difflib
+import http.client
 import json
 import os
 import re
 import shutil
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +23,10 @@ GOOGLE_FONTS_RAW_PREFIX = "https://raw.githubusercontent.com/google/fonts/"
 MAX_REMOTE_FILE_BYTES = 12 * 1024 * 1024
 MAX_FAMILY_BYTES = 32 * 1024 * 1024
 MAX_FAMILY_FONTS = 16
+REMOTE_REQUEST_ATTEMPTS = 2
+REMOTE_RETRY_SECONDS = 0.25
 _FAMILY_ID = re.compile(r"[a-z0-9]{2,80}")
 _SAFE_FILENAME = re.compile(r"[A-Za-z0-9._,\[\]-]{1,160}")
-_tree_family_ids: tuple[str, ...] | None = None
 
 
 class RemoteFontError(ValueError):
@@ -64,6 +67,55 @@ def normalize_google_font_family(value: str) -> str:
     return normalized
 
 
+@lru_cache(maxsize=1)
+def _font_aliases() -> dict[str, tuple[RemoteFontFamily, ...]]:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "assets"
+        / "fonts"
+        / "remote-font-aliases.json"
+    )
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        aliases = value["aliases"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RemoteFontError(
+            f"remote font alias catalog is invalid: {path}: {exc}"
+        ) from exc
+    if value.get("schema_version") != 1 or not isinstance(aliases, dict):
+        raise RemoteFontError(f"remote font alias catalog must use schema_version 1: {path}")
+    result: dict[str, tuple[RemoteFontFamily, ...]] = {}
+    for raw_alias, raw_families in aliases.items():
+        alias = normalize_google_font_family(str(raw_alias))
+        if (
+            alias != raw_alias
+            or not isinstance(raw_families, list)
+            or not raw_families
+        ):
+            raise RemoteFontError(
+                f"invalid remote font alias entry {raw_alias!r}: {path}"
+            )
+        families: list[RemoteFontFamily] = []
+        for raw_family in raw_families:
+            if not isinstance(raw_family, dict):
+                raise RemoteFontError(
+                    f"invalid remote font alias family for {raw_alias!r}: {path}"
+                )
+            family_id = normalize_google_font_family(
+                str(raw_family.get("family_id", ""))
+            )
+            label = raw_family.get("label")
+            if not isinstance(label, str) or not label.strip():
+                raise RemoteFontError(
+                    f"remote font alias family has no label for {raw_alias!r}: {path}"
+                )
+            families.append(
+                RemoteFontFamily(family_id=family_id, label=label.strip())
+            )
+        result[alias] = tuple(families)
+    return result
+
+
 def _request_json(url: str) -> Any:
     headers = {
         "Accept": "application/vnd.github+json",
@@ -74,21 +126,38 @@ def _request_json(url: str) -> Any:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=20) as response:
-            raw = response.read(MAX_REMOTE_FILE_BYTES + 1)
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            raise RemoteFontError("font family was not found in Google Fonts OFL") from exc
-        if exc.code == 403:
-            raise RemoteFontError(
-                "Google Fonts search was rate-limited; retry later or set GITHUB_TOKEN"
-            ) from exc
-        raise RemoteFontError(
-            f"Google Fonts request failed with HTTP {exc.code}"
-        ) from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise RemoteFontError(f"Google Fonts request failed: {exc}") from exc
+    raw = b""
+    for attempt in range(REMOTE_REQUEST_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                raw = response.read(MAX_REMOTE_FILE_BYTES + 1)
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                raise RemoteFontError("font family was not found in Google Fonts OFL") from exc
+            if exc.code == 403:
+                raise RemoteFontError(
+                    "Google Fonts search was rate-limited; retry later or set GITHUB_TOKEN"
+                ) from exc
+            if (
+                exc.code not in {429, 500, 502, 503, 504}
+                or attempt + 1 == REMOTE_REQUEST_ATTEMPTS
+            ):
+                raise RemoteFontError(
+                    f"Google Fonts request failed with HTTP {exc.code}: {url}"
+                ) from exc
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+            http.client.HTTPException,
+        ) as exc:
+            if attempt + 1 == REMOTE_REQUEST_ATTEMPTS:
+                raise RemoteFontError(
+                    f"Google Fonts request failed after {REMOTE_REQUEST_ATTEMPTS} attempts: "
+                    f"url={url}; cause={exc}"
+                ) from exc
+        time.sleep(REMOTE_RETRY_SECONDS * (2**attempt))
     if len(raw) > MAX_REMOTE_FILE_BYTES:
         raise RemoteFontError("Google Fonts response exceeded the safety limit")
     try:
@@ -103,13 +172,32 @@ def _download(url: str) -> bytes:
     request = urllib.request.Request(
         url, headers={"User-Agent": "pawmarvel-template-generator/0.1"}
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            content = response.read(MAX_REMOTE_FILE_BYTES + 1)
-    except urllib.error.HTTPError as exc:
-        raise RemoteFontError(f"font download failed with HTTP {exc.code}") from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise RemoteFontError(f"font download failed: {exc}") from exc
+    content = b""
+    for attempt in range(REMOTE_REQUEST_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                content = response.read(MAX_REMOTE_FILE_BYTES + 1)
+            break
+        except urllib.error.HTTPError as exc:
+            if (
+                exc.code not in {429, 500, 502, 503, 504}
+                or attempt + 1 == REMOTE_REQUEST_ATTEMPTS
+            ):
+                raise RemoteFontError(
+                    f"font download failed with HTTP {exc.code}: {url}"
+                ) from exc
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+            http.client.HTTPException,
+        ) as exc:
+            if attempt + 1 == REMOTE_REQUEST_ATTEMPTS:
+                raise RemoteFontError(
+                    f"font download failed after {REMOTE_REQUEST_ATTEMPTS} attempts: "
+                    f"url={url}; cause={exc}"
+                ) from exc
+        time.sleep(REMOTE_RETRY_SECONDS * (2**attempt))
     if len(content) > MAX_REMOTE_FILE_BYTES:
         raise RemoteFontError("downloaded font artifact exceeded the safety limit")
     return content
@@ -124,27 +212,21 @@ def _family_listing(family_id: str) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)]
 
 
-def _all_family_ids() -> tuple[str, ...]:
-    global _tree_family_ids
-    if _tree_family_ids is not None:
-        return _tree_family_ids
-    value = _request_json(f"{GOOGLE_FONTS_API}/git/trees/main?recursive=1")
-    tree = value.get("tree") if isinstance(value, dict) else None
-    if not isinstance(tree, list) or value.get("truncated") is True:
-        raise RemoteFontError("Google Fonts family index was incomplete")
-    found = {
-        match.group(1)
-        for item in tree
-        if isinstance(item, dict) and isinstance(item.get("path"), str)
-        if (match := re.fullmatch(r"ofl/([a-z0-9]+)/METADATA\.pb", item["path"]))
-    }
-    _tree_family_ids = tuple(sorted(found))
-    return _tree_family_ids
-
-
 def search_google_ofl(query: str, *, limit: int = 8) -> tuple[RemoteFontFamily, ...]:
-    """Return exact or fuzzy OFL family matches without downloading font binaries."""
+    """Return verified exact or curated-alias OFL families without a global tree fetch."""
     family_id = normalize_google_font_family(query)
+    aliases = _font_aliases().get(family_id)
+    if aliases:
+        verified = []
+        for family in aliases[: max(1, min(limit, 12))]:
+            try:
+                _family_listing(family.family_id)
+            except RemoteFontError as exc:
+                if "not found" in str(exc):
+                    continue
+                raise
+            verified.append(family)
+        return tuple(verified)
     try:
         _family_listing(family_id)
     except RemoteFontError as exact_error:
@@ -152,17 +234,7 @@ def search_google_ofl(query: str, *, limit: int = 8) -> tuple[RemoteFontFamily, 
             raise
     else:
         return (RemoteFontFamily(family_id=family_id, label=query.strip()),)
-
-    scored = []
-    for candidate in _all_family_ids():
-        score = difflib.SequenceMatcher(None, family_id, candidate).ratio()
-        if family_id in candidate or candidate in family_id or score >= 0.58:
-            scored.append((score, candidate))
-    scored.sort(key=lambda item: (-item[0], item[1]))
-    return tuple(
-        RemoteFontFamily(family_id=candidate, label=candidate)
-        for _, candidate in scored[: max(1, min(limit, 12))]
-    )
+    return ()
 
 
 def import_google_ofl_family(family_id: str, destination: Path) -> ImportedFontFamily:

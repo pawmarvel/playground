@@ -23,7 +23,11 @@ from pawmarvel_generator.font_reference import font_reference_from_editor
 from pawmarvel_generator.layout_cli import build_parser
 from pawmarvel_generator.layout_reference import layout_reference_from_editor
 from pawmarvel_generator.layout_server import ConfigError, EditorConfig, create_server
-from pawmarvel_generator.remote_fonts import ImportedFontFamily, RemoteFontFamily
+from pawmarvel_generator.remote_fonts import (
+    ImportedFontFamily,
+    RemoteFontError,
+    RemoteFontFamily,
+)
 from pawmarvel_generator.renderer import render_preview
 
 
@@ -238,6 +242,21 @@ class LayoutServerTests(unittest.TestCase):
         self.assertTrue(result["local"])
         self.assertEqual(result["remote"], [])
         remote_search.assert_not_called()
+
+    def test_remote_font_search_failure_returns_structured_gateway_error(self) -> None:
+        with patch(
+            "pawmarvel_generator.layout_server.search_google_ofl",
+            side_effect=RemoteFontError("GitHub connection reset after retry"),
+        ):
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                self.post("/search-fonts", {"query": "Bodoni"})
+
+        self.assertEqual(raised.exception.code, 502)
+        payload = json.loads(raised.exception.read())
+        raised.exception.close()
+        self.assertEqual(payload["code"], "remote_font_search_failed")
+        self.assertIn("Bodoni", payload["error"])
+        self.assertIn("connection reset", payload["error"])
 
     def test_preview_and_save_use_shared_renderer(self) -> None:
         payload = {"layout": layout_data()}

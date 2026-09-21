@@ -32,7 +32,10 @@ instance is the intended face and renders consistently in both the Pillow
 reference renderer and the target browser.
 
 The GUI's remote lookup is restricted to the official Google Fonts OFL tree.
-Open-world discovery outside that source remains deferred.
+`remote-font-aliases.json` maps a small reviewed set of common style and family
+terms to exact OFL family IDs. Runtime search verifies those directories
+directly and never downloads GitHub's global font tree. Open-world discovery
+outside that source remains deferred.
 
 ## Priority family coverage
 

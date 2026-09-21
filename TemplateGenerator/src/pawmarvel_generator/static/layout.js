@@ -251,6 +251,41 @@ function addFontFace(candidate) {
     `@font-face { font-family: "${candidate.id}"; src: url("/fonts/${candidate.id}") format("truetype"); }\n`;
 }
 
+async function remoteFontRequest(path, payload, operation, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(`${operation} timed out after ${Math.round(timeoutMs / 1000)} seconds. Check GitHub access and retry.`);
+    }
+    throw new Error(
+      `${operation} could not reach the local layout service. ` +
+      "Check the layout CLI terminal for the upstream GitHub error and retry."
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+  const body = await response.text();
+  let result;
+  try {
+    result = body ? JSON.parse(body) : {};
+  } catch (_error) {
+    throw new Error(`${operation} received an invalid response from the local layout service (HTTP ${response.status}).`);
+  }
+  if (!response.ok) {
+    throw new Error(result.error || `${operation} failed with HTTP ${response.status}`);
+  }
+  return result;
+}
+
 async function searchFonts() {
   const query = fontSearchQuery.value.trim();
   if (!query) {
@@ -262,13 +297,9 @@ async function searchFonts() {
   fontSearchResults.hidden = true;
   fontSearchStatus.textContent = "Searching the local catalog…";
   try {
-    const response = await fetch("/search-fonts", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({query}),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || response.statusText);
+    const result = await remoteFontRequest(
+      "/search-fonts", {query}, "Font search", 45000
+    );
     fontSearchResults.replaceChildren();
     const matches = [...result.local, ...result.remote];
     for (const match of matches) {
@@ -311,13 +342,12 @@ async function importOrSelectFont() {
   fontImportButton.disabled = true;
   fontSearchStatus.textContent = "Downloading and validating OFL artifacts…";
   try {
-    const response = await fetch("/import-font", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({family_id: option.value}),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || response.statusText);
+    const result = await remoteFontRequest(
+      "/import-font",
+      {family_id: option.value},
+      "Font download",
+      120000,
+    );
     for (const candidate of result.candidates) {
       if (!candidateById(candidate.id)) {
         boot.fontCandidates.push(candidate);

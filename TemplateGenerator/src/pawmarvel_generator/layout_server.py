@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import webbrowser
 from copy import deepcopy
 from dataclasses import dataclass
@@ -915,8 +916,23 @@ def _make_handler(
                             {"query": query, "local": local, "remote": remote}
                         ).encode("utf-8"),
                     )
-                except (ConfigError, RemoteFontError) as exc:
+                except ConfigError as exc:
                     self._json_error(HTTPStatus.BAD_REQUEST, str(exc))
+                except RemoteFontError as exc:
+                    self._json_error(
+                        HTTPStatus.BAD_GATEWAY,
+                        "remote OFL font search failed for "
+                        f"{locals().get('query')!r}: {exc}",
+                        code="remote_font_search_failed",
+                    )
+                except Exception as exc:
+                    traceback.print_exception(type(exc), exc, exc.__traceback__)
+                    self._json_error(
+                        HTTPStatus.INTERNAL_SERVER_ERROR,
+                        f"font search failed unexpectedly for {locals().get('query')!r}; "
+                        "see the layout CLI terminal for details",
+                        code="font_search_internal_error",
+                    )
                 return
             if self.path == "/import-font":
                 try:
@@ -975,7 +991,15 @@ def _make_handler(
                             }
                         ).encode("utf-8"),
                     )
-                except (ConfigError, FontCatalogError, RemoteFontError, OSError) as exc:
+                except RemoteFontError as exc:
+                    if 'family_dir' in locals() and family_dir.exists():
+                        shutil.rmtree(family_dir, ignore_errors=True)
+                    self._json_error(
+                        HTTPStatus.BAD_GATEWAY,
+                        f"remote OFL font import failed: {exc}",
+                        code="remote_font_import_failed",
+                    )
+                except (ConfigError, FontCatalogError, OSError) as exc:
                     if 'family_dir' in locals() and family_dir.exists():
                         shutil.rmtree(family_dir, ignore_errors=True)
                     self._json_error(HTTPStatus.BAD_REQUEST, str(exc))
