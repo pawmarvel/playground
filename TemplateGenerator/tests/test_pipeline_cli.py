@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import hashlib
 import io
 import json
@@ -202,6 +203,30 @@ class PipelineCliTests(unittest.TestCase):
             ["primary", "supporting"],
         )
         self.assertEqual(len(record["sources"]["staged_source_references"]), 2)
+
+    def test_layout_name_is_not_forwarded_to_pet_prompt_without_token(self) -> None:
+        client = CombinedClient()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            run_pipeline(self.args(), client=client, layout_runner=self.save_layout)
+
+        self.assertNotIn("SAUSAGE", client.images.calls[1]["prompt"])
+        self.assertNotIn("prompt contains no {{PET_NAME}}", stderr.getvalue())
+
+    def test_artistic_name_prompt_requires_name_before_paid_calls(self) -> None:
+        self.pet_prompt.write_text(
+            "Render {{PET_NAME}} as artistic lettering with the transformed pet.",
+            encoding="utf-8",
+        )
+        args = self.args()
+        args.pet_name = None
+        client = CombinedClient()
+
+        with self.assertRaisesRegex(PipelineError, "provide --pet-name"):
+            run_pipeline(args, client=client, layout_runner=self.save_layout)
+
+        self.assertEqual(client.images.call_count, 0)
 
     def test_preflight_stops_before_paid_calls(self) -> None:
         self.run.mkdir()

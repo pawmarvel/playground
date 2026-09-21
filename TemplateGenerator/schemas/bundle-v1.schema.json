@@ -228,7 +228,7 @@
     "selectedComponents": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["art", "pet_runtime", "layout_font"],
+      "required": ["art", "pet_runtime", "layout"],
       "properties": {
         "art": {
           "type": "object",
@@ -249,7 +249,7 @@
             "experiment_sha256": {"$ref": "#/$defs/sha256"}
           }
         },
-        "layout_font": {
+        "layout": {
           "type": "object",
           "additionalProperties": false,
           "required": ["experiment_id", "attempt_id", "layout_sha256", "font_sha256"],

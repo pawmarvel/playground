@@ -14,7 +14,7 @@
     "graduation_id": {"type": "string", "minLength": 1},
     "design_id": {"type": "string", "minLength": 1},
     "product_profile_id": {"type": "string", "minLength": 1},
-    "selected": {"type": "object", "required": ["art", "pet_runtime", "layout_font"]},
+    "selected": {"type": "object", "required": ["art", "pet_runtime", "layout"]},
     "sources": {
       "type": "object",
       "additionalProperties": false,

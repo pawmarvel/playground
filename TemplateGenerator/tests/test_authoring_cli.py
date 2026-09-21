@@ -134,6 +134,35 @@ class AuthoringCliTests(unittest.TestCase):
 
         self.assertIsNone(args.pet_name)
 
+    def test_pet_experiment_accepts_an_optional_default_pet_name(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "create-experiment",
+                "--kind", "pet",
+                "--experiment-id", "pet-gpt-v01",
+                "--design-id", "cooper",
+                "--product-profile", "profile.json",
+                "--pet-name", "COOPER",
+                "--authoring-root", "work/authoring",
+            ]
+        )
+
+        self.assertEqual(args.pet_name, "COOPER")
+
+    def test_prepare_print_pet_name_is_optional(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "prepare-print",
+                "--candidate-id", "print-finalist-0001",
+                "--authoring-product", "work/authoring/design/product",
+                "--art-attempt", "art-attempt",
+                "--pet-attempt", "pet-attempt",
+                "--layout-attempt", "layout-attempt",
+            ]
+        )
+
+        self.assertIsNone(args.pet_name)
+
     def test_help_does_not_require_resolvable_current_user(self) -> None:
         output = io.StringIO()
         with (

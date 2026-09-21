@@ -7,6 +7,7 @@ import shutil
 import statistics
 import sys
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -280,6 +281,7 @@ def create_experiment(
     parent_experiment_id: str | None, base_bundle_revision: int | None,
     created_by: str, font_reference: Path | None = None,
     layout_reference: Path | None = None,
+    pet_name: str | None = None,
 ) -> Path:
     if kind not in KINDS:
         raise AuthoringError(f"kind must be one of: {', '.join(sorted(KINDS))}")
@@ -316,6 +318,12 @@ def create_experiment(
         profile_info = _copy(product_profile, inputs / "product-profile.json")
         record_inputs: dict[str, Any] = {"product_profile": profile_info}
         generation: dict[str, Any] | None = None
+        if pet_name is not None and kind != "pet":
+            raise AuthoringError("--pet-name is only valid for a pet experiment")
+        if pet_name is not None:
+            pet_name = pet_name.strip()
+            if not pet_name:
+                raise AuthoringError("--pet-name must not be empty")
         if kind in {"art", "pet"}:
             if not prompt_file or not references or not provider or not model:
                 raise AuthoringError(f"{kind} experiment requires prompt, reference, provider, and model")
@@ -352,6 +360,13 @@ def create_experiment(
                     "background": "transparent",
                 },
             }
+            if kind == "pet" and pet_name is not None:
+                if PET_NAME_PLACEHOLDER in prompt_file.read_text(encoding="utf-8"):
+                    try:
+                        pet_name = validate_pet_name(pet_name, pet_name_policy(64))
+                    except PersonalizationError as exc:
+                        raise AuthoringError(f"invalid --pet-name: {exc}") from exc
+                generation["prompt_variables"] = {"pet_name": pet_name}
         else:
             if not art_attempt or not pet_attempt:
                 raise AuthoringError("layout experiment requires --art-attempt and --pet-attempt")
@@ -622,8 +637,24 @@ def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
     _id(attempt_id, "attempt ID")
     experiment = experiment.expanduser().resolve()
     meta = _json(experiment / "experiment.json")
+    if meta.get("kind") == "pet" and pet_name is None:
+        generation = meta.get("generation")
+        prompt_variables = (
+            generation.get("prompt_variables", {})
+            if isinstance(generation, dict)
+            else {}
+        )
+        inherited_pet_name = prompt_variables.get("pet_name")
+        if isinstance(inherited_pet_name, str):
+            pet_name = inherited_pet_name
     if meta.get("status") == "discarded":
         raise AuthoringError("cannot run a discarded experiment")
+    resolved_generation = deepcopy(meta.get("generation"))
+    if meta.get("kind") == "pet" and isinstance(resolved_generation, dict):
+        if pet_name is None:
+            resolved_generation.pop("prompt_variables", None)
+        else:
+            resolved_generation["prompt_variables"] = {"pet_name": pet_name}
     final = experiment / "attempts" / attempt_id
     partial = final.with_name(final.name + ".partial")
     if final.exists() or partial.exists():
@@ -633,7 +664,7 @@ def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
         "schema_version": 1, "attempt_id": attempt_id, "experiment_id": meta["experiment_id"],
         "kind": meta["kind"], "status": "running", "started_at": utc_now(),
         "experiment_sha256": sha256(experiment / "experiment.json"),
-        "resolved_generation": meta.get("generation"),
+        "resolved_generation": resolved_generation,
         "input_hashes": {
             key: value.get("sha256")
             for key, value in meta.get("inputs", {}).items()
@@ -921,8 +952,9 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
         layout_record = _attempt_record(layout_attempt)
         composition_pet_name = str(
             layout_record.get("layout_fixture", {}).get("pet_name", "")
-        ).strip()
-        if not composition_pet_name:
+        ).strip() or None
+        composition_layout = load_layout(layout_attempt / "outputs")
+        if composition_layout.has_name and not composition_pet_name:
             raise AuthoringError(
                 "layout attempt does not record its fixture pet name; create a new layout attempt"
             )
@@ -1320,7 +1352,7 @@ def prepare_print_candidate(
     *, candidate_id: str, authoring_product: Path, art_attempt: Path | None,
     pet_attempt: Path | None, layout_attempt: Path | None,
     art_review: Path | None = None, pet_review: Path | None = None,
-    layout_review: Path | None = None, pet_name: str, backend: str,
+    layout_review: Path | None = None, pet_name: str | None = None, backend: str,
     reuse_template_from: Path | None = None,
 ) -> Path:
     """Create one immutable profile-sized finalist from exact component attempts."""
@@ -1498,9 +1530,45 @@ def prepare_print_candidate(
     )
     profile_path = _relative_input(layout_experiment, profile_descriptor)
     profile = load_product_profile(profile_path)
-    pet_name = pet_name.strip()
+    preview_layout = load_layout(layout_attempt / "outputs")
+    layout_fixture_name = str(
+        records["layout"].get("layout_fixture", {}).get("pet_name") or ""
+    ).strip() or None
+    pet_prompt_variables = records["pet"].get("prompt_variables")
+    pet_prompt_name = (
+        pet_prompt_variables.get("pet_name", "").strip() or None
+        if isinstance(pet_prompt_variables, dict)
+        and isinstance(pet_prompt_variables.get("pet_name"), str)
+        else None
+    )
+    supplied_pet_name = (pet_name or "").strip() or None
+    if preview_layout.has_name:
+        pet_name = supplied_pet_name or layout_fixture_name
+    else:
+        if not pet_prompt_name:
+            raise AuthoringError(
+                "embedded-name layout requires the selected representative pet "
+                "attempt to record an applied {{PET_NAME}} prompt variable"
+            )
+        if supplied_pet_name and pet_prompt_name and supplied_pet_name != pet_prompt_name:
+            raise AuthoringError(
+                mismatch(
+                    "embedded pet-name source",
+                    expected=pet_prompt_name,
+                    actual=supplied_pet_name,
+                )
+            )
+        pet_name = pet_prompt_name
     if not pet_name:
-        raise AuthoringError("print candidate pet name must not be empty")
+        source = (
+            "layout fixture"
+            if preview_layout.has_name
+            else "representative pet attempt"
+        )
+        raise AuthoringError(
+            "print candidate cannot infer the QA pet name from the selected "
+            f"{source}; provide --pet-name"
+        )
 
     reused_record: dict[str, Any] | None = None
     reused_candidate: Path | None = None
@@ -1965,7 +2033,7 @@ def graduate(*, graduation_id: str, print_candidate: Path,
         "selected": {
             "art": {"experiment_id": art_experiment.name, "attempt_id": art_attempt.name, "artifact_sha256": sha256(art_file)},
             "pet_runtime": {"experiment_id": pet_experiment.name, "experiment_sha256": sha256(pet_experiment / "experiment.json")},
-            "layout_font": {
+            "layout": {
                 "experiment_id": layout_experiment.name,
                 "attempt_id": layout_attempt.name,
                 "layout_sha256": sha256(layout_file),
@@ -2062,7 +2130,7 @@ def trace_graduation(graduation: Path) -> str:
         (
             "selected layout",
             resolved_sources["layout_attempt"] / "outputs" / "layout.json",
-            selected.get("layout_font", {}).get("layout_sha256"),
+            selected.get("layout", {}).get("layout_sha256"),
         ),
         (
             "selected print candidate",

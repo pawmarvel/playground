@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -91,6 +93,16 @@ class PocRunnerTests(unittest.TestCase):
             ["pet.png", "reference.png", "supporting.png"],
         )
 
+    def test_layout_name_is_not_forwarded_to_prompt_without_token(self) -> None:
+        client = FakeClient()
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            run_poc(self.args(), client=client)
+
+        self.assertNotIn("BUDDY", client.images.kwargs["prompt"])
+        self.assertNotIn("prompt contains no {{PET_NAME}}", stderr.getvalue())
+
     def test_runs_generation_and_rendering_with_gemini(self) -> None:
         args = self.args()
         args.provider = "gemini"
@@ -153,6 +165,25 @@ class PocRunnerTests(unittest.TestCase):
 
         self.assertTrue(final.is_file())
         self.assertTrue(debug.is_file())
+
+    def test_artistic_name_prompt_requires_name_before_paid_call(self) -> None:
+        data = layout_data()
+        del data["name"]
+        (self.template / "layout.json").write_text(
+            json.dumps(data), encoding="utf-8"
+        )
+        self.prompt.write_text(
+            "BACKGROUND = TRANSPARENT\nLetter {{PET_NAME}} with the pet.",
+            encoding="utf-8",
+        )
+        args = self.args()
+        args.pet_name = None
+        client = FakeClient()
+
+        with self.assertRaisesRegex(UserInputError, "provide --pet-name"):
+            run_poc(args, client=client)
+
+        self.assertEqual(client.images.call_count, 0)
 
     def test_missing_finished_reference_fails_before_paid_call(self) -> None:
         args = self.args()

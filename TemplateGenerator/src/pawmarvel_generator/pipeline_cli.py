@@ -17,8 +17,10 @@ from typing import Any, Callable, Sequence
 from .artifact_io import read_json
 from .cli_errors import add_debug_argument, report_unexpected
 from .cli import (
+    PET_NAME_PLACEHOLDER,
     UserInputError,
     _atomic_write_bytes,
+    _read_prompt,
     _resolve_api_key,
     _validate_image,
     _validate_regular_file,
@@ -89,8 +91,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--pet-name",
         help=(
-            "optional personalized name; replaces {{PET_NAME}} in the pet "
-            "prompt and is required only when the saved layout has a name layer"
+            "optional personalized name for layout rendering; it is also passed "
+            "to pet generation only when the pet prompt contains {{PET_NAME}}"
         ),
     )
     parser.add_argument(
@@ -382,6 +384,7 @@ def run_pipeline(
                 )
     art_prompt_source = _validate_regular_file(args.art_prompt, "art prompt")
     pet_prompt_source = _validate_regular_file(args.pet_prompt, "pet prompt")
+    _, pet_prompt_text = _read_prompt(pet_prompt_source)
     pet_source = _validate_image(args.pet_image, "pet image")
     explicit_font = args.font is not None
     font = _validate_regular_file(args.font, "font") if explicit_font else None
@@ -390,6 +393,8 @@ def run_pipeline(
     except FontLicenseError as exc:
         raise PipelineError(str(exc)) from exc
     pet_name = (args.pet_name or "").strip() or None
+    pet_prompt_uses_name = PET_NAME_PLACEHOLDER in pet_prompt_text
+    pet_generation_name = pet_name if pet_prompt_uses_name else None
     rerun_steps = tuple(dict.fromkeys(getattr(args, "rerun_step", [])))
     selective_rerun = bool(rerun_steps)
     if selective_rerun and args.force:
@@ -400,6 +405,10 @@ def run_pipeline(
     run_art = full_run or "art" in rerun_steps
     run_pet = full_run or "pet" in rerun_steps
     run_layout = full_run or "layout" in rerun_steps
+    if run_pet and pet_prompt_uses_name and pet_name is None:
+        raise PipelineError(
+            f"pet prompt contains {PET_NAME_PLACEHOLDER}; provide --pet-name"
+        )
     replace_outputs = args.force or selective_rerun
     font_catalogs = tuple(
         path.expanduser().resolve() for path in getattr(args, "font_catalog", [])
@@ -629,6 +638,7 @@ def run_pipeline(
         "pet_prompt": str(pet_prompt_source),
         "pet_image": str(pet_source),
         "pet_name": pet_name,
+        "pet_prompt_uses_pet_name": pet_prompt_uses_name,
         "font": str(font) if explicit_font else None,
         "font_license": str(font_license) if explicit_font else None,
         "font_selection": (
@@ -738,7 +748,7 @@ def run_pipeline(
             _generation_args(
                 reference_design=source_references,
                 pet_image=staged_pet,
-                pet_name=pet_name,
+                pet_name=pet_generation_name,
                 prompt_file=pet_prompt_source,
                 api_key_file=args.api_key_file,
                 output_dir=run_dir,

@@ -677,7 +677,7 @@ reference improves results, create a new pet experiment with the revised
 against the baseline. Record the winning experiment normally. Its snapshotted
 reference list becomes the runtime reference contract carried into the bundle.
 
-### 6.1 Tune one representative result in disposable scratch
+### 6.1 Default pet-only workflow: tune, benchmark, and select
 
 Do this before creating an immutable pet experiment or running the smoke
 fixtures. Scratch is the fastest place to correct obvious prompt problems such
@@ -693,6 +693,22 @@ pet, and ordered reference list fixed. Edit only the draft prompt unless the
 specific hypothesis is a model/configuration change. In particular, do not use
 high quality here when the intended online setting is low quality: that would
 validate a different runtime contract.
+
+The main workflow intentionally omits `--pet-name`: the image model generates
+only the transformed pet, and section 7 adds the personalized name with the
+selected deterministic font. Section 6.2 documents the optional artistic-name
+alternative separately.
+
+Keep that separation through the complete default E2E flow:
+
+- pet scratch, pet experiment creation, and pet benchmarks receive no
+  `--pet-name`;
+- layout authoring receives `--pet-name` only as preview text for the
+  deterministic name layer;
+- print preparation infers that preview text from the selected layout attempt;
+  and
+- the graduated bundle declares `renderer.name_mode: layout-text` and includes
+  the selected OFL font.
 
 ```bash
 PAWMARVEL_PET_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/pet-prompt-tuning"
@@ -752,23 +768,6 @@ the model or quality must change, update the corresponding config value and the
 candidate filename/experiment ID before promotion. The overwritten scratch
 states require no cleanup or retention; the immutable experiment is the first
 durable record.
-
-For a design whose personalized name must be generated as part of the same
-artistic pet layer, put the exact, case-sensitive token `{{PET_NAME}}` in the
-pet prompt and pass `--pet-name`. The generator normalizes and validates the
-name, replaces every occurrence before the API call, and records the value in
-the immutable pet-attempt `run.json`. A prompt containing the token is rejected
-before a paid call if `--pet-name` is absent. The argument is optional for a
-normal pet-only prompt. If `--pet-name` is supplied to a prompt without the
-token, the generator prints a warning, leaves the prompt unchanged, and
-continues the API call. This makes an accidentally unused name visible without
-blocking the run.
-
-Use artistic-name mode deliberately: its lettering is baked into
-`transformed-pet.png`. During layout authoring, turn off **Render a separate
-pet-name text layer**. The saved `layout.json` then omits `name`; preview and
-print rendering place the combined pet-and-lettering PNG without adding a
-second name. Keep the switch on for the standard deterministic OFL-font mode.
 
 Use the two fixture tiers deliberately:
 
@@ -962,6 +961,185 @@ printf 'pet decision: %s\npet fixture:  %s\n' "$PAWMARVEL_PET_DECISION" "$PAWMAR
 
 The bundle selects the pet experiment's runtime contract, not this one pet's
 pixels. The attempt is representative QA evidence.
+
+### 6.2 Optional: generate artistic pet lettering with the transformed pet
+
+Skip this subsection for the default workflow. By default, transformed-pet
+generation receives no pet-name argument, produces only the pet cutout, and
+leaves name rendering to the deterministic layout/font layer.
+
+Use this alternative only when the design requires the image model to generate
+the pet name as part of `transformed-pet.png`. Put the exact, case-sensitive
+token `{{PET_NAME}}` in the artistic-name prompt. The following disposable
+scratch command is the standard section 6.1 command with one explicit
+`--pet-name` override:
+
+```bash
+PAWMARVEL_ARTISTIC_NAME_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/pet-artistic-name"
+PAWMARVEL_ARTISTIC_NAME_PROMPT="$PAWMARVEL_ARTISTIC_NAME_SCRATCH/pet-transform-artistic-name-gpt.md"
+
+mkdir -p "$PAWMARVEL_ARTISTIC_NAME_SCRATCH"
+cp "$PAWMARVEL_PET_PROMPT" "$PAWMARVEL_ARTISTIC_NAME_PROMPT"
+"${EDITOR:-vi}" "$PAWMARVEL_ARTISTIC_NAME_PROMPT"
+
+grep -Fq '{{PET_NAME}}' "$PAWMARVEL_ARTISTIC_NAME_PROMPT"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
+  --provider "$PAWMARVEL_PET_PROVIDER" \
+  --model "$PAWMARVEL_PET_MODEL" \
+  --quality "$PAWMARVEL_PET_QUALITY" \
+  --pet-image "$PAWMARVEL_PET" \
+  --pet-name "$PAWMARVEL_PET_NAME" \
+  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
+  --prompt-file "$PAWMARVEL_ARTISTIC_NAME_PROMPT" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  --profile-layer transformed-pet \
+  --background transparent \
+  --output-format png \
+  --output-dir "$PAWMARVEL_ARTISTIC_NAME_SCRATCH" \
+  --output-name transformed-pet.png \
+  --force
+```
+
+After the scratch output is satisfactory, create an alternative immutable pet
+experiment with the same name. Do not run this in addition to `pet-gpt-v01`
+unless the intent is to compare both modes; use a distinct experiment ID so
+their evidence cannot be confused:
+
+```bash
+mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
+cp "$PAWMARVEL_ARTISTIC_NAME_PROMPT" \
+  "$PAWMARVEL_PROMPT_CANDIDATES/pet-transform-artistic-name-gpt-v01.md"
+
+PAWMARVEL_ARTISTIC_NAME_CANDIDATE_PROMPT="$PAWMARVEL_PROMPT_CANDIDATES/pet-transform-artistic-name-gpt-v01.md"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
+  --kind pet \
+  --experiment-id pet-gpt-artistic-name-v01 \
+  --design-id "$PAWMARVEL_DESIGN_ID" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
+  --prompt-file "$PAWMARVEL_ARTISTIC_NAME_CANDIDATE_PROMPT" \
+  --pet-name "$PAWMARVEL_PET_NAME" \
+  --provider "$PAWMARVEL_PET_PROVIDER" \
+  --model "$PAWMARVEL_PET_MODEL" \
+  --quality "$PAWMARVEL_PET_QUALITY" \
+  --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
+
+PAWMARVEL_PET_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/pet/pet-gpt-artistic-name-v01"
+```
+
+If this is the chosen workflow, run the same smoke and release sequence from
+section 6.1 against this experiment. The experiment-level name is inherited, so
+the paid benchmark commands still do not repeat `--pet-name`. Use distinct
+attempt prefixes and review IDs so the default and artistic-name evidence
+cannot be mixed. This optional walkthrough reuses the reviewed smoke and release
+selection drafts created in section 6.1; creating or editing those JSON drafts
+makes no provider calls. Verify them before starting the paid sequence:
+
+```bash
+test -f "$PAWMARVEL_SMOKE_SELECTION"
+test -f "$PAWMARVEL_RELEASE_SELECTION"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" benchmark \
+  --experiment "$PAWMARVEL_PET_EXPERIMENT" \
+  --fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_SMOKE_SELECTION" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
+  --attempts-per-fixture 1 \
+  --attempt-id-prefix artistic-smoke
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
+  --kind pet \
+  --review-id pet-gpt-artistic-name-smoke \
+  --experiment pet-gpt-artistic-name-v01 \
+  --attempt-prefix artistic-smoke- \
+  --fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_SMOKE_SELECTION" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
+  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" benchmark \
+  --experiment "$PAWMARVEL_PET_EXPERIMENT" \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_RELEASE_SELECTION" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
+  --attempts-per-fixture 1 \
+  --attempt-id-prefix artistic-release
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
+  --kind pet \
+  --review-id pet-gpt-artistic-name-release \
+  --experiment pet-gpt-artistic-name-v01 \
+  --attempt-prefix artistic-release- \
+  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_RELEASE_SELECTION" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
+  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
+```
+
+Review both contact sheets, then record this mode's winner and derive its
+representative attempt exactly once:
+
+```bash
+PAWMARVEL_PET_REVIEW_ID="pet-gpt-artistic-name-release"
+PAWMARVEL_PET_SELECTED_EXPERIMENT_ID="pet-gpt-artistic-name-v01"
+PAWMARVEL_PET_LAYOUT_ATTEMPT_ID="artistic-release-sausage-dog-0001"
+PAWMARVEL_PET_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/pet/$PAWMARVEL_PET_REVIEW_ID"
+
+PAWMARVEL_PET_DECISION="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
+  --review "$PAWMARVEL_PET_REVIEW" \
+  --selected-experiment "$PAWMARVEL_PET_SELECTED_EXPERIMENT_ID" \
+  --selected-by application-owner \
+  --notes "Accepted artistic pet-name pixels, identity, alpha, and latency")"
+
+PAWMARVEL_PET_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/pet/$PAWMARVEL_PET_SELECTED_EXPERIMENT_ID"
+PAWMARVEL_PET_ATTEMPT="$PAWMARVEL_PET_EXPERIMENT/attempts/$PAWMARVEL_PET_LAYOUT_ATTEMPT_ID"
+test -f "$PAWMARVEL_PET_ATTEMPT/run.json"
+```
+
+The experiment stores the default under
+`generation.prompt_variables.pet_name`. Later `run-attempt` and `benchmark`
+commands inherit it automatically and pass it to `pawmarvel-generate`; do not
+repeat `--pet-name` on those commands. Supply an attempt- or benchmark-level
+`--pet-name` only to deliberately override the experiment fixture, for example:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
+  --experiment "$PAWMARVEL_PET_EXPERIMENT" \
+  --attempt-id artistic-name-override-0001 \
+  --pet-image "$PAWMARVEL_PET" \
+  --pet-name "MILO"
+```
+
+The generator replaces every `{{PET_NAME}}` occurrence and records the resolved
+value in the attempt `run.json`. A token without either an experiment default
+or an attempt override is rejected before a paid call. A supplied name with no
+token emits a warning but does not block the call.
+
+Because the lettering is baked into the transformed-pet pixels, turn off
+**Render a separate pet-name text layer** during layout authoring. The saved
+layout then omits `name`, and preview/print composition will not add duplicate
+font-rendered text. For this E2E variant, use the section 7 layout creation
+command with the derived `PAWMARVEL_PET_ATTEMPT`, but run the layout attempt
+without `--pet-name`:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
+  --experiment "$PAWMARVEL_LAYOUT_EXPERIMENT" \
+  --attempt-id attempt-0001
+```
+
+Save only the pet region, then use the normal layout comparison, layout
+decision, assembly review, print preparation, graduation, bundle build, and
+bundle validation commands in sections 7-9. None of those commands needs a
+pet-name override. Print preparation infers the embedded name from the selected
+pet attempt, and bundle generation receives only the normal name-length policy.
+The resulting layout attempt, print candidate, graduation, and bundle contain
+no `fonts/` assets. The bundle declares `renderer.name_mode` as
+`embedded-in-pet`, and its selected layout provenance records
+`font_sha256: null`. This completes the alternative E2E path without changing
+the default path.
 
 ## 7. Iterate layout and font
 
@@ -1229,11 +1407,13 @@ fixed artwork, return to section 5. If it is pet style/alpha/latency, return to
 section 6. If it is placement or typography, create another layout experiment
 or attempt and repeat this section.
 
-The assembly command intentionally has no separate pet-name option. It renders
-the exact name saved by the layout UI and recorded by
-`PAWMARVEL_LAYOUT_ATTEMPT`, ensuring the layout preview and assembly preview use
-identical text inputs. To preserve a second named comparison, save another
-layout attempt after changing **Preview pet name**.
+The assembly command intentionally has no separate pet-name option. In the
+default `layout-text` mode it renders the exact name saved by the layout UI and
+recorded by `PAWMARVEL_LAYOUT_ATTEMPT`, ensuring the layout and assembly
+previews use identical text. In `embedded-in-pet` mode the layout records no
+name or font, and assembly composes the already-lettered transformed-pet image
+without adding text. To preserve a second separate-text comparison, save
+another layout attempt after changing **Preview pet name**.
 
 The walkthrough selects `layout-v01/attempt-0001`. If another candidate wins,
 create a new layout review ID, run its selection block, and create a new
@@ -1280,12 +1460,19 @@ PAWMARVEL_PRINT_FINALIST="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" prep
   --art-review "$PAWMARVEL_ART_REVIEW" \
   --pet-review "$PAWMARVEL_PET_REVIEW" \
   --layout-review "$PAWMARVEL_LAYOUT_REVIEW" \
-  --pet-name "$PAWMARVEL_PET_NAME" \
   --backend "$PAWMARVEL_UPSCALE_BACKEND")"
 
 test "$PAWMARVEL_PRINT_FINALIST" = "$PAWMARVEL_AUTHORING_PRODUCT/print-candidates/$PAWMARVEL_PRINT_CANDIDATE_ID"
 printf 'print finalist: %s\n' "$PAWMARVEL_PRINT_FINALIST"
 ```
+
+`prepare-print` infers its QA name from immutable evidence. In `layout-text`
+mode it uses the selected layout attempt's saved preview fixture. In
+`embedded-in-pet` mode it uses the representative pet attempt's resolved
+`{{PET_NAME}}` value. Therefore the normal command does not repeat
+`--pet-name`. An explicit override remains
+available for diagnostics; for embedded lettering it must match the name that
+was used to generate the selected pet pixels.
 
 Inspect:
 
@@ -1323,7 +1510,6 @@ upscale changes, reuse the exact template-side print result:
   --art-attempt "$PAWMARVEL_ART_ATTEMPT" \
   --pet-attempt "/path/to/new/pet/attempt" \
   --layout-attempt "$PAWMARVEL_LAYOUT_ATTEMPT" \
-  --pet-name "$PAWMARVEL_PET_NAME" \
   --backend "$PAWMARVEL_UPSCALE_BACKEND" \
   --reuse-template-from "$PAWMARVEL_PRINT_FINALIST"
 ```
@@ -1415,11 +1601,13 @@ printf 'bundle revision: %s\n' "$PAWMARVEL_BUNDLE"
   --bundle "$PAWMARVEL_BUNDLE"
 ```
 
-Choose `--pet-name-max-length` for the usable name box in this design; it is
+Choose `--pet-name-max-length` for the usable name box in `layout-text` mode or
+for the tested artistic-lettering capacity in `embedded-in-pet` mode. It is
 stored in `bundle.json.personalization.pet_name`. The application must apply
-that bundle policy before rendering and must reuse the normalized value for
-preview and print. Twelve Unicode code points is the CLI default, but spelling
-the value out during graduation makes the product decision reviewable.
+that policy before either font rendering or prompt substitution and must reuse
+the normalized value for preview and print. Twelve Unicode code points is the
+CLI default, but spelling the value out during graduation makes the product
+decision reviewable.
 
 `--qa-input-pet` must be an operator-reviewed, non-customer fixture and must
 byte-match the input saved by the representative pet attempt used by the print
@@ -1831,6 +2019,14 @@ selected pet quality explicitly in a consumer/debug run; do not rely on the
 `pawmarvel-poc-run` default, because a different value changes both latency and
 generation behavior.
 
+In the normal `layout-text` bundle, `--pet-name FLUFFY` above is consumed only
+by the deterministic renderer. `pawmarvel-poc-run` does not forward it to image
+generation because the bundled pet prompt has no `{{PET_NAME}}` token. In an
+`embedded-in-pet` bundle, the same command is the explicit E2E override: the
+prompt contains the token, so the wrapper forwards `FLUFFY` to pet generation,
+and the fontless layout does not render a second name. Omitting `--pet-name` is
+valid only when the layout has no name layer and the prompt has no token.
+
 The command above is the single-reference form. If the manifest contains
 supporting references, use the following form instead; do not run both commands
 into the same output directory. Repeat `--reference-design` in the
@@ -1963,6 +2159,13 @@ pawmarvel_pipeline_debug
 For a multi-reference scratch run, the pipeline stages and copies every
 `--reference-design` in array order. The first remains the primary layout
 reference, matching the manual art and pet experiments.
+
+The debug pipeline's `--pet-name` initializes layout text. It is not forwarded
+to the pet image call for the default prompt. If `--pet-prompt` contains
+`{{PET_NAME}}`, the pipeline also substitutes the same value into image
+generation. When pet generation is selected, a token with no option fails
+validation before either paid image call; a layout-only rerun can reuse the
+already-lettered pet without repeating the name.
 
 `"$@"` forwards any arguments supplied to the shell function. It allows the
 same base command to run selective diagnostics:

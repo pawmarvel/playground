@@ -559,7 +559,7 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
     selected_shapes = {
         "art": {"experiment_id", "attempt_id", "artifact_sha256"},
         "pet_runtime": {"experiment_id", "experiment_sha256"},
-        "layout_font": {
+        "layout": {
             "experiment_id",
             "attempt_id",
             "layout_sha256",
@@ -567,18 +567,18 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         },
     }
     if not isinstance(selected, dict) or set(selected) != set(selected_shapes):
-        raise BundleError("provenance.selected must contain art, pet_runtime, and layout_font")
+        raise BundleError("provenance.selected must contain art, pet_runtime, and layout")
     for component, fields in selected_shapes.items():
         descriptor = selected.get(component)
         if not isinstance(descriptor, dict) or set(descriptor) != fields:
             raise BundleError(f"provenance.selected.{component} is invalid")
         for field, value in descriptor.items():
-            if component == "layout_font" and field == "font_sha256":
+            if component == "layout" and field == "font_sha256":
                 if preview.has_name:
                     require_sha256(value, f"provenance.selected.{component}.{field}")
                 elif value is not None:
                     raise BundleError(
-                        "provenance.selected.layout_font.font_sha256 must be null "
+                        "provenance.selected.layout.font_sha256 must be null "
                         "when layout.name is absent"
                     )
                 continue
@@ -762,8 +762,8 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
     }
     if preview.has_name:
         assert preview.font_path is not None
-        provenance_hashes["provenance.selected.layout_font.font_sha256"] = (
-            selected["layout_font"]["font_sha256"],
+        provenance_hashes["provenance.selected.layout.font_sha256"] = (
+            selected["layout"]["font_sha256"],
             preview.font_path,
         )
     for label, (expected_hash, artifact) in provenance_hashes.items():
@@ -972,7 +972,7 @@ def build_from_selection(
         ),
         (
             "selection layout hash",
-            selected.get("layout_font", {}).get("layout_sha256"),
+            selected.get("layout", {}).get("layout_sha256"),
             selected_layout,
         ),
         (
@@ -986,7 +986,7 @@ def build_from_selection(
         hash_checks.append(
             (
                 "selection font hash",
-                selected.get("layout_font", {}).get("font_sha256"),
+                selected.get("layout", {}).get("font_sha256"),
                 selected_layout_value.font_path,
             )
         )

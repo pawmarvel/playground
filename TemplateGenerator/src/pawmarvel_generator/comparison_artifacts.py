@@ -36,10 +36,6 @@ def render_comparison_contact_sheet(
         raise ComparisonArtifactError("contact sheets support art, pet, or layout")
     filename = filenames[kind]
     composed_pet = kind == "pet" and composition_template is not None
-    if composed_pet and not composition_pet_name:
-        raise ComparisonArtifactError(
-            "pet composition contact sheet requires the layout fixture name"
-        )
     artifact_kind = (
         "pet-composition-contact-sheet" if composed_pet else f"{kind}-contact-sheet"
     )

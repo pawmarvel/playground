@@ -607,6 +607,20 @@ UTC timestamp and short label, but identity comes from `experiment.json` plus
 input and output hashes. A rerun creates another attempt or another experiment;
 it never replaces comparison evidence. Only `scratch/` permits replacement.
 
+A pet experiment may also pin the optional `{{PET_NAME}}` value used by an
+artistic-name prompt. Attempts and fixture benchmarks inherit this experiment
+default and pass it to the image-generation adapter; an explicit attempt-level
+value overrides it for deliberate comparison. Pet-only prompts omit the value.
+This keeps repeated benchmark calls on one reproducible prompt-variable input
+without duplicating the name on every command.
+
+Wrapper tools may accept one pet name for complete preview composition, but
+they inspect the selected pet prompt before constructing the image request.
+They forward the value to image generation only when the prompt contains the
+exact `{{PET_NAME}}` token. Otherwise the value is confined to deterministic
+layout rendering. This preserves a simple E2E command without silently adding
+customer text to the default pet-only generation contract.
+
 Art prompts have design-product scope because the profile defines the art
 canvas. Pet-transform development is also product-specific in the MVP. An
 operator may copy prompt text as the starting point for another profile, but
@@ -904,7 +918,7 @@ not a viable fallback.
     },
     "compatibility_evaluation": {"status": "passed"},
     "print_candidate": {"status": "passed"},
-    "selected": {"art": {}, "pet_runtime": {}, "layout_font": {}},
+    "selected": {"art": {}, "pet_runtime": {}, "layout": {}},
     "print_derivation": {
       "mode": "selected-print-candidate",
       "print_candidate_id": "print-finalist-0002",
@@ -1146,7 +1160,8 @@ turning the generator into a workflow service. A minimal record is:
     "provider": "gemini",
     "model": "gemini-3.1-flash-image",
     "transport": "interactions",
-    "parameters": {"quality": "high", "output_format": "png", "background": "transparent"}
+    "parameters": {"quality": "high", "output_format": "png", "background": "transparent"},
+    "prompt_variables": {"pet_name": "COOPER"}
   },
   "generator": {"version": "<version>"},
   "created_by": "<operator>",
@@ -1155,6 +1170,10 @@ turning the generator into a workflow service. A minimal record is:
 ```
 
 The exact parameter object is provider-specific but must exclude credentials.
+`generation.prompt_variables` is omitted for a normal pet-only prompt. When it
+contains `pet_name`, `run-attempt` and `benchmark` inherit that value unless the
+operator supplies an explicit override; the resolved attempt value is recorded
+in `run.json`.
 Local absolute source paths may appear in private authoring metadata; published
 provenance contains bundle-relative paths or hashes only. Every attempt has a
 `run.json` containing start/end time, the resolved experiment generation
@@ -1301,10 +1320,15 @@ remain an advanced diagnostic mode, but all three must be supplied together
 and cannot be mixed with decision inputs. This avoids accidental cross-winner
 mixing without removing deliberate experimentation.
 
-Assembly and composed-pet evaluations obtain their QA name from the immutable
-layout attempt record. They never substitute a generic placeholder. Short names
-remain at the authored nominal size; longer names can shrink, so preserving the
-exact fixture is required for reproducible pixels and fit-status evidence.
+In `layout-text` mode, assembly, composed-pet evaluation, and print preparation
+obtain their QA name from the immutable layout-attempt fixture. In
+`embedded-in-pet` mode, rendering needs no separate name; print preparation
+instead obtains the already-rendered name from the representative pet attempt's
+applied prompt variables. The
+`--pet-name` print option is therefore only an explicit diagnostic override,
+and an embedded-name override must match the name already present in the pet
+pixels. The resolved print candidate always records a non-empty QA name for
+bundle replay and policy validation.
 
 The application owner records the winning assembly in
 `graduations/<graduation-id>/selection.json` before the generator allocates a
@@ -1324,7 +1348,7 @@ Operators do not repeat component source paths on the command line:
   "selected": {
     "art": {"experiment_id": "art-gpt-v04", "attempt_id": "attempt-0003", "artifact_sha256": "<sha256>"},
     "pet_runtime": {"experiment_id": "pet-gpt-v07", "experiment_sha256": "<sha256>"},
-    "layout_font": {"experiment_id": "layout-v03", "attempt_id": "attempt-0001", "layout_sha256": "<sha256>", "font_sha256": "<sha256>"}
+    "layout": {"experiment_id": "layout-v03", "attempt_id": "attempt-0001", "layout_sha256": "<sha256>", "font_sha256": "<sha256-or-null>"}
   },
   "sources": {
     "art_attempt": "experiments/art/art-gpt-v04/attempts/attempt-0003",
@@ -1353,7 +1377,7 @@ Operators do not repeat component source paths on the command line:
 }
 ```
 
-For an `embedded-in-pet` layout, `selected.layout_font.font_sha256` is `null`;
+For an `embedded-in-pet` layout, `selected.layout.font_sha256` is `null`;
 the layout hash remains mandatory and pins the absence of the `name` object.
 
 The pet runtime selection pins a prompt, provider, model, API transport,

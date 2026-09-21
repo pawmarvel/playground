@@ -197,7 +197,7 @@ class BundleContractTests(unittest.TestCase):
                         "experiment_id": "pet-gpt-v01",
                         "experiment_sha256": "d" * 64,
                     },
-                    "layout_font": {
+                    "layout": {
                         "experiment_id": "layout-v01",
                         "attempt_id": "attempt-0001",
                         "layout_sha256": _sha256(root / "layout.json"),
@@ -284,7 +284,7 @@ class BundleContractTests(unittest.TestCase):
             "name_mode": "embedded-in-pet",
             "version": 2,
         }
-        selected_layout = manifest["provenance"]["selected"]["layout_font"]
+        selected_layout = manifest["provenance"]["selected"]["layout"]
         selected_layout["layout_sha256"] = _sha256(self.bundle / "layout.json")
         selected_layout["font_sha256"] = None
         manifest["provenance"]["print_derivation"]["layout_sha256"] = _sha256(

@@ -10,7 +10,13 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from .cli import UserInputError, _resolve_provider_model, generate
+from .cli import (
+    PET_NAME_PLACEHOLDER,
+    UserInputError,
+    _read_prompt,
+    _resolve_provider_model,
+    generate,
+)
 from .cli_errors import add_debug_argument, report_unexpected
 from .config import ConfigError, load_layout
 from .renderer import RenderError, render_to_files
@@ -40,8 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--pet-name",
         help=(
-            "pet name for prompt substitution and/or the separate layout text "
-            "layer; optional when neither is used"
+            "pet name for the separate layout text layer; it is also passed to "
+            "image generation only when the prompt contains {{PET_NAME}}"
         ),
     )
     parser.add_argument(
@@ -113,6 +119,7 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
     debug = output_dir / "final-preview-debug.png"
     provider: str | None = None
     model: str | None = None
+    pet_prompt_uses_name = False
     if supplied_transformed is None:
         provider, model = _resolve_provider_model(
             getattr(args, "provider", "auto"), getattr(args, "model", None)
@@ -139,6 +146,13 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
             raise UserInputError(
                 f"pet transformation prompt does not exist: {prompt_file}"
             )
+        _, pet_prompt = _read_prompt(prompt_file)
+        pet_prompt_uses_name = PET_NAME_PLACEHOLDER in pet_prompt
+        if pet_prompt_uses_name and not (args.pet_name or "").strip():
+            raise UserInputError(
+                f"pet transformation prompt contains {PET_NAME_PLACEHOLDER}; "
+                "provide --pet-name"
+            )
     if layout.has_name and not (args.pet_name or "").strip():
         raise UserInputError(
             "--pet-name is required because layout.json contains a name layer"
@@ -163,6 +177,7 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
         ),
         "pet_source_mode": "reuse" if supplied_transformed else "generate",
         "pet_name": args.pet_name,
+        "pet_prompt_uses_pet_name": pet_prompt_uses_name,
         "prompt_file": str(prompt_file) if supplied_transformed is None else None,
         "reference_designs": (
             [str(path) for path in reference_designs]
@@ -185,7 +200,7 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
         generation_args = argparse.Namespace(
             reference_design=reference_designs,
             pet_image=pet_image,
-            pet_name=args.pet_name,
+            pet_name=args.pet_name if pet_prompt_uses_name else None,
             prompt_file=prompt_file,
             api_key_file=args.api_key_file,
             provider=provider,

@@ -157,6 +157,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--reference-design", type=_path_argument, action="append", default=[]
     )
     create.add_argument("--prompt-file", type=_path_argument)
+    create.add_argument(
+        "--pet-name",
+        help=(
+            "optional default value for {{PET_NAME}} in a pet experiment; "
+            "inherited by its attempts and benchmarks"
+        ),
+    )
     create.add_argument("--provider", choices=("openai", "gemini"))
     create.add_argument("--model")
     create.add_argument(
@@ -286,7 +293,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--layout-review", type=_path_argument,
         help="recommended winner review; requires art and pet reviews",
     )
-    print_candidate.add_argument("--pet-name", required=True)
+    print_candidate.add_argument(
+        "--pet-name",
+        help=(
+            "optional QA-name override; otherwise inferred from the selected "
+            "layout fixture or embedded-name pet attempt"
+        ),
+    )
     print_candidate.add_argument(
         "--backend", choices=("deterministic", "bria"), default="deterministic"
     )
@@ -375,6 +388,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 authoring_root=args.authoring_root,
                 references=args.reference_design,
                 prompt_file=args.prompt_file,
+                pet_name=args.pet_name,
                 provider=args.provider,
                 model=args.model,
                 quality=args.quality,
