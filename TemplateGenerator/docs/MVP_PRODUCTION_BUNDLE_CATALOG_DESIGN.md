@@ -613,6 +613,28 @@ product roots. References may remain design-scoped; every experiment still
 records their exact hashes, roles, and order. Cross-product component reuse is
 a post-MVP optimization, not part of the bundle-authoring contract.
 
+Art-prompt development has a disposable pre-experiment loop. The operator may
+overwrite one draft prompt and one art output below the product's `scratch/`
+directory until the fixed design is credible. One or two representative
+transformed-pet cutouts may be reused in an exact-renderer layout preview to
+check personalization space and visual balance. Pets remain composition probes
+and are never supplied to the art-generation request. Scratch art, cutouts, and
+layout have no provenance and cannot become immutable dependencies. Promotion
+copies only the prompt text; a new art experiment regenerates the output before
+stability and cross-candidate comparison.
+
+Pet-prompt development has a similar disposable pre-experiment loop. The operator may
+overwrite one draft prompt and one representative transformed-pet output below
+the product's `scratch/` directory until obvious identity, pose, crop, style,
+and transparency defects are corrected. That call must use the intended runtime
+provider, model, quality, profile geometry, pet-first image order, and complete
+ordered reference set. Scratch outputs have no durable provenance and cannot be
+reviewed, selected, composed into a layout candidate, or published. Promotion
+copies only the final prompt text into a named candidate; a new immutable pet
+experiment regenerates the representative attempt and then runs the smoke
+fixture tier. This keeps rapid wording edits cheap without weakening the
+experiment and bundle contracts.
+
 Failed or discarded experiments may be removed by the cleanup policy in
 section 6.5. Draft experiments are never removed automatically. Published
 bundle revisions and the source evidence needed to explain them may not be

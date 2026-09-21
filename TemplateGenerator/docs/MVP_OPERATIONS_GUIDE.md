@@ -483,6 +483,126 @@ baseline; use more attempts for finalists when reliability matters. Do not use
 extra stochastic attempts as a substitute for trying a materially different
 prompt.
 
+### 5.1 Tune one representative art result in disposable scratch
+
+Do this before creating an immutable art experiment. The fast loop overwrites
+one draft prompt and `art.png` until the fixed artwork is credible, then checks
+that art with one or two representative transformed-pet cutouts. It keeps no
+history and none of its files may be selected, reviewed, bundled, or used as an
+immutable layout dependency.
+
+The pet images are composition probes only. Never pass a user pet to the art
+generation request: reusable `art.png` must remain pet- and name-free. Keep the
+intended art provider, model, quality, product profile, and ordered references
+fixed while editing the prompt. Each prompt iteration still makes one paid art
+call, but it avoids creating experiments and repeated stability attempts for an
+obviously unsatisfactory design.
+
+```bash
+PAWMARVEL_ART_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/art-prompt-tuning"
+PAWMARVEL_ART_SCRATCH_TEMPLATE="$PAWMARVEL_ART_SCRATCH/template"
+PAWMARVEL_ART_SCRATCH_PETS="$PAWMARVEL_ART_SCRATCH/pets"
+PAWMARVEL_ART_SCRATCH_PROMPT="$PAWMARVEL_ART_SCRATCH/art-template-draft-gpt.md"
+
+mkdir -p "$PAWMARVEL_ART_SCRATCH_TEMPLATE" "$PAWMARVEL_ART_SCRATCH_PETS"
+cp "$PAWMARVEL_ART_PROMPT" "$PAWMARVEL_ART_SCRATCH_PROMPT"
+
+# Repeat this edit-and-generate pair. --force replaces the prior scratch art.
+"${EDITOR:-vi}" "$PAWMARVEL_ART_SCRATCH_PROMPT"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
+  --provider "$PAWMARVEL_ART_PROVIDER" \
+  --model "$PAWMARVEL_ART_MODEL" \
+  --quality "$PAWMARVEL_ART_QUALITY" \
+  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
+  --prompt-file "$PAWMARVEL_ART_SCRATCH_PROMPT" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  --profile-layer art \
+  --background transparent \
+  --output-format png \
+  --output-dir "$PAWMARVEL_ART_SCRATCH_TEMPLATE" \
+  --output-name art.png \
+  --force
+```
+
+First inspect `template/art.png` by itself. It must contain all reusable fixed
+artwork but no example pet, personalized name, mockup, garment, or placeholder
+animal. It must also leave a plausible personalization region rather than
+blindly reproducing screenshot geometry that conflicts with the product
+profile.
+
+For a new design, generate one representative scratch pet cutout with the
+current pet prompt. A second pet with a contrasting silhouette or coat is
+recommended but optional. These calls assess whether the art leaves usable
+composition space; they do not approve the pet prompt, which has its own scratch
+and fixture workflow in section 6.
+
+```bash
+# Optional second probe; choose a materially different pet rather than a near
+# duplicate. Omit its generation and GUI upload if only one probe is needed.
+PAWMARVEL_ART_SCRATCH_PET_2="$PAWMARVEL_PROJECT/examples/pet-inputs/white-fluffy-dog.png"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
+  --provider "$PAWMARVEL_PET_PROVIDER" \
+  --model "$PAWMARVEL_PET_MODEL" \
+  --quality "$PAWMARVEL_PET_QUALITY" \
+  --pet-image "$PAWMARVEL_PET" \
+  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
+  --prompt-file "$PAWMARVEL_PET_PROMPT" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  --profile-layer transformed-pet \
+  --background transparent \
+  --output-format png \
+  --output-dir "$PAWMARVEL_ART_SCRATCH_PETS" \
+  --output-name pet-01.png \
+  --force
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
+  --provider "$PAWMARVEL_PET_PROVIDER" \
+  --model "$PAWMARVEL_PET_MODEL" \
+  --quality "$PAWMARVEL_PET_QUALITY" \
+  --pet-image "$PAWMARVEL_ART_SCRATCH_PET_2" \
+  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
+  --prompt-file "$PAWMARVEL_PET_PROMPT" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  --profile-layer transformed-pet \
+  --background transparent \
+  --output-format png \
+  --output-dir "$PAWMARVEL_ART_SCRATCH_PETS" \
+  --output-name pet-02.png \
+  --force
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-layout-config" \
+  --art "$PAWMARVEL_ART_SCRATCH_TEMPLATE/art.png" \
+  --reference "$PAWMARVEL_SAMPLE" \
+  --pet "$PAWMARVEL_ART_SCRATCH_PETS/pet-01.png" \
+  --pet-name "$PAWMARVEL_PET_NAME" \
+  --font-catalog "$PAWMARVEL_FONT_CATALOG" \
+  "${PAWMARVEL_LAYOUT_REFERENCE_ARGS[@]}" \
+  --output "$PAWMARVEL_ART_SCRATCH_TEMPLATE/layout.json" \
+  --force
+```
+
+In the layout editor, upload `pet-02.png` as the alternate transformed pet and
+switch between both probes without changing the geometry. Confirm that neither
+pet collides with fixed artwork, both remain visually balanced, the intended
+name region remains usable, and the art still resembles the reference at the
+profile aspect ratio. If art wording changes, regenerate `art.png`, reopen the
+scratch editor, and repeat; reusing the two cutouts avoids extra pet API calls.
+
+When the result is satisfactory, promote only the prompt text. The scratch art,
+pet cutouts, and layout are disposable. The immutable experiment must regenerate
+`art.png`, and the real layout remains a later product of the selected immutable
+art and pet attempts.
+
+```bash
+mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
+cp "$PAWMARVEL_ART_SCRATCH_PROMPT" \
+  "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v01.md"
+
+PAWMARVEL_ART_CANDIDATE_PROMPT="$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v01.md"
+```
+
 Create the first art experiment. `create-experiment` snapshots the exact
 product profile, prompt, and ordered reference images.
 
@@ -493,7 +613,7 @@ product profile, prompt, and ordered reference images.
   --design-id "$PAWMARVEL_DESIGN_ID" \
   --product-profile "$PAWMARVEL_PROFILE" \
   "${PAWMARVEL_REFERENCE_ARGS[@]}" \
-  --prompt-file "$PAWMARVEL_ART_PROMPT" \
+  --prompt-file "$PAWMARVEL_ART_CANDIDATE_PROMPT" \
   --provider "$PAWMARVEL_ART_PROVIDER" \
   --model "$PAWMARVEL_ART_MODEL" \
   --quality "$PAWMARVEL_ART_QUALITY" \
@@ -528,7 +648,8 @@ and snapshot it in a second experiment:
 
 ```bash
 mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
-cp "$PAWMARVEL_ART_PROMPT" "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md"
+cp "$PAWMARVEL_ART_CANDIDATE_PROMPT" \
+  "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md"
 
 # Edit v02 to test a specific hypothesis; do not edit immutable experiment inputs.
 "${EDITOR:-vi}" "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md"
@@ -662,10 +783,11 @@ the prior decision remains traceable.
 ## 6. Iterate the transformed-pet prompt and model
 
 The primary MVP path uses GPT Image 2 because offline tests found Gemini's pet
-cutout and transparency behavior insufficiently reliable. A changed pet prompt
-or request configuration is a new experiment. The current one-attempt fixture
-tiers measure cross-pet coverage and comparative latency; they do not claim
-repeat-run reliability for any one pet.
+cutout and transparency behavior insufficiently reliable. After a prompt is
+promoted from scratch, every changed prompt or request configuration becomes a
+new experiment. The current one-attempt fixture tiers measure cross-pet coverage
+and comparative latency; they do not claim repeat-run reliability for any one
+pet.
 At runtime, the customer pet is always the first image and the finished-design
 references follow in recorded order.
 
@@ -677,10 +799,86 @@ reference improves results, create a new pet experiment with the revised
 against the baseline. Record the winning experiment normally. Its snapshotted
 reference list becomes the runtime reference contract carried into the bundle.
 
+### 6.1 Tune one representative result in disposable scratch
+
+Do this before creating an immutable pet experiment or running the smoke
+fixtures. Scratch is the fastest place to correct obvious prompt problems such
+as the wrong pose, crop, style, identity, or background. This loop deliberately
+keeps only the latest draft prompt and output; it is not experiment history and
+is never valid input to a review, decision, layout, print candidate, or bundle.
+Each iteration still makes one paid image call; it is faster because it avoids
+creating immutable records and running two or three fixtures for wording that
+has not yet produced one acceptable representative result.
+
+Keep the intended production provider, model, quality, product profile, input
+pet, and ordered reference list fixed. Edit only the draft prompt unless the
+specific hypothesis is a model/configuration change. In particular, do not use
+high quality here when the intended online setting is low quality: that would
+validate a different runtime contract.
+
+```bash
+PAWMARVEL_PET_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/pet-prompt-tuning"
+PAWMARVEL_PET_SCRATCH_PROMPT="$PAWMARVEL_PET_SCRATCH/pet-transform-draft-gpt.md"
+
+mkdir -p "$PAWMARVEL_PET_SCRATCH"
+cp "$PAWMARVEL_PET_PROMPT" "$PAWMARVEL_PET_SCRATCH_PROMPT"
+
+# Repeat this edit-and-generate loop. --force replaces the prior scratch image.
+"${EDITOR:-vi}" "$PAWMARVEL_PET_SCRATCH_PROMPT"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
+  --provider "$PAWMARVEL_PET_PROVIDER" \
+  --model "$PAWMARVEL_PET_MODEL" \
+  --quality "$PAWMARVEL_PET_QUALITY" \
+  --pet-image "$PAWMARVEL_PET" \
+  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
+  --prompt-file "$PAWMARVEL_PET_SCRATCH_PROMPT" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  --profile-layer transformed-pet \
+  --background transparent \
+  --output-format png \
+  --output-dir "$PAWMARVEL_PET_SCRATCH" \
+  --output-name transformed-pet.png \
+  --force
+```
+
+Compare the current `transformed-pet.png` directly with the user pet and all
+finished-design references. Before paying for a smoke benchmark, confirm:
+
+- the user pet's recognizable identity, markings, and important features remain;
+- pose, expression, crop, palette, and rendering style follow the primary
+  finished-design reference;
+- supporting references clarify style without overriding the primary reference;
+- the PNG contains only the transformed pet with usable transparency—no design
+  background, personalized text, template artwork, shadow, or mockup; and
+- the profile dimensions and representative-call latency are acceptable.
+
+Once one result is credible, promote only the prompt text into a named candidate
+and create a fresh immutable experiment from it. Do not copy the scratch image
+into the experiment: `run-attempt` must regenerate it so the output has complete
+provenance. A provider-specific filename is required because the prompt is part
+of that provider's runtime contract.
+
+```bash
+mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
+cp "$PAWMARVEL_PET_SCRATCH_PROMPT" \
+  "$PAWMARVEL_PROMPT_CANDIDATES/pet-transform-gpt-v01.md"
+
+PAWMARVEL_PET_CANDIDATE_PROMPT="$PAWMARVEL_PROMPT_CANDIDATES/pet-transform-gpt-v01.md"
+```
+
+The remaining section uses `$PAWMARVEL_PET_CANDIDATE_PROMPT` for the immutable
+experiment and then runs the smoke fixtures. If scratch tuning discovers that
+the model or quality must change, update the corresponding config value and the
+candidate filename/experiment ID before promotion. The overwritten scratch
+states require no cleanup or retention; the immutable experiment is the first
+durable record.
+
 Use the two fixture tiers deliberately:
 
 - `mvp-pets-smoke-v1` has three morphology-diverse dogs and costs three calls
-  per experiment. Use it while editing prompts or request configuration.
+  per experiment. Use it after the scratch gate to compare credible candidate
+  prompts or request configurations.
 - `mvp-pets-v1` has a fourteen-pet inventory with eleven dogs and three cats,
   spanning varied body shapes, coats, tones, and source-background difficulty.
   A release run selects 6-14 of them and runs once per shortlisted experiment.
@@ -727,7 +925,7 @@ popularity ranking:
   --design-id "$PAWMARVEL_DESIGN_ID" \
   --product-profile "$PAWMARVEL_PROFILE" \
   "${PAWMARVEL_REFERENCE_ARGS[@]}" \
-  --prompt-file "$PAWMARVEL_PET_PROMPT" \
+  --prompt-file "$PAWMARVEL_PET_CANDIDATE_PROMPT" \
   --provider "$PAWMARVEL_PET_PROVIDER" \
   --model "$PAWMARVEL_PET_MODEL" \
   --quality "$PAWMARVEL_PET_QUALITY" \
