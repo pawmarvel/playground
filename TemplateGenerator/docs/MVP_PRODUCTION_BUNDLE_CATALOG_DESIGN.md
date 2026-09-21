@@ -615,13 +615,19 @@ a post-MVP optimization, not part of the bundle-authoring contract.
 
 Art-prompt development has a disposable pre-experiment loop. The operator may
 overwrite one draft prompt and one art output below the product's `scratch/`
-directory until the fixed design is credible. One or two representative
-transformed-pet cutouts may be reused in an exact-renderer layout preview to
-check personalization space and visual balance. Pets remain composition probes
-and are never supplied to the art-generation request. Scratch art, cutouts, and
-layout have no provenance and cannot become immutable dependencies. Promotion
-copies only the prompt text; a new art experiment regenerates the output before
-stability and cross-candidate comparison.
+directory until the fixed design is credible. This first-design loop is art
+only; it does not require a pet transformation or provisional layout. Promotion
+copies only the prompt text, and a new art experiment regenerates the output
+before stability and cross-candidate comparison.
+
+After pet and layout candidates exist, later art improvement may optionally
+reuse one or two representative transformed-pet outputs and the selected layout
+in an exact-renderer scratch preview. Pets are composition probes and are never
+supplied to the art-generation request. The copied layout only diagnoses whether
+an art change preserves composition; it is not promoted. Scratch art, cutouts,
+layout copies, and previews have no provenance and cannot become immutable
+dependencies. A material art-geometry change requires a new immutable art
+experiment followed by a new layout experiment and downstream evaluation.
 
 Pet-prompt development has a similar disposable pre-experiment loop. The operator may
 overwrite one draft prompt and one representative transformed-pet output below

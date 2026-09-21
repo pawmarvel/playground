@@ -17,6 +17,22 @@ the production-bundle workflow. The application/FE consumes a versioned bundle;
 it must never consume `authoring/`, `work/`, `scratch/`, experiment, evaluation,
 selection, or print-candidate paths.
 
+For a brand-new design, follow sections 2 through 9 in order. The shortest
+supported path is:
+
+1. configure private inputs and ordered references;
+2. tune art in disposable scratch, then record one immutable art candidate;
+3. tune the pet prompt against one pet, then run smoke and release fixtures;
+4. author one layout against the selected art and a successful release fixture;
+5. review assembly, prepare print, graduate, bundle, and publish.
+
+Sections 10 through 16 are not prerequisites for that first bundle. They cover
+post-preview improvement, consumer verification, cleanup, whole-pipeline
+debugging, focused troubleshooting, and alternate providers. Create additional
+art, pet, or layout candidates only when the current evidence gives a reason;
+the first run does not require a synthetic alternative merely to exercise
+comparison tooling.
+
 ## 1. Operating rules
 
 - Scope every authoring workspace by both design and product profile:
@@ -233,11 +249,6 @@ a supporting image as another pet to combine. `create-experiment` snapshots the
 ordered references and hashes; later attempts and fixture benchmarks reuse that
 immutable order automatically.
 
-Configs created before the tiered fixture contract export the obsolete single
-`PAWMARVEL_FIXTURE_SET` variable. Create a new versioned config with
-`init-config --version-number <next>` and carry over intentional design settings;
-do not hand-edit an old config into an ambiguous partial migration.
-
 `PAWMARVEL_RELEASE_ID` is the identity of the release this iteration will
 create; it does not search for or select an older catalog. If you intend to
 publish an existing release, change it to that catalog's exact directory name
@@ -383,17 +394,18 @@ work/authoring/cooper/blanket-king-9375x12375/
       attempts/
         attempt-0001/{run.json,outputs/,qa/}
         attempt-0002/{run.json,outputs/,qa/}
-    art/art-gpt-v02/                  # a different prompt/configuration
+    art/art-gpt-v02/                  # optional later prompt/configuration improvement
       experiment.json
       inputs/
       attempts/
         attempt-0001/{run.json,outputs/,qa/}
+        attempt-0002/{run.json,outputs/,qa/}
     pet/pet-gpt-v01/
       experiment.json
       inputs/                         # prompt, references, profile snapshots
       attempts/
-        attempt-0001/{run.json,inputs/,outputs/,qa/}
-        benchmark-*/{run.json,inputs/,outputs/,qa/}
+        smoke-*/{run.json,inputs/,outputs/,qa/}
+        release-*/{run.json,inputs/,outputs/,qa/}
     layout/layout-v01/
       experiment.json
       inputs/                         # pinned art/pet, layout/font references, OFL catalog
@@ -401,11 +413,12 @@ work/authoring/cooper/blanket-king-9375x12375/
         attempt-0001/{run.json,outputs/,qa/}
         attempt-0002/{run.json,outputs/,qa/} # optional layout/font alternative
   reviews/                            # self-contained evaluation/decision packets
-    art/art-prompt-v01-v02/
+    art/art-baseline/
       evaluation.json
       artifacts/art-comparison.png
       decision.json
-    pet/pet-gpt-baseline/
+    art/art-improvement-v02/          # optional later cross-candidate review
+    pet/pet-gpt-release/
       evaluation.json
       artifacts/pet-comparison.png
       decision.json
@@ -486,25 +499,24 @@ prompt.
 ### 5.1 Tune one representative art result in disposable scratch
 
 Do this before creating an immutable art experiment. The fast loop overwrites
-one draft prompt and `art.png` until the fixed artwork is credible, then checks
-that art with one or two representative transformed-pet cutouts. It keeps no
+one draft prompt and `art.png` until the fixed artwork is credible. It keeps no
 history and none of its files may be selected, reviewed, bundled, or used as an
 immutable layout dependency.
 
-The pet images are composition probes only. Never pass a user pet to the art
-generation request: reusable `art.png` must remain pet- and name-free. Keep the
-intended art provider, model, quality, product profile, and ordered references
-fixed while editing the prompt. Each prompt iteration still makes one paid art
-call, but it avoids creating experiments and repeated stability attempts for an
-obviously unsatisfactory design.
+For a brand-new design, this is intentionally an art-only workflow. A pet
+transformation and layout do not exist yet and are not prerequisites. Never
+pass a user pet to the art-generation request: reusable `art.png` must remain
+pet- and name-free. Keep the intended art provider, model, quality, product
+profile, and ordered references fixed while editing the prompt. Each prompt
+iteration still makes one paid art call, but it avoids creating experiments and
+repeated stability attempts for an obviously unsatisfactory design.
 
 ```bash
 PAWMARVEL_ART_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/art-prompt-tuning"
 PAWMARVEL_ART_SCRATCH_TEMPLATE="$PAWMARVEL_ART_SCRATCH/template"
-PAWMARVEL_ART_SCRATCH_PETS="$PAWMARVEL_ART_SCRATCH/pets"
 PAWMARVEL_ART_SCRATCH_PROMPT="$PAWMARVEL_ART_SCRATCH/art-template-draft-gpt.md"
 
-mkdir -p "$PAWMARVEL_ART_SCRATCH_TEMPLATE" "$PAWMARVEL_ART_SCRATCH_PETS"
+mkdir -p "$PAWMARVEL_ART_SCRATCH_TEMPLATE"
 cp "$PAWMARVEL_ART_PROMPT" "$PAWMARVEL_ART_SCRATCH_PROMPT"
 
 # Repeat this edit-and-generate pair. --force replaces the prior scratch art.
@@ -531,69 +543,16 @@ animal. It must also leave a plausible personalization region rather than
 blindly reproducing screenshot geometry that conflicts with the product
 profile.
 
-For a new design, generate one representative scratch pet cutout with the
-current pet prompt. A second pet with a contrasting silhouette or coat is
-recommended but optional. These calls assess whether the art leaves usable
-composition space; they do not approve the pet prompt, which has its own scratch
-and fixture workflow in section 6.
+Stop at the art-only review for the first version. Do not generate temporary pet
+cutouts or invent a provisional layout merely to complete this section. After
+sections 6 and 7 produce transformed-pet and layout candidates, section 10.1
+provides the optional composition-aware scratch loop used for later design
+improvements and preview feedback.
 
-```bash
-# Optional second probe; choose a materially different pet rather than a near
-# duplicate. Omit its generation and GUI upload if only one probe is needed.
-PAWMARVEL_ART_SCRATCH_PET_2="$PAWMARVEL_PROJECT/examples/pet-inputs/white-fluffy-dog.png"
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
-  --provider "$PAWMARVEL_PET_PROVIDER" \
-  --model "$PAWMARVEL_PET_MODEL" \
-  --quality "$PAWMARVEL_PET_QUALITY" \
-  --pet-image "$PAWMARVEL_PET" \
-  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
-  --prompt-file "$PAWMARVEL_PET_PROMPT" \
-  --product-profile "$PAWMARVEL_PROFILE" \
-  --profile-layer transformed-pet \
-  --background transparent \
-  --output-format png \
-  --output-dir "$PAWMARVEL_ART_SCRATCH_PETS" \
-  --output-name pet-01.png \
-  --force
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
-  --provider "$PAWMARVEL_PET_PROVIDER" \
-  --model "$PAWMARVEL_PET_MODEL" \
-  --quality "$PAWMARVEL_PET_QUALITY" \
-  --pet-image "$PAWMARVEL_ART_SCRATCH_PET_2" \
-  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
-  --prompt-file "$PAWMARVEL_PET_PROMPT" \
-  --product-profile "$PAWMARVEL_PROFILE" \
-  --profile-layer transformed-pet \
-  --background transparent \
-  --output-format png \
-  --output-dir "$PAWMARVEL_ART_SCRATCH_PETS" \
-  --output-name pet-02.png \
-  --force
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-layout-config" \
-  --art "$PAWMARVEL_ART_SCRATCH_TEMPLATE/art.png" \
-  --reference "$PAWMARVEL_SAMPLE" \
-  --pet "$PAWMARVEL_ART_SCRATCH_PETS/pet-01.png" \
-  --pet-name "$PAWMARVEL_PET_NAME" \
-  --font-catalog "$PAWMARVEL_FONT_CATALOG" \
-  "${PAWMARVEL_LAYOUT_REFERENCE_ARGS[@]}" \
-  --output "$PAWMARVEL_ART_SCRATCH_TEMPLATE/layout.json" \
-  --force
-```
-
-In the layout editor, upload `pet-02.png` as the alternate transformed pet and
-switch between both probes without changing the geometry. Confirm that neither
-pet collides with fixed artwork, both remain visually balanced, the intended
-name region remains usable, and the art still resembles the reference at the
-profile aspect ratio. If art wording changes, regenerate `art.png`, reopen the
-scratch editor, and repeat; reusing the two cutouts avoids extra pet API calls.
-
-When the result is satisfactory, promote only the prompt text. The scratch art,
-pet cutouts, and layout are disposable. The immutable experiment must regenerate
-`art.png`, and the real layout remains a later product of the selected immutable
-art and pet attempts.
+When the art-only result is satisfactory, promote only the prompt text. The
+scratch art is disposable. The immutable experiment must regenerate `art.png`,
+and the real layout remains a later product of the selected immutable art and
+pet attempts.
 
 ```bash
 mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
@@ -647,118 +606,22 @@ artwork only: no example pet, personalized name, product mockup, garment, or
 placeholder animal.
 
 The baseline evaluation measures variation and latency between stochastic runs
-of one exact prompt/configuration. The main prompt-authoring loop also needs a
-cross-experiment evaluation. Make a private candidate prompt, edit the wording,
-and snapshot it in a second experiment:
-
-```bash
-mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
-cp "$PAWMARVEL_ART_CANDIDATE_PROMPT" \
-  "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md"
-
-# Edit v02 to test a specific hypothesis; do not edit immutable experiment inputs.
-"${EDITOR:-vi}" "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md"
-
-# Authoring prompt variants may add a lowercase suffix after the provider
-# category. Graduation canonicalizes the selected file to art-template-gpt.md
-# (or art-template-gemini.md) in the FE bundle.
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
-  --kind art \
-  --experiment-id art-gpt-v02 \
-  --design-id "$PAWMARVEL_DESIGN_ID" \
-  --product-profile "$PAWMARVEL_PROFILE" \
-  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
-  --prompt-file "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md" \
-  --provider "$PAWMARVEL_ART_PROVIDER" \
-  --model "$PAWMARVEL_ART_MODEL" \
-  --quality "$PAWMARVEL_ART_QUALITY" \
-  --parent-experiment-id art-gpt-v01 \
-  --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
-
-PAWMARVEL_ART_EXPERIMENT_V02="$PAWMARVEL_AUTHORING_PRODUCT/experiments/art/art-gpt-v02"
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
-  --experiment "$PAWMARVEL_ART_EXPERIMENT_V02" \
-  --attempt-id attempt-0001
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
-  --experiment "$PAWMARVEL_ART_EXPERIMENT_V02" \
-  --attempt-id attempt-0002
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
-  --kind art \
-  --review-id art-prompt-v01-v02 \
-  --experiment art-gpt-v01 \
-  --experiment art-gpt-v02 \
-  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
-  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
-```
-
-Open
-`reviews/art/art-prompt-v01-v02/artifacts/art-comparison.png`. Its labeled
-tiles show all renderable attempts from both prompt experiments on a checkerboard
-background, including gate status, latency, and a short content hash. Use it for
-side-by-side review, then inspect the original `outputs/art.png` files at full
-resolution before choosing a winner. The evaluation JSON records the complete
-candidate list and the contact-sheet hash; it does not make the visual decision.
-
-Repeat `--experiment` for any number of prompt candidates. Prefer changing one
-prompt hypothesis at a time, and create a new review ID whenever the
-candidate set changes. Never replace an experiment, attempt, or review.
-
-`--quality` is part of the experiment configuration. For OpenAI it is passed
-to the image API. To isolate quality, create—for example—`art-gpt-v02-low`
-using the exact v02 prompt/model/reference inputs but `--quality low`, run the
-same number of attempts, and add it to a new comparison:
-
-```bash
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
-  --kind art \
-  --experiment-id art-gpt-v02-low \
-  --design-id "$PAWMARVEL_DESIGN_ID" \
-  --product-profile "$PAWMARVEL_PROFILE" \
-  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
-  --prompt-file "$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md" \
-  --provider "$PAWMARVEL_ART_PROVIDER" \
-  --model "$PAWMARVEL_ART_MODEL" \
-  --quality low \
-  --parent-experiment-id art-gpt-v02 \
-  --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
-
-PAWMARVEL_ART_EXPERIMENT_V02_LOW="$PAWMARVEL_AUTHORING_PRODUCT/experiments/art/art-gpt-v02-low"
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
-  --experiment "$PAWMARVEL_ART_EXPERIMENT_V02_LOW" \
-  --attempt-id attempt-0001
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
-  --experiment "$PAWMARVEL_ART_EXPERIMENT_V02_LOW" \
-  --attempt-id attempt-0002
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
-  --kind art \
-  --review-id art-v02-high-vs-low \
-  --experiment art-gpt-v02 \
-  --experiment art-gpt-v02-low \
-  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
-  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
-```
-
-This comparison is meaningful only when prompt, model, references, and attempt
-count are held constant. Compare median latency and failure rate together with
-the visual result; do not assume `high` wins automatically.
+of the exact prompt/configuration. If both attempts pass and the candidate is
+visually satisfactory, select it now. Do not create a second prompt or quality
+experiment solely for bookkeeping. Section 10.1 shows how to add and compare a
+successor after preview feedback or when this baseline exposes a specific
+improvement hypothesis.
 
 After reviewing the comparison, enter the winning review, experiment, and
 attempt once. The block records the immutable decision and derives every art
 parameter used by later sections; do not separately type an art-attempt path.
-If the quality comparison wins instead, change the three IDs to that review's
-actual winner before running the block.
+For a later multi-candidate review, change the three IDs to that review's actual
+winner before running the same block.
 
 ```bash
 # Operator selection inputs: edit only these three values.
-PAWMARVEL_ART_REVIEW_ID="art-prompt-v01-v02"
-PAWMARVEL_ART_SELECTED_EXPERIMENT_ID="art-gpt-v02"
+PAWMARVEL_ART_REVIEW_ID="art-baseline"
+PAWMARVEL_ART_SELECTED_EXPERIMENT_ID="art-gpt-v01"
 PAWMARVEL_ART_SELECTED_ATTEMPT_ID="attempt-0001"
 
 PAWMARVEL_ART_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/art/$PAWMARVEL_ART_REVIEW_ID"
@@ -947,11 +810,6 @@ PAWMARVEL_SMOKE_SELECTION="$PAWMARVEL_BENCHMARK_SELECTION_ROOT/pet-smoke-v01.jso
 
 cat "$PAWMARVEL_SMOKE_SELECTION"
 ${EDITOR:-vi} "$PAWMARVEL_SMOKE_SELECTION"
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
-  --experiment "$PAWMARVEL_PET_EXPERIMENT" \
-  --attempt-id attempt-0001 \
-  --pet-image "$PAWMARVEL_PET"
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" benchmark \
   --experiment "$PAWMARVEL_PET_EXPERIMENT" \
@@ -1268,82 +1126,10 @@ test -f "$PAWMARVEL_LAYOUT_ATTEMPT/run.json"
 printf 'layout decision: %s\nlayout attempt:  %s\n' "$PAWMARVEL_LAYOUT_DECISION" "$PAWMARVEL_LAYOUT_ATTEMPT"
 ```
 
-### Optionally promote the selected font to the repository catalog
-
-Do this only after the layout font has been selected and reviewed. Promotion is
-repository maintenance for future authoring runs; it is not required for the
-current attempt or bundle. Start from the immutable attempt output, never from
-the temporary browser cache:
-
-```bash
-PAWMARVEL_SAVED_FONT_DIR="$PAWMARVEL_LAYOUT_ATTEMPT/outputs/fonts"
-test -f "$PAWMARVEL_SAVED_FONT_DIR/source.json"
-test -f "$PAWMARVEL_SAVED_FONT_DIR/METADATA.pb"
-test -f "$PAWMARVEL_SAVED_FONT_DIR/OFL.txt"
-
-PAWMARVEL_PROMOTED_FAMILY_ID="$($PAWMARVEL_PROJECT/.venv/bin/python -c \
-  'import json,sys; print(json.load(open(sys.argv[1]))["family_id"])' \
-  "$PAWMARVEL_SAVED_FONT_DIR/source.json")"
-PAWMARVEL_PROMOTED_FONT_NAME="$($PAWMARVEL_PROJECT/.venv/bin/python -c \
-  'import json,sys; print(json.load(open(sys.argv[1]))["font_filename"])' \
-  "$PAWMARVEL_SAVED_FONT_DIR/source.json")"
-PAWMARVEL_PROMOTED_FONT_DIR="$PAWMARVEL_PROJECT/assets/fonts/$PAWMARVEL_PROMOTED_FAMILY_ID"
-
-test ! -e "$PAWMARVEL_PROMOTED_FONT_DIR"
-mkdir "$PAWMARVEL_PROMOTED_FONT_DIR"
-cp "$PAWMARVEL_SAVED_FONT_DIR/$PAWMARVEL_PROMOTED_FONT_NAME" "$PAWMARVEL_PROMOTED_FONT_DIR/"
-cp "$PAWMARVEL_SAVED_FONT_DIR/OFL.txt" "$PAWMARVEL_PROMOTED_FONT_DIR/"
-cp "$PAWMARVEL_SAVED_FONT_DIR/METADATA.pb" "$PAWMARVEL_PROMOTED_FONT_DIR/"
-cp "$PAWMARVEL_SAVED_FONT_DIR/source.json" "$PAWMARVEL_PROMOTED_FONT_DIR/"
-```
-
-Review `source.json` and `OFL.txt`, and reject the promotion if the source is not
-`google-fonts-ofl`, the license is ambiguous, or the selected file is unsuitable
-for deterministic preview and print rendering. Then append one face entry to
-`assets/fonts/catalog.json`, keep the `fonts` array ordered by family/style, and
-increment `selection.face_count`. Use the existing entries as the schema:
-
-```json
-{
-  "family": "<family name from METADATA.pb>",
-  "style": "<selected face style>",
-  "role": "<bold-condensed|rounded-playful|handwritten|script|slab-western|retro-decorative>",
-  "font": "<family-id>/<selected-font>.ttf",
-  "license": "<family-id>/OFL.txt",
-  "font_sha256": "<shasum -a 256 of the TTF>",
-  "license_sha256": "<shasum -a 256 of OFL.txt>",
-  "font_bytes": 12345
-}
-```
-
-Calculate the inventory values and validate that the manifest exactly matches
-the renderable local catalog:
-
-```bash
-shasum -a 256 "$PAWMARVEL_PROMOTED_FONT_DIR/$PAWMARVEL_PROMOTED_FONT_NAME"
-shasum -a 256 "$PAWMARVEL_PROMOTED_FONT_DIR/OFL.txt"
-wc -c "$PAWMARVEL_PROMOTED_FONT_DIR/$PAWMARVEL_PROMOTED_FONT_NAME"
-
-"$PAWMARVEL_PROJECT/.venv/bin/python" -m unittest discover \
-  -s "$PAWMARVEL_PROJECT/tests" \
-  -p 'test_font_catalog.py' \
-  -v
-```
-
-Finally inspect and stage only the promoted family and catalog inventory. Do
-not stage `work/`:
-
-```bash
-git diff -- "$PAWMARVEL_PROJECT/assets/fonts/catalog.json"
-git status --short -- "$PAWMARVEL_PROMOTED_FONT_DIR" "$PAWMARVEL_PROJECT/assets/fonts/catalog.json"
-git add "$PAWMARVEL_PROMOTED_FONT_DIR" "$PAWMARVEL_PROJECT/assets/fonts/catalog.json"
-git diff --cached --check
-git diff --cached --stat
-```
-
-New layout experiments snapshot the expanded catalog automatically. Existing
-experiments remain immutable and continue using their original catalog
-snapshot.
+Repository-wide promotion of a newly downloaded OFL font is not required for
+this layout or bundle. Continue directly to assembly. Section 16 documents the
+optional maintenance procedure for making that family available to future
+authoring work.
 
 Before print preparation, render the selected release fixtures through the
 selected art and layout. This reuses the already-generated pet cutouts and does
@@ -1465,6 +1251,10 @@ print-candidates/print-finalist-0001/
     fonts/OFL.txt
 ```
 
+### Optional reuse after a pet-only print change
+
+Skip this subsection in the normal first-design flow.
+
 If the print result exposes an art, pet, or layout problem, return to the
 corresponding section and create new immutable IDs. The explicit attempt flags
 remain available for advanced diagnostics and intentional candidate mixing.
@@ -1518,6 +1308,10 @@ printf 'graduated selection: %s\n' "$PAWMARVEL_SELECTION"
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" trace \
   --graduation "$PAWMARVEL_GRADUATION"
 ```
+
+### Troubleshooting only: graduation assembly mismatch
+
+Skip this subsection when `graduate` succeeds.
 
 If `graduate` reports an assembly mismatch, create a new assembly review for
 the exact selected combination and a new print candidate. Do not edit an old
@@ -1743,6 +1537,9 @@ revalidated/imported, the local exchange copy may be reclaimed independently.
 exchange revisions, so allocation remains monotonic after this cleanup;
 do not delete selected authoring lineage with a filesystem command.
 
+This completes the brand-new-design path. Stop here until local review or FE
+trial feedback identifies a concrete reason for another iteration.
+
 ## 10. Iterate after FE trial feedback
 
 FE feedback must identify `template_id`, `bundle_revision`, and a safe
@@ -1750,15 +1547,181 @@ reproduction input. Classify the defect before rerunning anything:
 
 | Feedback | Repeat | Required downstream work |
 | --- | --- | --- |
-| Fixed art/style | Section 5 | Revalidate layout, assembly, print, selection, and bundle |
-| Pet quality, alpha, latency, or model | Section 6 | Revalidate assembly and pet print; reuse verified template print assets when eligible |
-| Placement or typography | Section 7 | Rebuild assembly, print layout/render, selection, and bundle |
+| Fixed art/style | Section 10.1 | Revalidate layout, assembly, print, selection, and bundle |
+| Pet quality, alpha, latency, or model | Section 6 scratch/benchmark pattern with successor IDs | Revalidate assembly and pet print; reuse verified template print assets when eligible |
+| Placement or typography | Section 7 pattern with a successor experiment/attempt | Rebuild assembly, print layout/render, selection, and bundle |
 | Print upscale | Section 8 | Create a new print candidate with a new ID |
 | Product geometry | Start a new product-profile workspace | Regenerate all profile-dependent artifacts |
 
 An accepted improvement produces `v000002` or the next revision. Never patch
 `v000001`. A materially different visual design gets a new `design_id`; a
 different product geometry gets a new `product_profile_id`.
+
+### 10.1 Optional composition-aware art scratch loop
+
+Use this workflow only after sections 6 and 7 have produced representative
+transformed-pet outputs and a layout. It is useful when preview or FE feedback
+suggests that fixed art competes with the pet or name. It is optional: isolated
+art feedback can return directly to the art-only scratch loop in section 5.1.
+
+Seed a new disposable draft from the selected art experiment, then use only the
+edit-and-generate pair from section 5.1 to regenerate scratch `art.png`. Do not
+rerun section 5.1's original `cp "$PAWMARVEL_ART_PROMPT"` command after editing,
+because it would replace the feedback draft with the original source prompt.
+
+```bash
+PAWMARVEL_SELECTED_ART_PROMPT="$(find \
+  "$PAWMARVEL_ART_EXPERIMENT/inputs" \
+  -maxdepth 1 -type f -name 'art-template-*.md' -print -quit)"
+PAWMARVEL_ART_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/art-preview-feedback"
+PAWMARVEL_ART_SCRATCH_TEMPLATE="$PAWMARVEL_ART_SCRATCH/template"
+PAWMARVEL_ART_SCRATCH_PROMPT="$PAWMARVEL_ART_SCRATCH/art-template-draft-gpt.md"
+
+test -f "$PAWMARVEL_SELECTED_ART_PROMPT"
+mkdir -p "$PAWMARVEL_ART_SCRATCH_TEMPLATE"
+cp "$PAWMARVEL_SELECTED_ART_PROMPT" "$PAWMARVEL_ART_SCRATCH_PROMPT"
+```
+
+Reuse existing transformed-pet attempts rather than making new pet API calls.
+One pet is sufficient for a focused correction; a second pet with a contrasting
+body shape or coat is recommended when the change affects available composition
+space.
+
+Stage the selected immutable layout and its font beside the scratch art so the
+normal renderer—not an approximation—produces the comparison previews. This
+entire layout/render block is optional. Skip it when no accepted layout exists
+or when the feedback concerns only isolated fixed artwork.
+
+```bash
+PAWMARVEL_ART_FEEDBACK_TEMPLATE="$PAWMARVEL_ART_SCRATCH/template"
+PAWMARVEL_ART_FEEDBACK_PREVIEWS="$PAWMARVEL_ART_SCRATCH/previews"
+PAWMARVEL_ART_FEEDBACK_PET_1="$PAWMARVEL_PET_ATTEMPT/outputs/transformed-pet.png"
+PAWMARVEL_ART_FEEDBACK_PET_2="$PAWMARVEL_PET_EXPERIMENT/attempts/release-white-fluffy-dog-0001/outputs/transformed-pet.png"
+
+mkdir -p "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/fonts" \
+  "$PAWMARVEL_ART_FEEDBACK_PREVIEWS"
+cp "$PAWMARVEL_LAYOUT_ATTEMPT/outputs/layout.json" \
+  "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/layout.json"
+cp -R "$PAWMARVEL_LAYOUT_ATTEMPT/outputs/fonts/." \
+  "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/fonts/"
+
+test -f "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/art.png"
+test -f "$PAWMARVEL_ART_FEEDBACK_PET_1"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-render" \
+  --template-dir "$PAWMARVEL_ART_FEEDBACK_TEMPLATE" \
+  --layout "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/layout.json" \
+  --pet "$PAWMARVEL_ART_FEEDBACK_PET_1" \
+  --pet-name "$PAWMARVEL_PET_NAME" \
+  --output "$PAWMARVEL_ART_FEEDBACK_PREVIEWS/pet-01.png" \
+  --debug-output "$PAWMARVEL_ART_FEEDBACK_PREVIEWS/pet-01-debug.png" \
+  --force
+```
+
+The second probe is optional. Run it only when that fixture attempt exists, or
+replace the path with another successful attempt from the selected pet
+experiment:
+
+```bash
+if test -f "$PAWMARVEL_ART_FEEDBACK_PET_2"; then
+  "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-render" \
+    --template-dir "$PAWMARVEL_ART_FEEDBACK_TEMPLATE" \
+    --layout "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/layout.json" \
+    --pet "$PAWMARVEL_ART_FEEDBACK_PET_2" \
+    --pet-name "$PAWMARVEL_PET_NAME" \
+    --output "$PAWMARVEL_ART_FEEDBACK_PREVIEWS/pet-02.png" \
+    --debug-output "$PAWMARVEL_ART_FEEDBACK_PREVIEWS/pet-02-debug.png" \
+    --force
+fi
+```
+
+Compare the isolated scratch art and the one or two composed previews. Confirm
+that fixed elements do not collide with either pet, visual balance survives the
+silhouette change, and the name region remains usable. The copied layout is a
+diagnostic probe, not a new layout candidate. If the improved art changes
+geometry enough that the accepted layout no longer works, promote and evaluate
+the new art first, then create a new layout experiment in section 7.
+
+Only the revised art prompt is promoted from this scratch loop. The following
+example creates one successor and compares it with the currently selected art;
+it is not part of the first-design path:
+
+```bash
+PAWMARVEL_ART_NEXT_ID="art-gpt-v02"
+PAWMARVEL_ART_NEXT_PROMPT="$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v02.md"
+PAWMARVEL_ART_NEXT_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/art/$PAWMARVEL_ART_NEXT_ID"
+
+mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
+cp "$PAWMARVEL_ART_SCRATCH_PROMPT" "$PAWMARVEL_ART_NEXT_PROMPT"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
+  --kind art \
+  --experiment-id "$PAWMARVEL_ART_NEXT_ID" \
+  --design-id "$PAWMARVEL_DESIGN_ID" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
+  --prompt-file "$PAWMARVEL_ART_NEXT_PROMPT" \
+  --provider "$PAWMARVEL_ART_PROVIDER" \
+  --model "$PAWMARVEL_ART_MODEL" \
+  --quality "$PAWMARVEL_ART_QUALITY" \
+  --parent-experiment-id "$PAWMARVEL_ART_SELECTED_EXPERIMENT_ID" \
+  --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
+  --experiment "$PAWMARVEL_ART_NEXT_EXPERIMENT" \
+  --attempt-id attempt-0001
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
+  --experiment "$PAWMARVEL_ART_NEXT_EXPERIMENT" \
+  --attempt-id attempt-0002
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
+  --kind art \
+  --review-id art-improvement-v02 \
+  --experiment "$PAWMARVEL_ART_SELECTED_EXPERIMENT_ID" \
+  --experiment "$PAWMARVEL_ART_NEXT_ID" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
+  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
+```
+
+Inspect the comparison and full-size originals. If v02 wins, reuse the decision
+block in section 5 with review `art-improvement-v02`, experiment `art-gpt-v02`,
+and the winning attempt ID. To compare quality instead of wording, create the
+successor from the exact same prompt/model/references with a different
+`--quality`; do not change prompt and quality in one experiment. Repeat the
+affected layout, assembly, print, graduation, and bundle steps to produce the
+next immutable revision. The scratch art, copied layout, and preview files
+remain disposable.
+
+### 10.2 Successor rules for pet and layout feedback
+
+Do not rerun the literal `pet-gpt-v01`, `layout-v01`, attempt, review, or
+graduation IDs from the first-design walkthrough. Existing records are
+immutable. Keep every accepted upstream decision that is unaffected and create
+new IDs only from the first changed stage onward.
+
+For pet feedback:
+
+1. seed the disposable prompt from the selected pet experiment's snapshotted
+   prompt, not the original mutable config source;
+2. tune one representative output with the section 6.1 scratch command;
+3. promote it as a provider-named v02 prompt and create `pet-gpt-v02` with the
+   selected experiment as its parent;
+4. run a new smoke selection/prefix first; run a new release prefix only after
+   smoke passes; and
+5. create new pet and assembly reviews, a new pet decision, print candidate,
+   graduation, and bundle revision.
+
+For layout or typography feedback, create `layout-v02` pinned to the already
+selected art and pet attempts. Seed its optional layout/font references from
+the previous immutable layout attempt, save one new attempt, and compare the
+old and new layout experiments. No art or pet provider call is needed. A
+changed art winner or official representative pet requires a new layout
+experiment even when the visible box values are expected to remain unchanged.
+
+These successor paths preserve the first bundle and its evidence. They also
+avoid regenerating unaffected art or pet artifacts merely because a downstream
+layout or print issue changed.
 
 ## 11. Verify bundle consumption and FE-independent debugging
 
@@ -1868,8 +1831,12 @@ The preview and print must use the same bundle revision and customer values.
 Mark a losing experiment before cleanup:
 
 ```bash
+PAWMARVEL_DISCARDED_EXPERIMENT_ID="replace-with-losing-experiment-id"
+PAWMARVEL_DISCARDED_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/art/$PAWMARVEL_DISCARDED_EXPERIMENT_ID"
+test -f "$PAWMARVEL_DISCARDED_EXPERIMENT/experiment.json"
+
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" set-status \
-  --experiment "$PAWMARVEL_AUTHORING_PRODUCT/experiments/art/art-gpt-v02" \
+  --experiment "$PAWMARVEL_DISCARDED_EXPERIMENT" \
   --status discarded
 ```
 
@@ -2108,3 +2075,80 @@ bundle commands reject a Gemini pet runtime even when its offline review passes.
 Enabling another production provider requires a new reviewed runtime transport
 contract, schema change, FE adapter, and end-to-end contract tests. The existing
 art experiment does not need to be regenerated for this comparison.
+
+## 16. Optional repository font-catalog maintenance
+
+This is repository maintenance for future authoring runs. It is not required
+for the current layout, bundle, or first-design flow. Run it only when the
+selected layout font was downloaded from Google Fonts and should become a
+curated local option. Start from the immutable layout-attempt output, never from
+the temporary browser cache:
+
+```bash
+PAWMARVEL_SAVED_FONT_DIR="$PAWMARVEL_LAYOUT_ATTEMPT/outputs/fonts"
+test -f "$PAWMARVEL_SAVED_FONT_DIR/source.json"
+test -f "$PAWMARVEL_SAVED_FONT_DIR/METADATA.pb"
+test -f "$PAWMARVEL_SAVED_FONT_DIR/OFL.txt"
+
+PAWMARVEL_PROMOTED_FAMILY_ID="$($PAWMARVEL_PROJECT/.venv/bin/python -c \
+  'import json,sys; print(json.load(open(sys.argv[1]))["family_id"])' \
+  "$PAWMARVEL_SAVED_FONT_DIR/source.json")"
+PAWMARVEL_PROMOTED_FONT_NAME="$($PAWMARVEL_PROJECT/.venv/bin/python -c \
+  'import json,sys; print(json.load(open(sys.argv[1]))["font_filename"])' \
+  "$PAWMARVEL_SAVED_FONT_DIR/source.json")"
+PAWMARVEL_PROMOTED_FONT_DIR="$PAWMARVEL_PROJECT/assets/fonts/$PAWMARVEL_PROMOTED_FAMILY_ID"
+
+test ! -e "$PAWMARVEL_PROMOTED_FONT_DIR"
+mkdir "$PAWMARVEL_PROMOTED_FONT_DIR"
+cp "$PAWMARVEL_SAVED_FONT_DIR/$PAWMARVEL_PROMOTED_FONT_NAME" "$PAWMARVEL_PROMOTED_FONT_DIR/"
+cp "$PAWMARVEL_SAVED_FONT_DIR/OFL.txt" "$PAWMARVEL_PROMOTED_FONT_DIR/"
+cp "$PAWMARVEL_SAVED_FONT_DIR/METADATA.pb" "$PAWMARVEL_PROMOTED_FONT_DIR/"
+cp "$PAWMARVEL_SAVED_FONT_DIR/source.json" "$PAWMARVEL_PROMOTED_FONT_DIR/"
+```
+
+Review `source.json` and `OFL.txt`. Reject promotion if the source is not
+`google-fonts-ofl`, the license is ambiguous, or the selected file is unsuitable
+for deterministic preview and print rendering. Then append one face entry to
+`assets/fonts/catalog.json`, keep `fonts` ordered by family/style, and increment
+`selection.face_count`:
+
+```json
+{
+  "family": "<family name from METADATA.pb>",
+  "style": "<selected face style>",
+  "role": "<bold-condensed|rounded-playful|handwritten|script|slab-western|retro-decorative>",
+  "font": "<family-id>/<selected-font>.ttf",
+  "license": "<family-id>/OFL.txt",
+  "font_sha256": "<shasum -a 256 of the TTF>",
+  "license_sha256": "<shasum -a 256 of OFL.txt>",
+  "font_bytes": 12345
+}
+```
+
+Calculate the inventory values and validate the local catalog:
+
+```bash
+shasum -a 256 "$PAWMARVEL_PROMOTED_FONT_DIR/$PAWMARVEL_PROMOTED_FONT_NAME"
+shasum -a 256 "$PAWMARVEL_PROMOTED_FONT_DIR/OFL.txt"
+wc -c "$PAWMARVEL_PROMOTED_FONT_DIR/$PAWMARVEL_PROMOTED_FONT_NAME"
+
+"$PAWMARVEL_PROJECT/.venv/bin/python" -m unittest discover \
+  -s "$PAWMARVEL_PROJECT/tests" \
+  -p 'test_font_catalog.py' \
+  -v
+```
+
+Finally inspect and stage only the promoted family and catalog inventory. Do
+not stage `work/`:
+
+```bash
+git diff -- "$PAWMARVEL_PROJECT/assets/fonts/catalog.json"
+git status --short -- "$PAWMARVEL_PROMOTED_FONT_DIR" "$PAWMARVEL_PROJECT/assets/fonts/catalog.json"
+git add "$PAWMARVEL_PROMOTED_FONT_DIR" "$PAWMARVEL_PROJECT/assets/fonts/catalog.json"
+git diff --cached --check
+git diff --cached --stat
+```
+
+New layout experiments snapshot the expanded catalog automatically. Existing
+experiments remain immutable and continue using their original catalog
+snapshot.
