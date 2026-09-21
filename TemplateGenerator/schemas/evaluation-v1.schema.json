@@ -33,6 +33,10 @@
         }
       }
     },
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
     "hard_gates": {
       "type": "object",
       "required": ["status"],

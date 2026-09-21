@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import shlex
 import subprocess
@@ -14,6 +15,45 @@ from pawmarvel_generator.authoring_cli import DEFAULT_PROJECT_ROOT, build_parser
 
 
 class AuthoringCliTests(unittest.TestCase):
+    def test_compare_prints_recorded_coverage_warnings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            evaluation = Path(temporary) / "evaluation.json"
+            evaluation.write_text(
+                json.dumps(
+                    {
+                        "warnings": [
+                            "incomplete fixture coverage; missing_fixture_ids=['dog-2']"
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with (
+                patch(
+                    "pawmarvel_generator.authoring_cli.compare",
+                    return_value=evaluation,
+                ),
+                redirect_stdout(stdout),
+                redirect_stderr(stderr),
+            ):
+                result = main(
+                    [
+                        "compare",
+                        "--kind", "pet",
+                        "--review-id", "pet-release",
+                        "--experiment", "pet-gpt-v01",
+                        "--evaluation-protocol", "protocol.json",
+                        "--authoring-product", "authoring/design/product",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(stdout.getvalue().strip(), str(evaluation))
+            self.assertIn("WARNING: incomplete fixture coverage", stderr.getvalue())
+            self.assertIn("dog-2", stderr.getvalue())
+
     def test_init_config_defaults_to_editable_project_root(self) -> None:
         args = build_parser().parse_args(
             [

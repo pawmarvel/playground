@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -312,8 +314,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 force=args.force,
             )
         elif args.command == "validate-fixture-set":
-            import json
-
             print(json.dumps(load_fixture_set(args.fixture_set).summary(), indent=2))
             return 0
         elif args.command == "prepare-benchmark":
@@ -324,6 +324,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 filters=tuple(args.fixture_filter),
                 force=args.force,
             )
+            selection = json.loads(result.read_text(encoding="utf-8"))
+            for warning in selection.get("warnings", []):
+                print(f"WARNING: {warning}", file=sys.stderr, flush=True)
         elif args.command == "create-experiment":
             result = create_experiment(
                 kind=args.kind,
@@ -366,6 +369,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 base_bundle_revision=args.base_bundle_revision,
                 attempt_prefix=args.attempt_prefix,
                 fixture_selection=args.fixture_selection)
+            evaluation = json.loads(result.read_text(encoding="utf-8"))
+            for warning in evaluation.get("warnings", []):
+                print(f"WARNING: {warning}", file=sys.stderr, flush=True)
         elif args.command == "record-decision":
             result = record_decision(
                 review=args.review,

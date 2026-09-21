@@ -24,11 +24,15 @@
     "decision": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["selected_by", "selected_at", "notes"],
+      "required": ["selected_by", "selected_at", "notes", "accepted_warnings"],
       "properties": {
         "selected_by": {"type": "string", "minLength": 1},
         "selected_at": {"type": "string"},
-        "notes": {"type": "string"}
+        "notes": {"type": "string"},
+        "accepted_warnings": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
       }
     }
   }

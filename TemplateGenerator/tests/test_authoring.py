@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import shutil
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
@@ -276,6 +278,16 @@ class AuthoringLifecycleTests(unittest.TestCase):
             review=evaluation.parent, selected_by="owner", notes="compatible",
             selected_experiment=None, selected_attempt=None,
         )
+        for decision in (
+            art_decision,
+            pet_decision,
+            layout_decision,
+            assembly_decision,
+        ):
+            self._validate_schema(
+                decision,
+                "evaluation-decision-v1.schema.json",
+            )
         print_candidate = prepare_print_candidate(
             candidate_id="print-finalist-0001", authoring_product=product,
             art_attempt=art_attempt, pet_attempt=pet_attempt,
@@ -648,10 +660,6 @@ class AuthoringLifecycleTests(unittest.TestCase):
             first, "benchmark-pet-two-0001", "transformed-pet.png", (816, 816),
             pet_source=second_fixture_pet,
         )
-        self._fake_attempt(
-            second, "benchmark-pet-two-0001", "transformed-pet.png", (816, 816),
-            pet_source=second_fixture_pet,
-        )
         unselected_pet = make_image(
             self.root / "pet-unselected.png", color=(20, 30, 40, 255)
         )
@@ -722,18 +730,80 @@ class AuthoringLifecycleTests(unittest.TestCase):
             record["fixture_selection"]["config_sha256"],
             sha256(fixture_selection),
         )
-        for candidate in record["candidates"]:
-            self.assertEqual(candidate["measurements"]["attempts"], 2)
-            self.assertEqual(candidate["measurements"]["success_rate"], 1.0)
-            self.assertEqual(candidate["fixture_coverage"]["status"], "passed")
-            self.assertEqual(
-                {group["value"] for group in candidate["fixture_coverage"]["groups"]["size_class"]},
-                {"small", "large"},
+        complete, incomplete = record["candidates"]
+        self.assertEqual(complete["measurements"]["attempts"], 2)
+        self.assertEqual(complete["fixture_coverage"]["status"], "passed")
+        self.assertEqual(complete["fixture_coverage"]["coverage_rate"], 1.0)
+        self.assertEqual(complete["fixture_coverage"]["missing_fixture_ids"], [])
+        self.assertEqual(
+            {group["value"] for group in complete["fixture_coverage"]["groups"]["size_class"]},
+            {"small", "large"},
+        )
+        self.assertEqual(
+            complete["fixture_coverage"]["groups"]["species"][0]["value"],
+            "dog",
+        )
+        self.assertEqual(incomplete["measurements"]["attempts"], 1)
+        self.assertEqual(incomplete["fixture_coverage"]["status"], "warning")
+        self.assertEqual(incomplete["fixture_coverage"]["coverage_rate"], 0.5)
+        self.assertEqual(
+            incomplete["fixture_coverage"]["missing_fixture_ids"], ["pet-two"]
+        )
+        self.assertTrue(incomplete["hard_gates_passed"])
+        self.assertEqual(record["hard_gates"]["status"], "passed")
+        self.assertEqual(len(record["warnings"]), 1)
+        self.assertIn("pet-gpt-v02", record["warnings"][0])
+        self.assertIn("pet-two", record["warnings"][0])
+
+        with self.assertRaisesRegex(
+            AuthoringError, "selected candidate contains warnings.*--notes"
+        ):
+            record_decision(
+                review=evaluation.parent,
+                selected_by="application-owner",
+                notes="",
+                selected_experiment=second.name,
+                selected_attempt=None,
             )
-            self.assertEqual(
-                candidate["fixture_coverage"]["groups"]["species"][0]["value"],
-                "dog",
-            )
+        decision = record_decision(
+            review=evaluation.parent,
+            selected_by="application-owner",
+            notes="Accepted reduced coverage for MVP release",
+            selected_experiment=second.name,
+            selected_attempt=None,
+        )
+        decision_record = json.loads(decision.read_text(encoding="utf-8"))
+        self.assertEqual(
+            decision_record["decision"]["accepted_warnings"], record["warnings"]
+        )
+
+        complete_evaluation = compare(
+            kind="pet",
+            review_id="pet-controlled-complete-winner",
+            authoring_product=product,
+            experiments=[first.name, second.name],
+            evaluation_protocol=self.protocol,
+            fixture_set=fixture_set,
+            art_attempt=None,
+            pet_experiment=None,
+            layout_attempt=None,
+            base_bundle_revision=None,
+            attempt_prefix="benchmark-",
+            fixture_selection=fixture_selection,
+        )
+        complete_decision = record_decision(
+            review=complete_evaluation.parent,
+            selected_by="application-owner",
+            notes="",
+            selected_experiment=first.name,
+            selected_attempt=None,
+        )
+        self.assertEqual(
+            json.loads(complete_decision.read_text(encoding="utf-8"))["decision"][
+                "accepted_warnings"
+            ],
+            [],
+        )
 
     def test_benchmark_runs_only_reviewed_fixture_selection(self) -> None:
         experiment = self._experiment("pet", "pet-benchmark-v01", self.pet_prompt)
@@ -802,23 +872,23 @@ class AuthoringLifecycleTests(unittest.TestCase):
             [self.pet.resolve(), third_pet.resolve()],
         )
 
+        warning_output = io.StringIO()
         with patch(
             "pawmarvel_generator.authoring.run_attempt",
             side_effect=[AuthoringError("provider failed"), expected[1]],
-        ) as mocked_run:
-            with self.assertRaisesRegex(
-                AuthoringError,
-                r"benchmark completed with failed attempts.*succeeded=1; failed=1.*provider failed",
-            ):
-                benchmark(
-                    experiment=experiment,
-                    fixture_set=fixture_set,
-                    fixture_selection=selection,
-                    evaluation_protocol=self.protocol,
-                    attempts_per_fixture=1,
-                    attempt_id_prefix="retry",
-                )
+        ) as mocked_run, redirect_stderr(warning_output):
+            partial_result = benchmark(
+                experiment=experiment,
+                fixture_set=fixture_set,
+                fixture_selection=selection,
+                evaluation_protocol=self.protocol,
+                attempts_per_fixture=1,
+                attempt_id_prefix="retry",
+            )
         self.assertEqual(mocked_run.call_count, 2)
+        self.assertEqual(partial_result, [expected[1]])
+        self.assertIn("WARNING: benchmark completed with incomplete fixture coverage", warning_output.getvalue())
+        self.assertIn("provider failed", warning_output.getvalue())
 
     def test_benchmark_rejects_non_pet_experiment_before_paid_calls(self) -> None:
         experiment = self._experiment("art", "art-benchmark-v01", self.art_prompt)

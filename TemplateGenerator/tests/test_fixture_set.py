@@ -110,13 +110,43 @@ class FixtureSetTests(unittest.TestCase):
         with self.assertRaisesRegex(FixtureSetError, "smaller than the requested"):
             select_fixtures(fixture_set, fixture_count=4)
 
-    def test_release_inventory_and_run_require_at_least_six_pets(self) -> None:
+    def test_release_inventory_requires_six_but_smaller_runs_warn(self) -> None:
         manifest = self._manifest()
         value = json.loads(manifest.read_text(encoding="utf-8"))
         value["tier"] = "release"
         manifest.write_text(json.dumps(value), encoding="utf-8")
         with self.assertRaisesRegex(FixtureSetError, "release fixture set must contain 6-15"):
             load_fixture_set(manifest)
+
+        for index in range(4, 7):
+            image = make_image(
+                self.root / f"dog-{index}.png",
+                color=(index * 20, 50, 90, 255),
+            )
+            value["fixtures"].append(
+                {
+                    **value["fixtures"][0],
+                    "id": f"dog-{index}",
+                    "pet_image": image.name,
+                    "sha256": sha256(image),
+                    "breed": {
+                        "id": f"breed-{index}",
+                        "label": f"Breed {index}",
+                        "mixed": False,
+                    },
+                }
+            )
+        manifest.write_text(json.dumps(value), encoding="utf-8")
+        fixture_set = load_fixture_set(manifest)
+        selection = write_fixture_selection(
+            manifest,
+            output=self.root / "release-selection.json",
+            fixture_count=2,
+        )
+        selection_record = json.loads(selection.read_text(encoding="utf-8"))
+        self.assertEqual(selection_record["selected_fixture_ids"], ["dog-1", "dog-2"])
+        self.assertIn("recommended=6-15", selection_record["warnings"][0])
+        self.assertEqual(len(load_fixture_selection(fixture_set, selection)), 2)
 
     def test_writes_reviewable_selection_and_honors_edited_id_order(self) -> None:
         manifest = self._manifest()

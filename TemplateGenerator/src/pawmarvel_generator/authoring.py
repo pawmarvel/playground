@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import statistics
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from .font_reference import FontReferenceError, load_font_reference
 from .fixture_set import (
     FixtureSetError,
     PetFixture,
+    fixture_selection_warnings,
     load_fixture_selection,
     load_fixture_set,
 )
@@ -727,10 +729,14 @@ def benchmark(*, experiment: Path, fixture_set: Path, evaluation_protocol: Path,
         details = "; ".join(
             f"{attempt_id}: {message}" for attempt_id, message in failures
         )
-        raise AuthoringError(
-            "benchmark completed with failed attempts; "
+        print(
+            "WARNING: benchmark completed with incomplete fixture coverage; "
             f"experiment={experiment}; succeeded={len(results)}; "
-            f"failed={len(failures)}; failures=[{details}]"
+            f"failed={len(failures)}; failures=[{details}]. "
+            "The successful attempts remain usable for comparison; review and "
+            "explicitly accept the coverage gap in the pet decision if graduating.",
+            file=sys.stderr,
+            flush=True,
         )
     return results
 
@@ -760,7 +766,7 @@ def _fixture_group_coverage(
                 "status": (
                     "passed"
                     if all(fixture.image_sha256 in passing_hashes for fixture in group)
-                    else "failed"
+                    else "warning"
                 ),
             }
             for label, group in sorted(members.items())
@@ -865,6 +871,13 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
         _require_matching_layout_art(art_attempt, layout_attempt)
         composition_template = layout_attempt / "outputs"
     candidates: list[dict[str, Any]] = []
+    coverage_warnings: list[str] = []
+    selection_warnings = list(
+        fixture_selection_warnings(fixture_inventory, len(selected_fixtures))
+        if fixture_inventory and selected_fixtures
+        else ()
+    )
+    coverage_warnings.extend(selection_warnings)
     if kind in KINDS:
         if not experiments:
             raise AuthoringError(f"{kind} comparison requires at least one --experiment")
@@ -936,28 +949,49 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
                 and run.get("hard_gates", {}).get("status") == "passed"
             }
             fixture_coverage = None
+            candidate_warnings = list(selection_warnings)
             if expected_fixture_hashes:
+                missing_fixtures = [
+                    fixture.id
+                    for fixture in selected_fixtures
+                    if fixture.image_sha256 not in passing_fixture_hashes
+                ]
                 fixture_coverage = {
                     "expected_fixtures": len(expected_fixture_hashes),
                     "covered_fixtures": len(expected_fixture_hashes & passing_fixture_hashes),
+                    "coverage_rate": (
+                        len(expected_fixture_hashes & passing_fixture_hashes)
+                        / len(expected_fixture_hashes)
+                    ),
+                    "missing_fixture_ids": missing_fixtures,
                     "status": (
                         "passed"
                         if expected_fixture_hashes <= passing_fixture_hashes
-                        else "failed"
+                        else "warning"
                     ),
                     "groups": _fixture_group_coverage(
                         selected_fixtures, passing_fixture_hashes
                     ),
                 }
+                if missing_fixtures:
+                    coverage_warning = (
+                        "incomplete fixture coverage for pet experiment "
+                        f"{experiment_id!r}: covered "
+                        f"{fixture_coverage['covered_fixtures']}/"
+                        f"{fixture_coverage['expected_fixtures']}; "
+                        f"missing_fixture_ids={missing_fixtures}. This is review "
+                        "evidence, not a machine graduation gate; the application "
+                        "owner must explicitly accept the gap in the decision notes."
+                    )
+                    candidate_warnings.append(coverage_warning)
+                    coverage_warnings.append(coverage_warning)
             candidates.append({"experiment_id": experiment_id,
                                "configuration": experiment_meta.get("generation"),
                                "attempts": runs,
                                "measurements": _attempt_measurements(runs),
                                "fixture_coverage": fixture_coverage,
-                               "hard_gates_passed": bool(succeeded) and (
-                                   fixture_coverage is None
-                                   or fixture_coverage["status"] == "passed"
-                               )})
+                               "warnings": candidate_warnings,
+                               "hard_gates_passed": bool(succeeded)})
     elif kind == "assembly":
         if not art_attempt or not pet_experiment or not layout_attempt:
             raise AuthoringError("assembly comparison currently requires art, pet, and layout inputs")
@@ -1048,8 +1082,15 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
         "base_bundle_revision": base_bundle_revision, "created_at": utc_now(),
         "candidates": candidates, "measurements": measurements,
         "review_artifacts": review_artifacts,
+        "warnings": coverage_warnings,
         "hard_gates": {"status": "passed" if candidates and any(c["hard_gates_passed"] for c in candidates) else "failed"},
-        "human_review": {"status": "pending", "notes": "Application owner records approval in the decision file."},
+        "human_review": {
+            "status": "pending",
+            "notes": (
+                "Application owner records approval in the decision file and "
+                "explicitly accepts any evaluation warnings."
+            ),
+        },
     }
     try:
         atomic_json(output, record)
@@ -1102,6 +1143,7 @@ def record_decision(
     reviewer = selected_by.strip()
     if not reviewer:
         raise AuthoringError("--selected-by must not be empty")
+    accepted_warnings: list[str] = []
 
     if kind in KINDS:
         if not selected_experiment:
@@ -1122,6 +1164,9 @@ def record_decision(
                 f"selected {kind} experiment is absent or failed hard gates: "
                 f"{selected_experiment!r}; evaluation={evaluation}"
             )
+        accepted_warnings = [
+            str(warning) for warning in candidate.get("warnings", [])
+        ]
         selected: dict[str, Any] = {"experiment_id": selected_experiment}
         if kind in {"art", "layout"}:
             if not selected_attempt:
@@ -1173,6 +1218,13 @@ def record_decision(
             for field in ("art_attempt", "pet_experiment", "layout_attempt")
         }
 
+    if accepted_warnings and not notes.strip():
+        raise AuthoringError(
+            "selected candidate contains warnings; --notes must document the "
+            "application owner's acceptance before graduation: "
+            f"evaluation={evaluation}; warnings={accepted_warnings}"
+        )
+
     output = review / "decision.json"
     if output.exists():
         raise AuthoringError(f"decision already exists: {output}")
@@ -1194,6 +1246,7 @@ def record_decision(
                 "selected_by": reviewer,
                 "selected_at": utc_now(),
                 "notes": notes.strip(),
+                "accepted_warnings": accepted_warnings,
             },
         },
     )

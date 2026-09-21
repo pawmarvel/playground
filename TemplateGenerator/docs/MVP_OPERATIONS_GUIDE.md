@@ -884,22 +884,29 @@ Review identity retention, pose/expression/crop, style, genuine transparency,
 failure rate, and latency. The evaluation reports overall fixture coverage plus
 coverage grouped by species, size, morphology, and risk tag. A one-attempt-per-pet MVP
 benchmark reports minimum, maximum, and median; it does not establish p95 or
-repeat-run stability. Do not select the experiment until every fixture in the
-recorded release selection has a successful hard-gate-passing result.
+repeat-run stability. Missing fixture results are recorded as coverage warnings,
+not machine hard-gate failures. Review the covered and missing fixture IDs before
+selection. The application owner may graduate a partially covered candidate by
+documenting the accepted risk in the pet decision `--notes`; those warnings are
+copied into the immutable decision record for later audit.
 
 The draft records the original filters only as provenance. The reviewed
 `selected_fixture_ids` array is authoritative and may be reordered or edited
 before the paid run. IDs must be unique and present in the pinned manifest; a
-release selection must contain 6-15 pets. Regenerate with `--force` when you
-intend to replace an existing draft. Use explicit `id=` filters when later
-steps require named fixtures, as in this example.
+release inventory contains 6-15 pets, while an operator-reviewed run may select
+1-15. Selecting fewer than the recommended six emits a low-coverage warning in
+the draft and evaluation but does not block comparison or graduation. Regenerate
+with `--force` when you intend to replace an existing draft. Use explicit `id=`
+filters when later steps require named fixtures, as in this example.
 
 Before the first provider call, `benchmark` verifies that the target is a pet
 experiment and that its attempt prefix, fixture set, selection, and protocol
 are valid. If an individual provider attempt fails, the batch continues so the
-remaining fixtures still produce evidence, then exits nonzero with every
-failed attempt ID and error. Fix the cause and use a new attempt prefix; failed
-attempt records are immutable.
+remaining fixtures still produce evidence, prints a warning containing every
+failed attempt ID and error, and exits successfully so `compare` can produce the
+partial evaluation and contact sheet. Fixing the cause still requires a new
+attempt prefix because failed attempt records are immutable. A partial run may
+be graduated only through the explicit manual decision above.
 
 After reviewing the pet comparison, enter the winning review and runtime
 experiment once. Also choose one successful attempt from that experiment as

@@ -92,7 +92,9 @@ def render_comparison_contact_sheet(
                     ),
                 }
             )
-    if len(tiles) < 2:
+    # A low-coverage release may leave only one valid output. Preserve that
+    # evidence as a review artifact even though it is not a side-by-side sheet.
+    if not tiles:
         return None
     tiles.sort(
         key=lambda tile: (

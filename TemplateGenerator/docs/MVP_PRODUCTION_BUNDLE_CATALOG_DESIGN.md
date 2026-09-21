@@ -532,7 +532,7 @@ examples/
   pet-inputs/                              # shared non-customer dog and cat images
   authoring/fixture-sets/
     mvp-pets-smoke-v1/fixture-set.json     # 2-3 pets, one attempt each
-    mvp-pets-v1/fixture-set.json           # 6-15 pets per release run, one attempt each
+    mvp-pets-v1/fixture-set.json           # 6-15-pet inventory; reviewed runs may use 1-15
 ```
 
 The current manifests contain three smoke dogs and fourteen release pets
@@ -1204,7 +1204,9 @@ and layout-attempt product-relative paths. For example:
 A pet prompt/model comparison uses the same non-customer pet fixtures, ordered
 references, product profile, and normalization policy. Prompt iteration first
 uses a two- or three-pet smoke tier; only shortlisted candidates incur a release
-run of six or more pets selected from the fourteen-pet dog-and-cat inventory.
+run selected from the fourteen-pet dog-and-cat inventory. Six fixtures remain the
+recommended release breadth, but smaller operator-reviewed runs are allowed and
+produce explicit coverage warnings for manual graduation review.
 Both use one attempt per pet. The tool checks
 successful calls, PNG dimensions, usable alpha, and elapsed time; the reviewer
 checks identity, style, pose/crop, unwanted background/text, and acceptable
@@ -1226,11 +1228,16 @@ requires assembly evaluation.
 
 Each candidate has independent attempt-count, success-rate, hard-gate-rate,
 latency, and fixture-coverage measurements. An optional attempt-ID prefix
-excludes ad hoc smoke runs from a controlled benchmark. A pet candidate cannot
-pass a fixture-backed evaluation unless every fixture in the recorded resolved
-selection is covered; coverage requires one successful hard-gate-passing result
-per selected fixture. Candidates compared for latency must use the identical
-fixture manifest, reviewed selection file, resolved IDs, and attempt count.
+excludes ad hoc smoke runs from a controlled benchmark. Fixture coverage is
+review evidence rather than a machine graduation gate: the evaluation records
+the coverage rate, missing fixture IDs, grouped gaps, and prominent warnings,
+while valid available outputs still produce the comparison artifacts. Selecting
+a partially covered pet runtime is an application-owner decision; the decision
+must contain non-empty acceptance notes and snapshots the warnings it accepted.
+Image geometry, alpha, readability, and artifact integrity remain machine hard
+gates. Candidates compared for latency should use the identical fixture manifest,
+reviewed selection file, resolved IDs, and attempt count; deviations remain visible
+to the reviewer rather than silently presented as equivalent evidence.
 
 Art comparison has the same machine gates for PNG geometry and alpha. The
 repeatable experiment input supports both within-experiment stability review
@@ -1502,7 +1509,8 @@ roles/order, and renderer/name semantics.
    subcommands. `prepare-benchmark` creates the reviewed run plan without API
    calls; `benchmark` preflights the pet experiment and run identity, creates
    only its declared fixture attempts, continues after individual provider
-   failures, and exits nonzero with an aggregate failure report;
+   failures, and emits an aggregate nonfatal coverage warning so comparison
+   evidence can still be generated;
    `compare` reads completed attempts and never makes a paid call. The command
    orchestrates the existing focused CLIs; it does not duplicate image
    generation or rendering. A small independent `comparison_artifacts.py`

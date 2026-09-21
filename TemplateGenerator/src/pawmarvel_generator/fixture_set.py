@@ -18,6 +18,7 @@ class FixtureSetError(ValueError):
 
 _ID = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 _TIERS = {"smoke": (2, 3), "release": (6, 15)}
+_SELECTION_LIMITS = {"smoke": (2, 3), "release": (1, 15)}
 _SPECIES = {"cat", "dog"}
 _SIZES = {"toy", "small", "medium", "large", "giant"}
 _COAT_LENGTHS = {"short", "medium", "long"}
@@ -132,7 +133,7 @@ def select_fixtures(
             )
         matched = matched[:fixture_count]
 
-    minimum, maximum = _TIERS[fixture_set.tier]
+    minimum, maximum = _SELECTION_LIMITS[fixture_set.tier]
     if not minimum <= len(matched) <= maximum:
         raise FixtureSetError(
             f"{fixture_set.tier} run must select {minimum}-{maximum} pets; "
@@ -140,6 +141,21 @@ def select_fixtures(
             f"available={len(fixture_set.fixtures)}"
         )
     return matched
+
+
+def fixture_selection_warnings(
+    fixture_set: PetFixtureSet, selected_count: int
+) -> tuple[str, ...]:
+    """Return advisory coverage warnings for a valid reviewed selection."""
+    recommended_minimum, recommended_maximum = _TIERS[fixture_set.tier]
+    if selected_count >= recommended_minimum:
+        return ()
+    return (
+        f"low {fixture_set.tier} fixture coverage: selected={selected_count}; "
+        f"recommended={recommended_minimum}-{recommended_maximum}. This is review "
+        "evidence, not a machine graduation gate; the application owner must "
+        "explicitly accept the gap in the pet decision notes.",
+    )
 
 
 def write_fixture_selection(
@@ -177,6 +193,7 @@ def write_fixture_selection(
                 "requested_count": fixture_count,
             },
             "selected_fixture_ids": [fixture.id for fixture in selected],
+            "warnings": list(fixture_selection_warnings(fixture_set, len(selected))),
         },
     )
     return output
@@ -239,7 +256,7 @@ def load_fixture_selection(
             f"selection={selection_path}; missing={missing}"
         )
     selected = tuple(fixtures_by_id[fixture_id] for fixture_id in selected_ids)
-    minimum, maximum = _TIERS[fixture_set.tier]
+    minimum, maximum = _SELECTION_LIMITS[fixture_set.tier]
     if not minimum <= len(selected) <= maximum:
         raise FixtureSetError(
             f"{fixture_set.tier} fixture selection must contain {minimum}-{maximum} pets; "
