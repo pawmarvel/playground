@@ -49,7 +49,7 @@ class CliTests(unittest.TestCase):
     def args(self, *extra: str) -> argparse.Namespace:
         return build_parser().parse_args(
             [
-                "--sample-design",
+                "--reference-design",
                 str(self.sample),
                 "--pet-image",
                 str(self.pet),
@@ -83,11 +83,11 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("input_fidelity", request)
         self.assertNotIn("service_tier", request)
 
-    def test_sample_only_generation_is_supported(self) -> None:
+    def test_reference_only_generation_is_supported(self) -> None:
         client = FakeClient()
         args = build_parser().parse_args(
             [
-                "--sample-design",
+                "--reference-design",
                 str(self.sample),
                 "--prompt-file",
                 str(self.prompt),
@@ -102,14 +102,14 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("USER PET", client.images.kwargs["prompt"])
         self.assertIn("PRIMARY REFERENCE DESIGN", client.images.kwargs["prompt"])
 
-    def test_sample_only_multiple_references_preserve_primary_role(self) -> None:
+    def test_reference_only_multiple_references_preserve_primary_role(self) -> None:
         second = make_image(self.root / "second.png")
         client = FakeClient()
         args = build_parser().parse_args(
             [
-                "--sample-design",
+                "--reference-design",
                 str(self.sample),
-                "--sample-design",
+                "--reference-design",
                 str(second),
                 "--prompt-file",
                 str(self.prompt),
@@ -147,7 +147,7 @@ class CliTests(unittest.TestCase):
         second = make_image(self.root / "second.png")
         client = FakeClient()
         args = self.args(
-            "--sample-design",
+            "--reference-design",
             str(second),
             "--output-dir",
             str(self.root / "output"),

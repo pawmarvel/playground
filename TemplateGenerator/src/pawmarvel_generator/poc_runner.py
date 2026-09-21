@@ -175,7 +175,7 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
 
     if supplied_transformed is None:
         generation_args = argparse.Namespace(
-            sample_design=reference_designs,
+            reference_design=reference_designs,
             pet_image=pet_image,
             prompt_file=prompt_file,
             api_key_file=args.api_key_file,

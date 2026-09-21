@@ -472,7 +472,9 @@ def _run_generation(experiment: Path, meta: dict[str, Any], stage: Path, pet_ima
         shutil.copyfile(pet_image.expanduser().resolve(), pet_copy)
         args.extend(["--pet-image", str(pet_copy)])
     for reference in inputs["references"]:
-        args.extend(["--sample-design", str(_relative_input(experiment, reference))])
+        args.extend(
+            ["--reference-design", str(_relative_input(experiment, reference))]
+        )
     parsed = build_generate_parser().parse_args(args)
     generate(parsed)
 

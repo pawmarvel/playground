@@ -235,6 +235,11 @@ printf 'art and pet references, in order:\n'
 printf '  %s\n' "${PAWMARVEL_REFERENCE_DESIGNS[@]}"
 ```
 
+`--reference-design` is the shared repeatable option used by
+`pawmarvel-generate`, `pawmarvel-author create-experiment`,
+`pawmarvel-pipeline`, and `pawmarvel-poc-run`. Reuse this array directly; do not
+translate it to a tool-specific synonym.
+
 For transformed-pet generation, the API image order is always:
 
 1. the user pet supplied to `run-attempt --pet-image`;
@@ -1882,16 +1887,9 @@ PAWMARVEL_SCRATCH_TEMPLATE="$PAWMARVEL_SCRATCH_PRODUCT/template"
 PAWMARVEL_SCRATCH_RUN="$PAWMARVEL_SCRATCH_PRODUCT/runs/sausage-dog-puppy"
 PAWMARVEL_SCRATCH_PRINT="$PAWMARVEL_SCRATCH_RUN/print"
 
-# The scratch pipeline converts the same shared ordered list to its
-# repeatable --sample-design option.
-PAWMARVEL_PIPELINE_REFERENCE_ARGS=()
-for reference in "${PAWMARVEL_REFERENCE_DESIGNS[@]}"; do
-  PAWMARVEL_PIPELINE_REFERENCE_ARGS+=(--sample-design "$reference")
-done
-
 pawmarvel_pipeline_debug() {
   "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-pipeline" \
-    "${PAWMARVEL_PIPELINE_REFERENCE_ARGS[@]}" \
+    "${PAWMARVEL_REFERENCE_ARGS[@]}" \
     --art-prompt "$PAWMARVEL_ART_PROMPT" \
     --pet-prompt "$PAWMARVEL_PET_PROMPT" \
     --pet-image "$PAWMARVEL_PET" \
@@ -1913,7 +1911,7 @@ pawmarvel_pipeline_debug
 ```
 
 For a multi-reference scratch run, the pipeline stages and copies every
-`--sample-design` in array order. The first remains the primary layout
+`--reference-design` in array order. The first remains the primary layout
 reference, matching the manual art and pet experiments.
 
 `"$@"` forwards any arguments supplied to the shell function. It allows the

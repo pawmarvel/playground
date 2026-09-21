@@ -80,7 +80,7 @@ class PipelineCliTests(unittest.TestCase):
     def args(self, *extra: str) -> argparse.Namespace:
         return self.parser.parse_args(
             [
-                "--sample-design",
+                "--reference-design",
                 str(self.sample),
                 "--art-prompt",
                 str(self.art_prompt),
@@ -164,7 +164,7 @@ class PipelineCliTests(unittest.TestCase):
         client = CombinedClient()
 
         outputs = run_pipeline(
-            self.args("--sample-design", str(supporting)),
+            self.args("--reference-design", str(supporting)),
             client=client,
             layout_runner=self.save_layout,
         )
@@ -188,9 +188,9 @@ class PipelineCliTests(unittest.TestCase):
             ],
         )
         record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
-        self.assertEqual(len(record["sources"]["sample_designs"]), 2)
+        self.assertEqual(len(record["sources"]["reference_designs"]), 2)
         self.assertEqual(
-            [item["role"] for item in record["sources"]["sample_designs"]],
+            [item["role"] for item in record["sources"]["reference_designs"]],
             ["primary", "supporting"],
         )
         self.assertEqual(len(record["sources"]["staged_source_references"]), 2)
@@ -328,17 +328,17 @@ class PipelineCliTests(unittest.TestCase):
     def test_selective_rerun_rejects_changed_supporting_reference(self) -> None:
         supporting = make_image(self.root / "supporting.png")
         run_pipeline(
-            self.args("--sample-design", str(supporting)),
+            self.args("--reference-design", str(supporting)),
             client=CombinedClient(),
             layout_runner=self.save_layout,
         )
         make_image(supporting, color=(10, 20, 30, 255))
         client = CombinedClient()
 
-        with self.assertRaisesRegex(PipelineError, "sample_designs"):
+        with self.assertRaisesRegex(PipelineError, "reference_designs"):
             run_pipeline(
                 self.args(
-                    "--sample-design",
+                    "--reference-design",
                     str(supporting),
                     "--rerun-step",
                     "pet",
@@ -371,7 +371,7 @@ class PipelineCliTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.parser.parse_args(
                 [
-                    "--sample-design",
+                    "--reference-design",
                     str(self.sample),
                     "--art-prompt",
                     str(self.art_prompt),
@@ -397,7 +397,7 @@ class PipelineCliTests(unittest.TestCase):
             ),
         )
         values = [
-            "--sample-design", str(self.sample),
+            "--reference-design", str(self.sample),
             "--art-prompt", str(self.art_prompt),
             "--pet-prompt", str(self.pet_prompt),
             "--pet-image", str(self.pet),
@@ -461,7 +461,7 @@ class PipelineCliTests(unittest.TestCase):
         )
         args = self.parser.parse_args(
             [
-                "--sample-design", str(self.sample),
+                "--reference-design", str(self.sample),
                 "--art-prompt", str(self.art_prompt),
                 "--pet-prompt", str(self.pet_prompt),
                 "--pet-image", str(self.pet),
@@ -489,8 +489,8 @@ class PipelineCliTests(unittest.TestCase):
         print_dir = self.root / "print"
         args = self.parser.parse_args(
             [
-                "--sample-design", str(self.sample),
-                "--sample-design", str(supporting),
+                "--reference-design", str(self.sample),
+                "--reference-design", str(supporting),
                 "--art-prompt", str(self.art_prompt),
                 "--pet-prompt", str(self.pet_prompt),
                 "--pet-image", str(self.pet),

@@ -1,7 +1,7 @@
 # CLI purpose:
 # Generate or edit personalized design assets with OpenAI or Gemini using a
-# sample design, a pet image, or both; optionally derive layer size from a
-# reusable product profile, then validate and save the returned image.
+# finished-design reference, a pet image, or both; optionally derive layer size
+# from a reusable product profile, then validate and save the returned image.
 
 from __future__ import annotations
 
@@ -178,16 +178,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pawmarvel-generate",
         description=(
-            "Generate or edit artwork with OpenAI or Gemini using a sample "
+            "Generate or edit artwork with OpenAI or Gemini using a reference "
             "design, a pet image, or both."
         ),
     )
     add_debug_argument(parser)
     parser.add_argument(
-        "--sample-design",
+        "--reference-design",
         type=Path,
         action="append",
-        help="optional sample design/style reference; repeat for ordered references",
+        help="optional finished-design reference; repeat in priority order",
     )
     parser.add_argument(
         "--pet-image",
@@ -319,7 +319,7 @@ def _warn_art_reference_aspect_mismatch(
         if source_width * target_height == target_width * source_height:
             continue
         print(
-            "Warning: sample design "
+            "Warning: reference design "
             f"{index} has aspect ratio {source_width}x{source_height}, but the "
             f"authoritative product-profile art canvas is {requested_size}. "
             "The output will use the product-profile dimensions and map the "
@@ -550,7 +550,7 @@ def _request_summary(
         else "provider managed"
     )
     return {
-        "sample_designs": [str(sample) for sample in samples],
+        "reference_designs": [str(sample) for sample in samples],
         "pet_image": str(pet) if pet else None,
         "prompt_file": str(prompt_file),
         "api_key_source": (
@@ -576,7 +576,7 @@ def _request_summary(
 
 def _print_request_details(summary: dict[str, Any]) -> None:
     inputs = {
-        "sample_designs": summary["sample_designs"],
+        "reference_designs": summary["reference_designs"],
         "pet_image": summary["pet_image"],
         "prompt_file": summary["prompt_file"],
         "api_key_source": summary["api_key_source"],
@@ -587,7 +587,7 @@ def _print_request_details(summary: dict[str, Any]) -> None:
     }
     images = (
         [summary["pet_image"]] if summary["pet_image"] is not None else []
-    ) + list(summary["sample_designs"])
+    ) + list(summary["reference_designs"])
     if summary["provider"] == "gemini":
         api_parameters = {
             "provider": "gemini",
@@ -729,7 +729,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
     provider, model = _resolve_provider_model(
         getattr(args, "provider", "auto"), getattr(args, "model", None)
     )
-    raw_samples = getattr(args, "sample_design", None)
+    raw_samples = getattr(args, "reference_design", None)
     sample_values = (
         []
         if raw_samples is None
@@ -738,7 +738,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         else [raw_samples]
     )
     samples = [
-        _validate_image(sample, f"sample design {index}")
+        _validate_image(sample, f"reference design {index}")
         for index, sample in enumerate(sample_values, start=1)
     ]
     pet = (
@@ -747,7 +747,9 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         else None
     )
     if not samples and pet is None:
-        raise UserInputError("provide at least one of --sample-design or --pet-image")
+        raise UserInputError(
+            "provide at least one of --reference-design or --pet-image"
+        )
 
     prompt_file, user_prompt = _read_prompt(args.prompt_file)
     _validate_prompt_category(prompt_file, provider)

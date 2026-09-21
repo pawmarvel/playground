@@ -136,7 +136,7 @@ that receipt preserves revision allocation safety after local exchange cleanup.
 A product profile derives preview art,
 transformed-pet, and print dimensions rather than trusting screenshot pixels.
 
-Repeat `--sample-design` to add supporting references. The first reference is
+Repeat `--reference-design` to add supporting references. The first reference is
 the primary design and the only one used by the layout editor; later references
 are ordered supporting visual evidence for art and pet generation. Pet-runtime
 experiments enforce the bundle contract's maximum of four total ordered
