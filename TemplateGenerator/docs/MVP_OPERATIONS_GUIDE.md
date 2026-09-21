@@ -603,6 +603,11 @@ cp "$PAWMARVEL_ART_SCRATCH_PROMPT" \
 PAWMARVEL_ART_CANDIDATE_PROMPT="$PAWMARVEL_PROMPT_CANDIDATES/art-template-gpt-v01.md"
 ```
 
+Art has no pet-fixture benchmark of its own. Treat the next two immutable art
+attempts as its smoke/stability screen; section 6 then validates the pet runtime
+across the fixture benchmark. This separation prevents pet variability from
+being misreported as art-generation reliability.
+
 Create the first art experiment. `create-experiment` snapshots the exact
 product profile, prompt, and ordered reference images.
 
