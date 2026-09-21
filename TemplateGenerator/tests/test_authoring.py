@@ -562,7 +562,7 @@ class AuthoringLifecycleTests(unittest.TestCase):
             experiment=layout_exp,
             attempt_id="attempt-0001",
             pet_image=None,
-            pet_name="",
+            no_pet_name=True,
             layout_file=layout_source / "layout.json",
         )
 
@@ -715,6 +715,69 @@ class AuthoringLifecycleTests(unittest.TestCase):
         self.assertEqual(bundle_record["renderer"]["name_mode"], "embedded-in-pet")
         self.assertFalse((bundle / "fonts").exists())
         self.assertNotIn("name", json.loads((bundle / "layout.json").read_text()))
+
+    def test_layout_attempt_defaults_to_pet_or_explicitly_disables_name(self) -> None:
+        art_exp = self._experiment("art", "art-layout-mode", self.art_prompt)
+        pet_exp = self._experiment("pet", "pet-layout-mode", self.pet_prompt)
+        art_attempt = self._fake_attempt(
+            art_exp, "attempt-0001", "art.png", (672, 1008)
+        )
+        pet_attempt = self._fake_attempt(
+            pet_exp, "attempt-0001", "transformed-pet.png", (816, 816)
+        )
+        layout_exp = create_experiment(
+            kind="layout",
+            experiment_id="layout-mode-v01",
+            design_id="life-is-good",
+            product_profile=self.profile,
+            authoring_root=self.authoring,
+            references=[],
+            prompt_file=None,
+            provider=None,
+            model=None,
+            quality="high",
+            art_attempt=art_attempt,
+            pet_attempt=pet_attempt,
+            font_catalogs=[],
+            parent_experiment_id=None,
+            base_bundle_revision=None,
+            created_by="test",
+        )
+
+        fixture = {
+            "pet_name": "PET",
+            "name_mode": "layout-text",
+            "layout_sha256": "a" * 64,
+        }
+        with patch(
+            "pawmarvel_generator.authoring._run_layout", return_value=fixture
+        ) as run_layout:
+            default_attempt = run_attempt(
+                experiment=layout_exp,
+                attempt_id="default-name",
+                pet_image=None,
+            )
+        self.assertEqual(run_layout.call_args.args[3], "PET")
+        default_record = json.loads((default_attempt / "run.json").read_text())
+        self.assertEqual(default_record["layout_fixture"]["pet_name"], "PET")
+
+        fixture = {
+            "pet_name": None,
+            "name_mode": "embedded-in-pet",
+            "layout_sha256": "b" * 64,
+        }
+        with patch(
+            "pawmarvel_generator.authoring._run_layout", return_value=fixture
+        ) as run_layout:
+            no_name_attempt = run_attempt(
+                experiment=layout_exp,
+                attempt_id="no-name",
+                pet_image=None,
+                no_pet_name=True,
+            )
+        self.assertIsNone(run_layout.call_args.args[3])
+        no_name_record = json.loads((no_name_attempt / "run.json").read_text())
+        self.assertIsNone(no_name_record["layout_fixture"]["pet_name"])
 
     def test_attempt_ids_are_immutable(self) -> None:
         art_exp = self._experiment("art", "art-gpt-v01", self.art_prompt)

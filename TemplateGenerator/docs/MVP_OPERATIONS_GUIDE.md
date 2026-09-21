@@ -1121,13 +1121,14 @@ Because the lettering is baked into the transformed-pet pixels, turn off
 **Render a separate pet-name text layer** during layout authoring. The saved
 layout then omits `name`, and preview/print composition will not add duplicate
 font-rendered text. For this E2E variant, use the section 7 layout creation
-command with the derived `PAWMARVEL_PET_ATTEMPT`, but run the layout attempt
-without `--pet-name`:
+command with the derived `PAWMARVEL_PET_ATTEMPT`, but explicitly select the
+no-name layout mode:
 
 ```bash
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
   --experiment "$PAWMARVEL_LAYOUT_EXPERIMENT" \
-  --attempt-id attempt-0001
+  --attempt-id attempt-0001 \
+  --no-pet-name
 ```
 
 Save only the pet region, then use the normal layout comparison, layout
@@ -1171,9 +1172,13 @@ PAWMARVEL_LAYOUT_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/layout/lay
 ```
 
 `--pet-name` only initializes the assembled preview and may be omitted; its
-default is `PET`. The value in the **Preview pet name** field at Save time
-becomes the QA fixture recorded for this immutable attempt. It is deliberately
-independent from the exact lettering in the finished reference.
+default is `PET`. Use `--no-pet-name` when the selected transformed-pet pixels
+already contain the artistic name, or when the product has no personalized
+text. That explicit option starts with **Render a separate pet-name text
+layer** disabled and saves a fontless layout unless the operator enables the
+layer and enters preview text. The value in the **Preview pet name** field at
+Save time becomes the QA fixture recorded for a separate-text attempt. It is
+deliberately independent from the exact lettering in the finished reference.
 
 The Cooper example intentionally starts without checked-in layout or font
 reference JSON. In its first layout experiment, omit both

@@ -513,7 +513,7 @@ def _run_layout(
     experiment: Path,
     meta: dict[str, Any],
     stage: Path,
-    pet_name: str,
+    pet_name: str | None,
     layout_file: Path | None,
     reference_text: str | None,
 ) -> dict[str, Any]:
@@ -538,7 +538,9 @@ def _run_layout(
         value = _json(layout_file.expanduser().resolve())
         source_layout = parse_layout(value, source_root)
         value["art"] = "art.png"
-        if source_layout.has_name:
+        if source_layout.has_name and pet_name is None:
+            value.pop("name")
+        elif source_layout.has_name:
             assert source_layout.font_path is not None
             fonts = outputs / "fonts"
             fonts.mkdir()
@@ -573,7 +575,8 @@ def _run_layout(
         catalogs = tuple(_relative_input(experiment, item) for item in inputs.get("font_catalogs", []))
         serve_layout_editor(EditorConfig(
             art=outputs / "art.png", reference=reference,
-            pet=outputs / "transformed-pet.png", pet_name=pet_name,
+            pet=outputs / "transformed-pet.png", pet_name=pet_name or "PET",
+            name_enabled=pet_name is not None,
             font=None, output=outputs / "layout.json", font_catalogs=catalogs,
             font_reference=font_reference, layout_reference=layout_reference,
             reference_text=reference_text,
@@ -633,10 +636,13 @@ def _run_layout(
 
 def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
                 pet_name: str | None = None, layout_file: Path | None = None,
-                reference_text: str | None = None) -> Path:
+                reference_text: str | None = None,
+                no_pet_name: bool = False) -> Path:
     _id(attempt_id, "attempt ID")
     experiment = experiment.expanduser().resolve()
     meta = _json(experiment / "experiment.json")
+    if no_pet_name and meta.get("kind") != "layout":
+        raise AuthoringError("--no-pet-name is supported only for layout attempts")
     if meta.get("kind") == "pet" and pet_name is None:
         generation = meta.get("generation")
         prompt_variables = (
@@ -696,7 +702,9 @@ def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
             raise AuthoringError(f"invalid --pet-name: {exc}") from exc
         record["prompt_variables"] = {"pet_name": pet_name}
     if meta["kind"] == "layout":
-        layout_pet_name = (pet_name or "").strip() or "PET"
+        layout_pet_name = (
+            None if no_pet_name else (pet_name or "").strip() or "PET"
+        )
         representative_pet = meta.get("inputs", {}).get("representative_pet", {})
         record["layout_fixture"] = {
             "pet_name": layout_pet_name,

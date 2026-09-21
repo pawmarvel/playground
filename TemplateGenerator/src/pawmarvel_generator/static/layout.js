@@ -146,7 +146,7 @@ function syncNameLayerMode() {
     (nameEnabled ? !currentLayoutReference() : !petReferenceRegion);
   metricsNode.textContent = nameEnabled
     ? "Text metrics pending."
-    : "Separate text layer disabled; name is expected inside the transformed-pet image.";
+    : "Separate pet-name text layer disabled.";
 }
 
 function setEditorLocked(locked) {
@@ -964,7 +964,7 @@ async function requestPreview() {
           draw();
           metricsNode.textContent = nameEnabled
             ? `Applied font size: ${appliedSize}px (${textFit}).`
-            : "Separate text layer disabled; preview uses embedded artistic lettering.";
+            : "Separate pet-name text layer disabled.";
           statusNode.textContent = `Preview revision ${requestedRevision} ready.`;
           setSaveEnabled();
         }

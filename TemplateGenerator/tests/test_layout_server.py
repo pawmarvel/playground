@@ -134,6 +134,48 @@ class LayoutServerTests(unittest.TestCase):
         )
         self.assertEqual(args.pet_name, "PET")
 
+        args = build_parser().parse_args(
+            [
+                "--art", str(self.art),
+                "--reference", str(self.reference),
+                "--pet", str(self.pet),
+                "--font", str(self.font),
+                "--output", str(self.output),
+                "--no-pet-name",
+            ]
+        )
+        self.assertIsNone(args.pet_name)
+
+    def test_new_editor_without_pet_name_starts_with_name_layer_disabled(self) -> None:
+        no_name_root = self.root / "no-name"
+        art = make_image(
+            no_name_root / "art.png", size=(200, 300), color=(20, 30, 40, 255)
+        )
+        output = no_name_root / "layout.json"
+        server = create_server(
+            EditorConfig(
+                art=art,
+                reference=self.reference,
+                pet=self.pet,
+                font=self.font,
+                output=output,
+                name_enabled=False,
+            )
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{server.server_port}/"
+            ) as response:
+                html = response.read()
+            self.assertIn(b'"nameEnabled": false', html)
+            self.assertIn(b'"petName": "PET"', html)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
     def test_serves_packaged_editor_assets(self) -> None:
         with urllib.request.urlopen(self.base + "/") as response:
             html = response.read()

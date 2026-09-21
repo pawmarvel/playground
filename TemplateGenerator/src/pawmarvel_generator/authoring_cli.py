@@ -196,12 +196,18 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--experiment", type=_path_argument, required=True)
     run.add_argument("--attempt-id", required=True)
     run.add_argument("--pet-image", type=_path_argument)
-    run.add_argument(
+    run_name = run.add_mutually_exclusive_group()
+    run_name.add_argument(
         "--pet-name",
         help=(
             "optional value for {{PET_NAME}} in a pet prompt, or initial "
             "preview text for a layout attempt (layout default: PET)"
         ),
+    )
+    run_name.add_argument(
+        "--no-pet-name",
+        action="store_true",
+        help="start a layout attempt without a separate pet-name text layer",
     )
     run.add_argument(
         "--reference-text",
@@ -404,7 +410,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "run-attempt":
             result = run_attempt(experiment=args.experiment, attempt_id=args.attempt_id, pet_image=args.pet_image,
                                  pet_name=args.pet_name, layout_file=args.layout_file,
-                                 reference_text=args.reference_text)
+                                 reference_text=args.reference_text,
+                                 no_pet_name=args.no_pet_name)
         elif args.command == "benchmark":
             if args.attempts_per_fixture is not None and args.attempts_per_fixture < 1:
                 raise AuthoringError("attempts per fixture must be positive")

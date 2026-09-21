@@ -774,7 +774,7 @@ def run_pipeline(
                 art=art,
                 reference=source_reference,
                 pet=transformed_pet,
-                pet_name=pet_name,
+                pet_name=pet_name or "PET",
                 font=font if explicit_font else None,
                 font_license=font_license if explicit_font else None,
                 font_catalogs=font_catalogs,

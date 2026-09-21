@@ -22,10 +22,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--art", type=Path, required=True)
     parser.add_argument("--reference", type=Path, required=True)
     parser.add_argument("--pet", type=Path, required=True)
-    parser.add_argument(
+    name_mode = parser.add_mutually_exclusive_group()
+    name_mode.add_argument(
         "--pet-name",
         default="PET",
-        help="initial QA preview name; it can be changed in the editor (default: PET)",
+        help="initial QA preview name (default: PET)",
+    )
+    name_mode.add_argument(
+        "--no-pet-name",
+        action="store_const",
+        const=None,
+        dest="pet_name",
+        help="start with the separate pet-name text layer disabled",
     )
     parser.add_argument(
         "--reference-text",
@@ -91,7 +99,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 art=args.art,
                 reference=args.reference,
                 pet=args.pet,
-                pet_name=args.pet_name,
+                pet_name=args.pet_name or "PET",
+                name_enabled=args.pet_name is not None,
                 font=args.font,
                 font_license=args.font_license,
                 font_catalogs=font_catalogs,

@@ -15,6 +15,28 @@ from pawmarvel_generator.authoring_cli import DEFAULT_PROJECT_ROOT, build_parser
 
 
 class AuthoringCliTests(unittest.TestCase):
+    def test_layout_attempt_defaults_to_pet_and_supports_explicit_no_name(self) -> None:
+        default = build_parser().parse_args(
+            [
+                "run-attempt",
+                "--experiment", "layout-v01",
+                "--attempt-id", "attempt-0001",
+            ]
+        )
+        self.assertIsNone(default.pet_name)
+        self.assertFalse(default.no_pet_name)
+
+        no_name = build_parser().parse_args(
+            [
+                "run-attempt",
+                "--experiment", "layout-v01",
+                "--attempt-id", "attempt-0001",
+                "--no-pet-name",
+            ]
+        )
+        self.assertIsNone(no_name.pet_name)
+        self.assertTrue(no_name.no_pet_name)
+
     def test_empty_optional_array_argument_has_actionable_error(self) -> None:
         stderr = io.StringIO()
         with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:

@@ -116,6 +116,7 @@ class EditorConfig:
     font: Path | None
     output: Path
     pet_name: str = "PET"
+    name_enabled: bool = True
     font_license: Path | None = None
     font_catalogs: tuple[Path, ...] = ()
     font_reference: Path | None = None
@@ -156,6 +157,7 @@ def _validate_editor_config(
         reference=config.reference.expanduser().resolve(),
         pet=config.pet.expanduser().resolve(),
         pet_name=config.pet_name.strip() or "PET",
+        name_enabled=config.name_enabled,
         font=font,
         output=config.output.expanduser().resolve(),
         font_license=font_license,
@@ -321,17 +323,23 @@ def _initial_layout(
     font_reference: FontReference | None,
     layout_reference: LayoutReference | None,
 ) -> dict[str, Any]:
+    def new_layout() -> dict[str, Any]:
+        layout = _default_layout(config, font_reference, layout_reference)
+        if not config.name_enabled:
+            layout.pop("name")
+        return layout
+
     if config.output.is_file():
         try:
             return load_layout(config.template_dir, config.output).to_dict()
         except ConfigError as exc:
             if config.force:
-                return _default_layout(config, font_reference, layout_reference)
+                return new_layout()
             raise ConfigError(
                 f"existing layout cannot be reopened: {config.output}; {exc}. "
                 "Fix the file or pass --force to start a new layout."
             ) from exc
-    return _default_layout(config, font_reference, layout_reference)
+    return new_layout()
 
 
 def _initial_font_reference(config: EditorConfig) -> FontReference | None:
