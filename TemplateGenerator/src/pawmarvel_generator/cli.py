@@ -1,7 +1,8 @@
 # CLI purpose:
-# Generate or edit personalized design assets with OpenAI or Gemini using a
-# finished-design reference, a pet image, or both; optionally derive layer size
-# from a reusable product profile, then validate and save the returned image.
+# Generate or edit personalized design assets with OpenAI or Gemini from a
+# text prompt alone, a finished-design reference, a pet image, or both;
+# optionally derive layer size from a reusable product profile, then validate
+# and save the returned image.
 
 from __future__ import annotations
 
@@ -141,9 +142,15 @@ class _GeminiRestClient:
 
 
 class _ProgressReporter:
-    def __init__(self, provider: str, interval: float | None = None) -> None:
+    def __init__(
+        self,
+        provider: str,
+        interval: float | None = None,
+        operation: str = "edit",
+    ) -> None:
         self.provider = provider
         self.interval = PROGRESS_INTERVAL_SECONDS if interval is None else interval
+        self.operation = operation
         self.started_at = 0.0
         self._finished = threading.Event()
         self._thread: threading.Thread | None = None
@@ -151,7 +158,11 @@ class _ProgressReporter:
     def __enter__(self) -> "_ProgressReporter":
         self.started_at = time.monotonic()
         service = "OpenAI" if self.provider == "openai" else "Gemini"
-        print(f"Submitting image edit request to {service}...", file=sys.stderr, flush=True)
+        print(
+            f"Submitting image {self.operation} request to {service}...",
+            file=sys.stderr,
+            flush=True,
+        )
         self._thread = threading.Thread(
             target=self._report,
             name="pawmarvel-generation-progress",
@@ -182,8 +193,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pawmarvel-generate",
         description=(
-            "Generate or edit artwork with OpenAI or Gemini using a reference "
-            "design, a pet image, or both."
+            "Generate or edit artwork with OpenAI or Gemini using a text prompt "
+            "alone, a reference design, a pet image, or both."
         ),
     )
     add_debug_argument(parser)
@@ -228,7 +239,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output-name",
-        help="output filename (default: first supplied image stem and selected suffix)",
+        help=(
+            "output filename (default: first supplied image stem, or prompt-file "
+            "stem in prompt-only mode, plus the selected suffix)"
+        ),
     )
     parser.add_argument(
         "--output-format",
@@ -486,10 +500,10 @@ def _api_output_format(output_format: str) -> str:
 def _output_path(
     output_dir: Path,
     output_name: str | None,
-    primary_input: Path,
+    default_stem: str,
     output_format: str,
 ) -> Path:
-    filename = output_name or f"{primary_input.stem}.{output_format}"
+    filename = output_name or f"{default_stem}.{output_format}"
     name = Path(filename)
     expected_suffixes = (
         {".jpg", ".jpeg"}
@@ -538,6 +552,8 @@ def _api_prompt(user_prompt: str, samples: list[Path], pet: Path | None) -> str:
         roles.append(
             "- USER PET: the supplied image; use it only for the customer's identity."
         )
+    if not roles:
+        return user_prompt
     mapping = "\n".join(roles)
     return (
         "INPUT IMAGE MAPPING:\n"
@@ -547,9 +563,25 @@ def _api_prompt(user_prompt: str, samples: list[Path], pet: Path | None) -> str:
     )
 
 
-def _gemini_prompt(prompt: str, background: str) -> str:
+def _gemini_prompt(
+    prompt: str,
+    background: str,
+    *,
+    prompt_only: bool = False,
+) -> str:
     if background != "transparent":
         return prompt
+    if prompt_only:
+        return (
+            f"{prompt}\n\n"
+            "GEMINI OUTPUT REQUIREMENT: Return only the artwork requested by the "
+            "prompt on a genuine transparent background. Do not add a product, "
+            "mockup, room scene, backdrop, border, checkerboard, or unrequested "
+            "decoration. If the response transport cannot encode alpha, use a "
+            "perfectly uniform pure-white (#FFFFFF) matte with no shadow, texture, "
+            "gradient, or other background content so downstream background "
+            "removal can isolate the requested artwork."
+        )
     return (
         f"{prompt}\n\n"
         "GEMINI OUTPUT REQUIREMENT: Return one isolated subject image only. Do "
@@ -585,6 +617,7 @@ def _request_summary(
     pet_name_substituted: bool = False,
     provider: str = "openai",
 ) -> dict[str, Any]:
+    operation = "edit" if samples or pet is not None else "generation"
     input_fidelity = (
         "model default (high fidelity)"
         if model == "gpt-image-2" or model.startswith("gpt-image-2-")
@@ -609,6 +642,7 @@ def _request_summary(
         "product_profile": str(product_profile) if product_profile else None,
         "product_profile_id": product_profile_id,
         "profile_layer": profile_layer,
+        "operation": operation,
         "provider": provider,
         "model": model,
         "size": size,
@@ -631,6 +665,7 @@ def _print_request_details(summary: dict[str, Any]) -> None:
         "product_profile": summary["product_profile"],
         "product_profile_id": summary["product_profile_id"],
         "profile_layer": summary["profile_layer"],
+        "operation": summary["operation"],
     }
     images = (
         [summary["pet_image"]] if summary["pet_image"] is not None else []
@@ -654,15 +689,21 @@ def _print_request_details(summary: dict[str, Any]) -> None:
     else:
         api_parameters = {
             "provider": "openai",
+            "endpoint": (
+                "images.edit"
+                if summary["operation"] == "edit"
+                else "images.generate"
+            ),
             "model": summary["model"],
-            "image": images,
             "quality": summary["quality"],
             "size": summary["size"],
             "background": summary["background"],
             "output_format": summary["output_format"],
             "n": 1,
         }
-        if summary["input_fidelity"] == "high":
+        if summary["operation"] == "edit":
+            api_parameters["image"] = images
+        if summary["operation"] == "edit" and summary["input_fidelity"] == "high":
             api_parameters["input_fidelity"] = "high"
     print("Input parameters:", file=sys.stderr)
     print(json.dumps(inputs, indent=2), file=sys.stderr)
@@ -793,11 +834,6 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         if args.pet_image is not None
         else None
     )
-    if not samples and pet is None:
-        raise UserInputError(
-            "provide at least one of --reference-design or --pet-image"
-        )
-
     prompt_file, user_prompt = _read_prompt(args.prompt_file)
     _validate_prompt_category(prompt_file, provider)
     user_prompt, resolved_pet_name, pet_name_substituted = _substitute_pet_name(
@@ -848,11 +884,10 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
     api_key_file, api_key = _resolve_api_key(args.api_key_file, provider=provider)
     api_output_format = _api_output_format(args.output_format)
     primary_input = samples[0] if samples else pet
-    assert primary_input is not None
     output = _output_path(
         args.output_dir,
         args.output_name,
-        primary_input,
+        primary_input.stem if primary_input is not None else prompt_file.stem,
         args.output_format,
     )
     background = _background_from_prompt(user_prompt, args.background)
@@ -906,7 +941,14 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
     api_prompt = _api_prompt(user_prompt, samples=samples, pet=pet)
     if provider == "gemini":
         input_items: list[dict[str, str]] = [
-            {"type": "text", "text": _gemini_prompt(api_prompt, background)}
+            {
+                "type": "text",
+                "text": _gemini_prompt(
+                    api_prompt,
+                    background,
+                    prompt_only=not image_paths,
+                ),
+            }
         ]
         input_items.extend(
             {
@@ -926,7 +968,10 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
             response_format["aspect_ratio"] = aspect_ratio
         if image_size is not None:
             response_format["image_size"] = image_size
-        with _ProgressReporter(provider):
+        with _ProgressReporter(
+            provider,
+            operation="edit" if image_paths else "generation",
+        ):
             result = client.interactions.create(
                 model=model,
                 input=input_items,
@@ -936,7 +981,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         encoded = getattr(output_image, "data", None)
         if not encoded:
             raise RuntimeError("Gemini returned no generated image")
-    else:
+    elif image_paths:
         with ExitStack() as stack:
             image_files = [stack.enter_context(path.open("rb")) for path in image_paths]
             request: dict[str, Any] = dict(
@@ -953,7 +998,20 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
                 request["input_fidelity"] = "high"
             with _ProgressReporter(provider):
                 result = client.images.edit(**request)
+    else:
+        request = dict(
+            model=model,
+            prompt=api_prompt,
+            quality=args.quality,
+            size=request_size,
+            background=background,
+            output_format=api_output_format,
+            n=1,
+        )
+        with _ProgressReporter(provider, operation="generation"):
+            result = client.images.generate(**request)
 
+    if provider == "openai":
         if not getattr(result, "data", None):
             raise RuntimeError("OpenAI returned no generated image")
         encoded = getattr(result.data[0], "b64_json", None)

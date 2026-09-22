@@ -84,10 +84,23 @@ class FakeImages:
     def __init__(self) -> None:
         self.kwargs = None
         self.call_count = 0
+        self.edit_call_count = 0
+        self.generate_call_count = 0
 
     def edit(self, **kwargs):
         self.kwargs = kwargs
         self.call_count += 1
+        self.edit_call_count += 1
+        return self._response(kwargs)
+
+    def generate(self, **kwargs):
+        self.kwargs = kwargs
+        self.call_count += 1
+        self.generate_call_count += 1
+        return self._response(kwargs)
+
+    @staticmethod
+    def _response(kwargs):
         size_value = kwargs.get("size", "auto")
         if size_value == "auto":
             size = (64, 64)

@@ -6,9 +6,9 @@ candidate.
 
 The MVP provides:
 
-- `pawmarvel-generate`: prompt-driven OpenAI or Gemini generation/editing with
-  a sample image, a pet image, or both; manual profile mode derives the selected
-  preview-art or transformed-pet size from `product-profile.json`.
+- `pawmarvel-generate`: prompt-driven OpenAI or Gemini generation/editing from
+  text alone, a sample image, a pet image, or both; manual profile mode derives
+  the selected preview-art or transformed-pet size from `product-profile.json`.
 - `pawmarvel-layout-config`: localhost visual editor for `layout.json`, using
   explicit screenshot pet/name regions for reference-guided initial geometry,
   plus exact visible text for advisory, confidence-gated ranking across the
@@ -108,6 +108,26 @@ provider auto-detection select Gemini. Credentials come from `--api-key-file`,
 key files must be plain text. The layout and render tools work offline. The POC
 runner exposes the same provider/model options and calls Tool 1 once followed
 by the renderer once.
+
+When neither `--reference-design` nor `--pet-image` is supplied,
+`pawmarvel-generate` runs prompt-only text-to-image generation. OpenAI uses
+`images.generate`; requests with one or more images continue to use
+`images.edit`. For example, an art prompt can request a transparent reusable
+canvas without exposing the model to a finished-design screenshot:
+
+```bash
+.venv/bin/pawmarvel-generate \
+  --prompt-file work/prompts/transparent-art-template-gpt.md \
+  --product-profile work/product-profile.json \
+  --profile-layer art \
+  --background transparent \
+  --output-format png \
+  --output-dir work/scratch/template \
+  --output-name art.png
+```
+
+Prompt-only mode defaults the output filename to the prompt-file stem when
+`--output-name` is omitted.
 It can instead reuse `--transformed-pet` with an explicit `--layout`, which is
 the no-generation path used to inspect a prepared print bundle.
 For the full authoring flow, `pawmarvel-author init-shared-config` creates the

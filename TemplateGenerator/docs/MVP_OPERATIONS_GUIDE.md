@@ -516,10 +516,28 @@ immutable layout dependency.
 For a brand-new design, this is intentionally an art-only workflow. A pet
 transformation and layout do not exist yet and are not prerequisites. Never
 pass a user pet to the art-generation request: reusable `art.png` must remain
-pet- and name-free. Keep the intended art provider, model, quality, product
-profile, and ordered references fixed while editing the prompt. Each prompt
-iteration still makes one paid art call, but it avoids creating experiments and
-repeated stability attempts for an obviously unsatisfactory design.
+pet- and name-free. Each prompt iteration still makes one paid art call, but it
+avoids creating experiments and repeated stability attempts for an obviously
+unsatisfactory design.
+
+Choose one input mode before beginning the scratch loop and keep it fixed while
+comparing prompt revisions:
+
+| Art-template scenario | Image inputs | API behavior |
+| --- | --- | --- |
+| Preserve or reconstruct fixed artwork from a finished design | Ordered `PAWMARVEL_REFERENCE_ARGS` | Reference-guided image edit |
+| Create artwork entirely from its written specification | None | Prompt-only image generation |
+| Create a simple transparent canvas with no inherited design elements | None | Prompt-only image generation |
+
+Do not pass a blank `--reference-design` value or a placeholder image for the
+prompt-only scenarios. Omit the option completely. In both modes keep the
+provider, model, quality, product profile, and output dimensions fixed while
+editing the prompt; otherwise one iteration changes more than the prompt.
+
+#### Reference-guided art scratch
+
+Use this path when `art.png` must retain any fixed typography, motifs, colors,
+texture, or composition from the finished-design references.
 
 ```bash
 PAWMARVEL_ART_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/art-prompt-tuning"
@@ -547,6 +565,73 @@ cp "$PAWMARVEL_ART_PROMPT" "$PAWMARVEL_ART_SCRATCH_PROMPT"
   --force
 ```
 
+#### Prompt-only transparent art scratch
+
+Use this path when the desired reusable art can be described without showing
+the model a finished-design screenshot. It is especially useful when
+`art.png` should be a simple transparent canvas that inherits no pet, text,
+shadow, motif, or other element from the example design.
+
+Edit the scratch prompt so it describes only the requested output. Do not leave
+instructions such as “remove the pet from IMAGE A” or “match the reference” in
+a prompt-only file because no IMAGE A exists. For a deliberately empty
+transparent canvas, the prompt can be as small as:
+
+```text
+BACKGROUND = TRANSPARENT
+
+Return one PNG canvas at the requested dimensions. Keep the entire canvas
+transparent. Draw no pet, name, text, shadow, motif, border, texture, mockup,
+checkerboard, or other visible element.
+```
+
+Run the same scratch loop without `"${PAWMARVEL_REFERENCE_ARGS[@]}"`. No
+placeholder image is required:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
+  --provider "$PAWMARVEL_ART_PROVIDER" \
+  --model "$PAWMARVEL_ART_MODEL" \
+  --quality "$PAWMARVEL_ART_QUALITY" \
+  --prompt-file "$PAWMARVEL_ART_SCRATCH_PROMPT" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  --profile-layer art \
+  --background transparent \
+  --output-format png \
+  --output-dir "$PAWMARVEL_ART_SCRATCH_TEMPLATE" \
+  --output-name art.png \
+  --force
+```
+
+With OpenAI this selects `images.generate`; supplying any reference or pet
+image selects `images.edit`. PNG/WebP alpha validation remains enabled, so a
+response without an alpha channel is rejected when `--background transparent`
+is requested. The CLI prints `operation: generation` and
+`endpoint: images.generate` before an OpenAI prompt-only call; confirm both in
+the diagnostic output.
+
+Alpha-channel validation alone does not prove that every pixel is transparent.
+For an intentionally empty canvas, run this local check after every iteration:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/python" -c \
+  'from pathlib import Path; from PIL import Image; p=Path("'"$PAWMARVEL_ART_SCRATCH_TEMPLATE"'/art.png"); im=Image.open(p).convert("RGBA"); assert im.getchannel("A").getbbox() is None, f"visible pixels remain in {p}"; print(f"fully transparent: {p} ({im.width}x{im.height})")'
+```
+
+If this check fails, inspect the image for faint pixels and tighten the prompt
+before retrying. Image generation is stochastic; when the permanent product
+requirement is literally an empty transparent canvas, a deterministic RGBA
+canvas generator is more reliable and cheaper than repeated AI calls.
+
+Prompt-only generation in this section is a disposable `pawmarvel-generate`
+scratch workflow. The current immutable `pawmarvel-author` art experiment still
+requires at least one snapshotted finished-design reference. Do not promote a
+prompt-only scratch result into the reference-guided experiment block below and
+expect an equivalent request: adding a reference changes the API operation and
+the generation behavior. Use the prompt-only scratch output for exploratory or
+manual validation until tracked prompt-only art experiments are explicitly
+added to the authoring contract.
+
 First inspect `template/art.png` by itself. It must contain all reusable fixed
 artwork but no example pet, personalized name, mockup, garment, or placeholder
 animal. It must also leave a plausible personalization region rather than
@@ -559,10 +644,11 @@ sections 6 and 7 produce transformed-pet and layout candidates, section 10.1
 provides the optional composition-aware scratch loop used for later design
 improvements and preview feedback.
 
-When the art-only result is satisfactory, promote only the prompt text. The
-scratch art is disposable. The immutable experiment must regenerate `art.png`,
-and the real layout remains a later product of the selected immutable art and
-pet attempts.
+When a **reference-guided** art-only result is satisfactory, promote only the
+prompt text. The scratch art is disposable. The immutable experiment must
+regenerate `art.png`, and the real layout remains a later product of the
+selected immutable art and pet attempts. For a prompt-only result, stop at the
+boundary described above rather than running this promotion block.
 
 ```bash
 mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"

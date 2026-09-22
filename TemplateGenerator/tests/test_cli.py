@@ -235,17 +235,55 @@ class CliTests(unittest.TestCase):
             "ADDITIONAL REFERENCE DESIGNS", client.images.kwargs["prompt"]
         )
 
-    def test_rejects_neither_image(self) -> None:
+    def test_openai_prompt_only_uses_image_generation_endpoint(self) -> None:
         args = build_parser().parse_args(
             [
                 "--prompt-file",
                 str(self.prompt),
                 "--api-key-file",
                 str(self.api_key_file),
+                "--output-dir",
+                str(self.root / "output"),
             ]
         )
-        with self.assertRaisesRegex(UserInputError, "at least one"):
-            generate(args, client=FakeClient())
+        client = FakeClient()
+
+        output = generate(args, client=client)
+
+        self.assertEqual(output, (self.root / "output" / "prompt.png").resolve())
+        self.assertEqual(client.images.generate_call_count, 1)
+        self.assertEqual(client.images.edit_call_count, 0)
+        self.assertEqual(
+            client.images.kwargs["prompt"],
+            "BACKGROUND = TRANSPARENT\nCreate the requested asset.",
+        )
+        self.assertNotIn("image", client.images.kwargs)
+
+    def test_gemini_prompt_only_uses_text_input(self) -> None:
+        gemini_key = self.root / "GEMINI_API_KEY.txt"
+        gemini_key.write_text("test-gemini-key", encoding="utf-8")
+        args = build_parser().parse_args(
+            [
+                "--provider",
+                "gemini",
+                "--prompt-file",
+                str(self.prompt),
+                "--api-key-file",
+                str(gemini_key),
+                "--output-dir",
+                str(self.root / "gemini-output"),
+            ]
+        )
+        client = FakeGeminiClient()
+
+        generate(args, client=client)
+
+        request = client.interactions.kwargs
+        self.assertEqual(len(request["input"]), 1)
+        self.assertEqual(request["input"][0]["type"], "text")
+        self.assertIn("Create the requested asset", request["input"][0]["text"])
+        self.assertIn("only the artwork requested", request["input"][0]["text"])
+        self.assertNotIn("isolated subject image", request["input"][0]["text"])
 
     def test_rejects_invalid_gpt_image_2_dimensions_before_api_call(self) -> None:
         client = FakeClient()
