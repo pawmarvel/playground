@@ -469,11 +469,18 @@ class CliTests(unittest.TestCase):
             )
 
     def test_rejects_prompt_category_that_disagrees_with_provider(self) -> None:
-        gemini_prompt = self.root / "pet-transform-gemini.md"
-        gemini_prompt.write_text("Create the requested pet.", encoding="utf-8")
-        args = self.args("--prompt-file", str(gemini_prompt))
-        with self.assertRaisesRegex(UserInputError, "does not match openai"):
-            generate(args, client=FakeClient())
+        for filename in (
+            "pet-transform-gemini.md",
+            "pet-transform-gemini-artistic-name-v01.md",
+            "pet-transform-artistic-name-gemini-v01.md",
+        ):
+            gemini_prompt = self.root / filename
+            gemini_prompt.write_text("Create the requested pet.", encoding="utf-8")
+            args = self.args("--prompt-file", str(gemini_prompt))
+            with self.subTest(filename=filename), self.assertRaisesRegex(
+                UserInputError, "does not match openai"
+            ):
+                generate(args, client=FakeClient())
 
     def test_older_model_requests_high_input_fidelity(self) -> None:
         client = FakeClient()

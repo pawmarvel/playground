@@ -976,7 +976,7 @@ scratch command is the standard section 6.1 command with one explicit
 
 ```bash
 PAWMARVEL_ARTISTIC_NAME_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/pet-artistic-name"
-PAWMARVEL_ARTISTIC_NAME_PROMPT="$PAWMARVEL_ARTISTIC_NAME_SCRATCH/pet-transform-artistic-name-gpt.md"
+PAWMARVEL_ARTISTIC_NAME_PROMPT="$PAWMARVEL_ARTISTIC_NAME_SCRATCH/pet-transform-gpt-artistic-name.md"
 
 mkdir -p "$PAWMARVEL_ARTISTIC_NAME_SCRATCH"
 cp "$PAWMARVEL_PET_PROMPT" "$PAWMARVEL_ARTISTIC_NAME_PROMPT"
@@ -1009,9 +1009,9 @@ their evidence cannot be confused:
 ```bash
 mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
 cp "$PAWMARVEL_ARTISTIC_NAME_PROMPT" \
-  "$PAWMARVEL_PROMPT_CANDIDATES/pet-transform-artistic-name-gpt-v01.md"
+  "$PAWMARVEL_PROMPT_CANDIDATES/pet-transform-gpt-artistic-name-v01.md"
 
-PAWMARVEL_ARTISTIC_NAME_CANDIDATE_PROMPT="$PAWMARVEL_PROMPT_CANDIDATES/pet-transform-artistic-name-gpt-v01.md"
+PAWMARVEL_ARTISTIC_NAME_CANDIDATE_PROMPT="$PAWMARVEL_PROMPT_CANDIDATES/pet-transform-gpt-artistic-name-v01.md"
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
   --kind pet \

@@ -13,7 +13,12 @@ from PIL import Image
 from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 
 from helpers import copy_font, layout_data, make_image, make_transparent_mark
-from pawmarvel_generator.bundle import BundleError, catalog_template_id, media_type
+from pawmarvel_generator.bundle import (
+    BundleError,
+    authoring_prompt_contract,
+    catalog_template_id,
+    media_type,
+)
 from pawmarvel_generator.bundle_cli import main as bundle_cli_main
 from pawmarvel_generator.catalog_cli import main as catalog_cli_main
 from pawmarvel_generator.release_catalog import build_release, validate_release
@@ -64,6 +69,32 @@ class BundleContractTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def test_authoring_prompt_accepts_provider_segment_before_or_after_variant(self) -> None:
+        root = Path(self.temp.name)
+        canonical = root / "pet-transform-gpt-artistic-name-v01.md"
+        existing = root / "pet-transform-artistic-name-gpt-v01.md"
+        canonical.write_text("Transform the pet.\n", encoding="utf-8")
+        existing.write_text("Transform the pet.\n", encoding="utf-8")
+
+        for prompt in (canonical, existing):
+            resolved, bundle_name = authoring_prompt_contract(
+                prompt, "pet-transform", "openai"
+            )
+            self.assertEqual(resolved, prompt.resolve())
+            self.assertEqual(bundle_name, "pet-transform-gpt.md")
+
+    def test_authoring_prompt_requires_exactly_one_matching_provider_segment(self) -> None:
+        root = Path(self.temp.name)
+        missing = root / "pet-transform-artistic-name-v01.md"
+        ambiguous = root / "pet-transform-gpt-artistic-gemini-v01.md"
+        missing.write_text("Transform the pet.\n", encoding="utf-8")
+        ambiguous.write_text("Transform the pet.\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(BundleError, "exactly one provider segment"):
+            authoring_prompt_contract(missing, "pet-transform", "openai")
+        with self.assertRaisesRegex(BundleError, "exactly one provider segment"):
+            authoring_prompt_contract(ambiguous, "pet-transform", "openai")
 
     def _write_bundle(self) -> None:
         root = self.bundle

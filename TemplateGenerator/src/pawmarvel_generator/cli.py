@@ -46,7 +46,9 @@ DEFAULT_MODELS = {
     "openai": "gpt-image-2",
     "gemini": "gemini-3.1-flash-image",
 }
-PROMPT_CATEGORY_PATTERN = re.compile(r"-(gpt|gemini)\.md$")
+PROMPT_CATEGORY_PATTERN = re.compile(
+    r"-(gpt|gemini)(?:-[a-z0-9]+)*\.md$"
+)
 PET_NAME_PLACEHOLDER = "{{PET_NAME}}"
 
 

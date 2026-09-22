@@ -19,8 +19,7 @@ PROMPT_FILENAME_PATTERN = re.compile(
     r"^(art-template|pet-transform)-(gpt|gemini)\.md$"
 )
 AUTHORING_PROMPT_FILENAME_PATTERN = re.compile(
-    r"^(art-template|pet-transform)-(gpt|gemini)"
-    r"(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?\.md$"
+    r"^(art-template|pet-transform)-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$"
 )
 PROMPT_MAX_BYTES = 1024 * 1024
 MAX_RUNTIME_REFERENCES = 4
@@ -113,10 +112,20 @@ def authoring_prompt_contract(
     if match is None or match.group(1) != kind:
         raise BundleError(
             f"{kind} authoring prompt filename mismatch; actual={resolved.name!r}; "
-            f"expected={kind}-{{gpt|gemini}}[-<variant>].md"
+            f"expected={kind}-<segments including exactly one gpt|gemini>.md"
         )
     expected_category = _provider_category(provider)
-    if match.group(2) != expected_category:
+    provider_segments = [
+        segment
+        for segment in match.group(2).split("-")
+        if segment in {"gpt", "gemini"}
+    ]
+    if len(provider_segments) != 1:
+        raise BundleError(
+            f"{kind} authoring prompt filename must contain exactly one provider "
+            f"segment (gpt or gemini); actual={resolved.name!r}"
+        )
+    if provider_segments[0] != expected_category:
         raise BundleError(
             f"{resolved.name} does not match the selected {provider} provider"
         )
