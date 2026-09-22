@@ -223,7 +223,7 @@ class LayoutServerTests(unittest.TestCase):
             )
         )
         self.assertNotIn("name", saved)
-        self.assertEqual(fixture["name_mode"], "embedded-in-pet")
+        self.assertEqual(fixture["name_mode"], "none")
         self.assertIsNone(fixture["pet_name"])
         self.assertFalse((self.root / "fonts").exists())
 

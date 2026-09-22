@@ -68,10 +68,12 @@ class AuthoringLifecycleTests(unittest.TestCase):
         prompt: Path,
         *,
         pet_name: str | None = None,
+        references: list[Path] | None = None,
     ) -> Path:
         return create_experiment(kind=kind, experiment_id=name, design_id="life-is-good",
             product_profile=self.profile, authoring_root=self.authoring,
-            references=[self.reference], prompt_file=prompt, provider="openai", model="gpt-image-2",
+            references=[self.reference] if references is None else references,
+            prompt_file=prompt, provider="openai", model="gpt-image-2",
             quality="high",
             art_attempt=None, pet_attempt=None, font_catalogs=[],
             parent_experiment_id=None, base_bundle_revision=None, created_by="test",
@@ -114,10 +116,18 @@ class AuthoringLifecycleTests(unittest.TestCase):
         return attempt
 
     def test_layout_attempt_comparison_and_reviewed_selection(self) -> None:
-        art_exp = self._experiment("art", "art-gpt-v01", self.art_prompt)
-        losing_art_exp = self._experiment("art", "art-gpt-v02", self.art_prompt)
-        pet_exp = self._experiment("pet", "pet-gpt-v01", self.pet_prompt)
-        pet_exp_v02 = self._experiment("pet", "pet-gpt-v02", self.pet_prompt)
+        art_exp = self._experiment(
+            "art", "art-gpt-v01", self.art_prompt, references=[]
+        )
+        losing_art_exp = self._experiment(
+            "art", "art-gpt-v02", self.art_prompt, references=[]
+        )
+        pet_exp = self._experiment(
+            "pet", "pet-gpt-v01", self.pet_prompt, references=[]
+        )
+        pet_exp_v02 = self._experiment(
+            "pet", "pet-gpt-v02", self.pet_prompt, references=[]
+        )
         art_attempt = self._fake_attempt(art_exp, "attempt-0001", "art.png", (672, 1008))
         self._fake_attempt(losing_art_exp, "attempt-0001", "art.png", (100, 100))
         pet_attempt = self._fake_attempt(pet_exp, "attempt-0001", "transformed-pet.png", (816, 816))
@@ -420,7 +430,9 @@ class AuthoringLifecycleTests(unittest.TestCase):
             manifest["provenance"]["print_candidate"]["print_candidate_id"],
             "print-finalist-0001",
         )
-        self.assertEqual(manifest["runtime"]["input_image_order"], ["user_pet", "reference_1"])
+        self.assertEqual(manifest["runtime"]["reference_assets"], [])
+        self.assertEqual(manifest["runtime"]["input_image_order"], ["user_pet"])
+        self.assertFalse((bundle / "reference-design.png").exists())
         self.assertEqual(manifest["runtime"]["request_parameters"]["quality"], "high")
         self.assertEqual(manifest["prompts"]["art_template"], "art-template-gpt.md")
         self.assertTrue((bundle / "art-template-gpt.md").is_file())
@@ -763,7 +775,7 @@ class AuthoringLifecycleTests(unittest.TestCase):
 
         fixture = {
             "pet_name": None,
-            "name_mode": "embedded-in-pet",
+            "name_mode": "none",
             "layout_sha256": "b" * 64,
         }
         with patch(
@@ -778,6 +790,51 @@ class AuthoringLifecycleTests(unittest.TestCase):
         self.assertIsNone(run_layout.call_args.args[3])
         no_name_record = json.loads((no_name_attempt / "run.json").read_text())
         self.assertIsNone(no_name_record["layout_fixture"]["pet_name"])
+        self.assertEqual(no_name_record["layout_fixture"]["name_mode"], "none")
+
+    def test_print_candidate_supports_product_without_pet_name(self) -> None:
+        art_exp = self._experiment("art", "art-no-name-v01", self.art_prompt)
+        pet_exp = self._experiment("pet", "pet-no-name-v01", self.pet_prompt)
+        art_attempt = self._fake_attempt(
+            art_exp, "attempt-0001", "art.png", (672, 1008)
+        )
+        pet_attempt = self._fake_attempt(
+            pet_exp, "attempt-0001", "transformed-pet.png", (816, 816)
+        )
+        layout_source = self.root / "no-name-layout"
+        make_transparent_mark(layout_source / "art.png", size=(672, 1008))
+        layout = layout_data()
+        del layout["name"]
+        (layout_source / "layout.json").write_text(
+            json.dumps(layout), encoding="utf-8"
+        )
+        layout_exp = create_experiment(
+            kind="layout", experiment_id="layout-no-name-v01",
+            design_id="life-is-good", product_profile=self.profile,
+            authoring_root=self.authoring, references=[], prompt_file=None,
+            provider=None, model=None, quality="high", art_attempt=art_attempt,
+            pet_attempt=pet_attempt, font_catalogs=[], parent_experiment_id=None,
+            base_bundle_revision=None, created_by="test",
+        )
+        layout_attempt = run_attempt(
+            experiment=layout_exp, attempt_id="attempt-0001", pet_image=None,
+            no_pet_name=True, layout_file=layout_source / "layout.json",
+        )
+
+        candidate = prepare_print_candidate(
+            candidate_id="print-no-name-v01",
+            authoring_product=self.authoring / "life-is-good" / "test-blanket",
+            art_attempt=art_attempt, pet_attempt=pet_attempt,
+            layout_attempt=layout_attempt, pet_name=None,
+            backend="deterministic",
+        )
+        record = json.loads((candidate / "print-candidate.json").read_text())
+        self.assertEqual(record["name_mode"], "none")
+        self.assertIsNone(record["pet_name"])
+        self.assertFalse((candidate / "outputs" / "fonts").exists())
+        self._validate_schema(
+            candidate / "print-candidate.json", "print-candidate-v1.schema.json"
+        )
 
     def test_attempt_ids_are_immutable(self) -> None:
         art_exp = self._experiment("art", "art-gpt-v01", self.art_prompt)
@@ -987,6 +1044,88 @@ class AuthoringLifecycleTests(unittest.TestCase):
                 parent_experiment_id=None,
                 base_bundle_revision=None,
                 created_by="test",
+            )
+
+    def test_no_reference_experiments_support_art_pet_and_layout(self) -> None:
+        art_exp = create_experiment(
+            kind="art", experiment_id="art-prompt-only-v01",
+            design_id="life-is-good", product_profile=self.profile,
+            authoring_root=self.authoring, references=[],
+            prompt_file=self.art_prompt, provider="openai", model="gpt-image-2",
+            quality="high", art_attempt=None, pet_attempt=None, font_catalogs=[],
+            parent_experiment_id=None, base_bundle_revision=None, created_by="test",
+        )
+        pet_exp = create_experiment(
+            kind="pet", experiment_id="pet-prompt-only-v01",
+            design_id="life-is-good", product_profile=self.profile,
+            authoring_root=self.authoring, references=[],
+            prompt_file=self.pet_prompt, provider="openai", model="gpt-image-2",
+            quality="low", art_attempt=None, pet_attempt=None, font_catalogs=[],
+            parent_experiment_id=None, base_bundle_revision=None, created_by="test",
+        )
+        art_meta = json.loads((art_exp / "experiment.json").read_text())
+        pet_meta = json.loads((pet_exp / "experiment.json").read_text())
+        self.assertEqual(art_meta["inputs"]["references"], [])
+        self.assertEqual(art_meta["generation"]["input_mode"], "prompt-only")
+        self.assertEqual(art_meta["generation"]["transport"], "images.generations")
+        self.assertEqual(pet_meta["generation"]["input_mode"], "pet-and-prompt")
+        self.assertEqual(pet_meta["generation"]["transport"], "images.edits")
+
+        def fake_generate(args) -> None:
+            size = (672, 1008) if args.profile_layer == "art" else (816, 816)
+            make_transparent_mark(Path(args.output_dir) / args.output_name, size=size)
+
+        with patch(
+            "pawmarvel_generator.authoring.generate", side_effect=fake_generate
+        ) as generated:
+            art_attempt = run_attempt(
+                experiment=art_exp, attempt_id="attempt-0001", pet_image=None
+            )
+            self.assertEqual(generated.call_args.args[0].reference_design or [], [])
+        with patch(
+            "pawmarvel_generator.authoring.generate", side_effect=fake_generate
+        ) as generated:
+            pet_attempt = run_attempt(
+                experiment=pet_exp, attempt_id="attempt-0001", pet_image=self.pet
+            )
+            self.assertEqual(generated.call_args.args[0].reference_design or [], [])
+            self.assertIsNotNone(generated.call_args.args[0].pet_image)
+        layout_exp = create_experiment(
+            kind="layout", experiment_id="layout-no-reference-v01",
+            design_id="life-is-good", product_profile=self.profile,
+            authoring_root=self.authoring, references=[], prompt_file=None,
+            provider=None, model=None, quality="high", art_attempt=art_attempt,
+            pet_attempt=pet_attempt, font_catalogs=[], parent_experiment_id=None,
+            base_bundle_revision=None, created_by="test",
+        )
+        layout_meta = json.loads((layout_exp / "experiment.json").read_text())
+        self.assertEqual(layout_meta["inputs"]["reference_mode"], "art-template")
+        self.assertNotIn("reference", layout_meta["inputs"])
+
+        layout_source = self.root / "no-reference-layout"
+        make_transparent_mark(layout_source / "art.png", size=(672, 1008))
+        (layout_source / "fonts").mkdir()
+        copy_font(layout_source / "fonts")
+        (layout_source / "layout.json").write_text(
+            json.dumps(layout_data()), encoding="utf-8"
+        )
+        layout_attempt = run_attempt(
+            experiment=layout_exp, attempt_id="attempt-0001", pet_image=None,
+            pet_name="PET", layout_file=layout_source / "layout.json",
+        )
+        self.assertTrue((layout_attempt / "outputs" / "preview.png").is_file())
+
+        with self.assertRaisesRegex(
+            AuthoringError, "require a finished-design reference"
+        ):
+            create_experiment(
+                kind="layout", experiment_id="layout-bad-reference-v01",
+                design_id="life-is-good", product_profile=self.profile,
+                authoring_root=self.authoring, references=[], prompt_file=None,
+                provider=None, model=None, quality="high", art_attempt=art_attempt,
+                pet_attempt=pet_attempt, font_catalogs=[], parent_experiment_id=None,
+                base_bundle_revision=None, created_by="test",
+                font_reference=self.root / "unused.json",
             )
 
     def test_comparison_rejects_duplicate_experiment_ids(self) -> None:

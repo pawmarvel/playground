@@ -117,6 +117,7 @@ class EditorConfig:
     output: Path
     pet_name: str = "PET"
     name_enabled: bool = True
+    name_mode_without_layer: str = "none"
     font_license: Path | None = None
     font_catalogs: tuple[Path, ...] = ()
     font_reference: Path | None = None
@@ -158,6 +159,7 @@ def _validate_editor_config(
         pet=config.pet.expanduser().resolve(),
         pet_name=config.pet_name.strip() or "PET",
         name_enabled=config.name_enabled,
+        name_mode_without_layer=config.name_mode_without_layer,
         font=font,
         output=config.output.expanduser().resolve(),
         font_license=font_license,
@@ -187,6 +189,10 @@ def _validate_editor_config(
             raise ConfigError(f"{label} does not exist: {path}")
     if resolved.output.name != "layout.json":
         raise ConfigError("--output must end with layout.json")
+    if resolved.name_mode_without_layer not in {"embedded-in-pet", "none"}:
+        raise ConfigError(
+            "name_mode_without_layer must be embedded-in-pet or none"
+        )
     if resolved.reference_text is not None and len(resolved.reference_text) > 64:
         raise ConfigError("reference text must not exceed 64 characters")
     if resolved.font_reference is not None:
@@ -1272,7 +1278,9 @@ def _make_handler(
                     "schema_version": 1,
                     "pet_name": pet_name,
                     "name_mode": (
-                        "layout-text" if layout.has_name else "embedded-in-pet"
+                        "layout-text"
+                        if layout.has_name
+                        else config.name_mode_without_layer
                     ),
                     "revision": revision,
                     "layout_sha256": hashlib.sha256(

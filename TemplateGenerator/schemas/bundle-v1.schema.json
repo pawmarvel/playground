@@ -30,7 +30,6 @@
     "personalization": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["pet_name"],
       "properties": {"pet_name": {"$ref": "#/$defs/petNamePolicy"}}
     },
     "provenance": {
@@ -65,7 +64,7 @@
           "required": ["input_pet", "pet_name"],
           "properties": {
             "input_pet": {"const": "qa/input-pet.png"},
-            "pet_name": {"type": "string", "minLength": 1}
+            "pet_name": {"type": ["string", "null"], "minLength": 1}
           }
         },
         "component_evaluations": {
@@ -102,12 +101,51 @@
     },
     "assets": {
       "type": "array",
-      "minItems": 12,
+      "minItems": 11,
       "maxItems": 19,
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/asset"}
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "renderer": {
+            "properties": {"name_mode": {"const": "none"}},
+            "required": ["name_mode"]
+          }
+        },
+        "required": ["renderer"]
+      },
+      "then": {
+        "properties": {
+          "personalization": {"maxProperties": 0},
+          "provenance": {
+            "properties": {
+              "qa_fixture": {
+                "properties": {"pet_name": {"type": "null"}}
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "personalization": {"required": ["pet_name"]},
+          "provenance": {
+            "properties": {
+              "qa_fixture": {
+                "properties": {
+                  "pet_name": {"type": "string", "minLength": 1}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "nonEmptyString": {"type": "string", "minLength": 1},
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -122,14 +160,14 @@
         "prompt": {"const": "pet-transform-gpt.md"},
         "reference_assets": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 4,
           "uniqueItems": true,
           "items": {"type": "string", "pattern": "^(reference-design\\.png|reference-designs/reference-design-000[2-4]\\.png)$"}
         },
         "input_image_order": {
           "type": "array",
-          "minItems": 2,
+          "minItems": 1,
           "maxItems": 5,
           "uniqueItems": true,
           "prefixItems": [{"const": "user_pet"}],
@@ -180,7 +218,7 @@
         "layout_schema_version": {"const": 2},
         "pet_fit": {"const": "contain-visible-alpha"},
         "pet_anchor": {"const": "bottom-center"},
-        "name_mode": {"enum": ["layout-text", "embedded-in-pet"]},
+        "name_mode": {"enum": ["layout-text", "embedded-in-pet", "none"]},
         "name_fit": {"const": "nominal-size-shrink-only-visible-ink-contain"},
         "version": {"const": 2}
       },

@@ -22,6 +22,7 @@ from .bundle import (
     validate_raster,
     validate_utc_timestamp,
 )
+from .cli import PET_NAME_PLACEHOLDER
 from .config import ConfigError, load_layout
 from .font_license import FontLicenseError, resolve_ofl_license
 from .generation_contract import provider_request_parameters
@@ -88,6 +89,17 @@ def _asset(path: Path, root: Path) -> dict[str, Any]:
             with Image.open(path) as image:
                 value["width"], value["height"] = image.size
     return value
+
+
+def _expected_name_mode(*, layout_has_name: bool, pet_prompt: str) -> str:
+    prompt_uses_name = PET_NAME_PLACEHOLDER in pet_prompt
+    if layout_has_name and prompt_uses_name:
+        raise BundleError(
+            "layout-text bundles cannot also embed {{PET_NAME}} in the pet prompt"
+        )
+    if layout_has_name:
+        return "layout-text"
+    return "embedded-in-pet" if prompt_uses_name else "none"
 
 
 def _next_revision(template_root: Path, product_root: Path, template_id: str) -> int:
@@ -390,9 +402,9 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
     refs = runtime.get("reference_assets")
     if not isinstance(refs, list):
         raise BundleError("runtime reference_assets must be an ordered array")
-    if not 1 <= len(refs) <= 4:
+    if not 0 <= len(refs) <= 4:
         raise BundleError(
-            "runtime reference_assets must contain one to four finished-design references"
+            "runtime reference_assets must contain zero to four finished-design references"
         )
     if refs != canonical_reference_paths(len(refs)):
         raise BundleError("runtime reference_assets must use canonical ordered paths")
@@ -432,11 +444,15 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         "alpha_failure": "reject",
     }:
         raise BundleError("runtime normalization policy is unsupported")
+    expected_name_mode = _expected_name_mode(
+        layout_has_name=preview.has_name,
+        pet_prompt=(root / pet_prompt_name).read_text(encoding="utf-8"),
+    )
     expected_renderer = {
         "layout_schema_version": 2,
         "pet_fit": "contain-visible-alpha",
         "pet_anchor": "bottom-center",
-        "name_mode": "layout-text" if preview.has_name else "embedded-in-pet",
+        "name_mode": expected_name_mode,
         "version": 2,
     }
     if preview.has_name:
@@ -641,12 +657,8 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
     if set(template_source) != expected_template_source:
         raise BundleError("provenance.print_derivation.template_source is invalid")
     personalization = manifest.get("personalization")
-    if (
-        not isinstance(personalization, dict)
-        or set(personalization) != {"pet_name"}
-        or not isinstance(personalization.get("pet_name"), dict)
-    ):
-        raise BundleError("personalization must match the closed bundle-v1 contract")
+    if not isinstance(personalization, dict):
+        raise BundleError("personalization must be an object")
     qa_fixture = provenance.get("qa_fixture")
     if not isinstance(qa_fixture, dict) or set(qa_fixture) != {"input_pet", "pet_name"}:
         raise BundleError(
@@ -654,13 +666,26 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         )
     if qa_fixture.get("input_pet") != "qa/input-pet.png":
         raise BundleError("provenance.qa_fixture.input_pet must be qa/input-pet.png")
-    try:
-        validate_pet_name(
-            qa_fixture["pet_name"],
-            personalization["pet_name"],
-        )
-    except PersonalizationError as exc:
-        raise BundleError(str(exc)) from exc
+    if expected_name_mode == "none":
+        if personalization != {} or qa_fixture["pet_name"] is not None:
+            raise BundleError(
+                "name_mode=none requires empty personalization and a null QA pet name"
+            )
+    else:
+        if (
+            set(personalization) != {"pet_name"}
+            or not isinstance(personalization.get("pet_name"), dict)
+        ):
+            raise BundleError(
+                "named bundles require exactly personalization.pet_name"
+            )
+        try:
+            validate_pet_name(
+                qa_fixture["pet_name"],
+                personalization["pet_name"],
+            )
+        except PersonalizationError as exc:
+            raise BundleError(str(exc)) from exc
     required_assets = {
         "product-profile.json",
         "art.png",
@@ -797,6 +822,7 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         "art.png",
         require_png=True,
         require_alpha=True,
+        allow_fully_transparent=True,
         expected_size=(profile.preview_art_size.width, profile.preview_art_size.height),
     )
     validate_raster(
@@ -806,6 +832,7 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         require_alpha=True,
         expected_size=(profile.print_size.width, profile.print_size.height),
         allow_large=True,
+        allow_fully_transparent=True,
     )
     validate_raster(
         root / "qa" / "input-pet.png",
@@ -1200,11 +1227,40 @@ def build_from_selection(
             )
         )
     print_record = _json(print_candidate_manifest)
+    pet_prompt_source = pet_experiment / str(pet_meta["inputs"]["prompt"]["path"])
+    expected_name_mode = _expected_name_mode(
+        layout_has_name=selected_layout_value.has_name,
+        pet_prompt=pet_prompt_source.read_text(encoding="utf-8"),
+    )
+    name_mode = print_record.get("name_mode")
+    layout_fixture_mode = layout_run.get("layout_fixture", {}).get("name_mode")
+    if name_mode != expected_name_mode or layout_fixture_mode != expected_name_mode:
+        raise BundleError(
+            mismatch(
+                "selected naming mode",
+                expected={
+                    "print_candidate": expected_name_mode,
+                    "layout_attempt": expected_name_mode,
+                },
+                actual={
+                    "print_candidate": name_mode,
+                    "layout_attempt": layout_fixture_mode,
+                },
+            )
+        )
+    name_policy = (
+        pet_name_policy(pet_name_max_length) if name_mode != "none" else None
+    )
     try:
-        name_policy = pet_name_policy(pet_name_max_length)
-        qa_pet_name = validate_pet_name(print_record.get("pet_name"), name_policy)
+        qa_pet_name = (
+            validate_pet_name(print_record.get("pet_name"), name_policy)
+            if name_policy is not None
+            else None
+        )
     except PersonalizationError as exc:
         raise BundleError(str(exc)) from exc
+    if name_mode == "none" and print_record.get("pet_name") is not None:
+        raise BundleError("name_mode=none print candidate must record pet_name=null")
     try:
         representative_pet_attempt = product_path(
             print_record["sources"]["pet_attempt"],
@@ -1479,9 +1535,7 @@ def build_from_selection(
                 "layout_schema_version": 2,
                 "pet_fit": "contain-visible-alpha",
                 "pet_anchor": "bottom-center",
-                "name_mode": (
-                    "layout-text" if preview_layout.has_name else "embedded-in-pet"
-                ),
+                "name_mode": name_mode,
                 **(
                     {
                         "name_fit": (
@@ -1493,7 +1547,9 @@ def build_from_selection(
                 ),
                 "version": 2,
             },
-            "personalization": {"pet_name": name_policy},
+            "personalization": (
+                {"pet_name": name_policy} if name_policy is not None else {}
+            ),
             "provenance": {
                 "selection_id": selection["selection_id"],
                 "selection_sha256": sha256(selection_path),

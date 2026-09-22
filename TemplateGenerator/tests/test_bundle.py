@@ -296,7 +296,45 @@ class BundleContractTests(unittest.TestCase):
         self.assertEqual(manifest["template_id"], "life-is-good--test-blanket")
         self.assertEqual(manifest["runtime"]["input_image_order"][0], "user_pet")
 
+    def test_validates_and_releases_bundle_without_reference_assets(self) -> None:
+        (self.bundle / "reference-design.png").unlink()
+        Image.new("RGBA", (672, 1008), (0, 0, 0, 0)).save(
+            self.bundle / "art.png"
+        )
+        Image.new("RGBA", (1344, 2016), (0, 0, 0, 0)).save(
+            self.bundle / "print" / "art.png"
+        )
+        manifest_path = self.bundle / "bundle.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["runtime"]["reference_assets"] = []
+        manifest["runtime"]["input_image_order"] = ["user_pet"]
+        manifest["provenance"]["selected"]["art"]["artifact_sha256"] = _sha256(
+            self.bundle / "art.png"
+        )
+        manifest["provenance"]["print_derivation"]["art_sha256"] = _sha256(
+            self.bundle / "print" / "art.png"
+        )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        self._refresh_assets()
+
+        validated = validate_production_bundle(self.bundle)
+        _validate_schema(validated, "bundle-v1.schema.json")
+        self.assertEqual(validated["runtime"]["reference_assets"], [])
+        self.assertEqual(validated["runtime"]["input_image_order"], ["user_pet"])
+
+        catalog = build_release(
+            release_id="2026-09-09.001", bundles=[self.bundle],
+            exchange_root=self.exchange, asset_base_url=None,
+        )
+        self.assertEqual(
+            len(validate_release(catalog, exchange_root=self.exchange)["templates"]),
+            1,
+        )
+
     def test_validates_artistic_name_bundle_without_name_or_font_assets(self) -> None:
+        (self.bundle / "pet-transform-gpt.md").write_text(
+            "Render {{PET_NAME}} as part of the pet cutout.", encoding="utf-8"
+        )
         for name in ("layout.json", "layout-print.json"):
             path = self.bundle / name
             layout = json.loads(path.read_text(encoding="utf-8"))
@@ -331,6 +369,44 @@ class BundleContractTests(unittest.TestCase):
         _validate_schema(validated, "bundle-v1.schema.json")
         self.assertEqual(validated["renderer"]["name_mode"], "embedded-in-pet")
         self.assertFalse((self.bundle / "fonts").exists())
+
+    def test_validates_bundle_with_no_pet_name_contract(self) -> None:
+        for name in ("layout.json", "layout-print.json"):
+            path = self.bundle / name
+            layout = json.loads(path.read_text(encoding="utf-8"))
+            del layout["name"]
+            path.write_text(json.dumps(layout), encoding="utf-8")
+        for path in (self.bundle / "fonts").iterdir():
+            path.unlink()
+        (self.bundle / "fonts").rmdir()
+
+        manifest_path = self.bundle / "bundle.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["renderer"] = {
+            "layout_schema_version": 2,
+            "pet_fit": "contain-visible-alpha",
+            "pet_anchor": "bottom-center",
+            "name_mode": "none",
+            "version": 2,
+        }
+        manifest["personalization"] = {}
+        manifest["provenance"]["qa_fixture"]["pet_name"] = None
+        selected_layout = manifest["provenance"]["selected"]["layout"]
+        selected_layout["layout_sha256"] = _sha256(self.bundle / "layout.json")
+        selected_layout["font_sha256"] = None
+        manifest["provenance"]["print_derivation"]["layout_sha256"] = _sha256(
+            self.bundle / "layout-print.json"
+        )
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
+        self._refresh_assets()
+
+        validated = validate_production_bundle(self.bundle)
+        _validate_schema(validated, "bundle-v1.schema.json")
+        self.assertEqual(validated["renderer"]["name_mode"], "none")
+        self.assertEqual(validated["personalization"], {})
+        self.assertIsNone(validated["provenance"]["qa_fixture"]["pet_name"])
 
     def test_validates_optional_remote_font_provenance(self) -> None:
         metadata = self.bundle / "fonts" / "METADATA.pb"
@@ -434,7 +510,7 @@ class BundleContractTests(unittest.TestCase):
             "reference-designs/reference-design-0005.png",
         ]
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-        with self.assertRaisesRegex(BundleError, "one to four"):
+        with self.assertRaisesRegex(BundleError, "zero to four"):
             validate_production_bundle(self.bundle)
 
     def test_rejects_print_layout_geometry_drift(self) -> None:

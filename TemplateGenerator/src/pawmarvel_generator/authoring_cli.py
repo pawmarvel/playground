@@ -207,7 +207,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_name.add_argument(
         "--no-pet-name",
         action="store_true",
-        help="start a layout attempt without a separate pet-name text layer",
+        help=(
+            "start a layout attempt without a separate pet-name text layer; "
+            "the selected pet attempt determines embedded-in-pet versus none"
+        ),
     )
     run.add_argument(
         "--reference-text",

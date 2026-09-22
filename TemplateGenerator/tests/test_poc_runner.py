@@ -93,6 +93,21 @@ class PocRunnerTests(unittest.TestCase):
             ["pet.png", "reference.png", "supporting.png"],
         )
 
+    def test_runs_generation_without_reference_design(self) -> None:
+        args = self.args()
+        args.reference_design = []
+        client = FakeClient()
+
+        transformed, final, debug = run_poc(args, client=client)
+
+        self.assertEqual(
+            [Path(file.name).name for file in client.images.kwargs["image"]],
+            ["pet.png"],
+        )
+        self.assertTrue(transformed.is_file())
+        self.assertTrue(final.is_file())
+        self.assertTrue(debug.is_file())
+
     def test_layout_name_is_not_forwarded_to_prompt_without_token(self) -> None:
         client = FakeClient()
         stderr = io.StringIO()

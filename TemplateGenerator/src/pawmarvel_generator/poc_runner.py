@@ -60,7 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         action="append",
         help=(
-            "finished design reference required with --pet-image; repeat in "
+            "optional finished design reference used with --pet-image; repeat in "
             "priority order to add supporting references"
         ),
     )
@@ -134,8 +134,6 @@ def run_poc(args: argparse.Namespace, client: Any | None = None) -> tuple[Path, 
     else:
         if pet_image is None or not pet_image.is_file():
             raise UserInputError(f"pet image does not exist: {pet_image}")
-        if not reference_designs:
-            raise UserInputError("at least one --reference-design is required")
         for index, reference_design in enumerate(reference_designs, 1):
             if not reference_design.is_file():
                 raise UserInputError(

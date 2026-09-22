@@ -257,7 +257,12 @@ def _require_matching_layout_art(
     return art
 
 
-def _image_gates(path: Path, expected_size: tuple[int, int]) -> dict[str, Any]:
+def _image_gates(
+    path: Path,
+    expected_size: tuple[int, int],
+    *,
+    allow_fully_transparent: bool = False,
+) -> dict[str, Any]:
     gates = {"readable_png": False, "expected_dimensions": False, "usable_alpha": False}
     try:
         with Image.open(path) as image:
@@ -266,7 +271,9 @@ def _image_gates(path: Path, expected_size: tuple[int, int]) -> dict[str, Any]:
             gates["expected_dimensions"] = image.size == expected_size
             rgba = image.convert("RGBA")
             low, high = rgba.getchannel("A").getextrema()
-            gates["usable_alpha"] = low < 255 and high > 0
+            gates["usable_alpha"] = low < 255 and (
+                allow_fully_transparent or high > 0
+            )
     except OSError:
         pass
     gates["status"] = "passed" if all(gates.values()) else "failed"
@@ -325,8 +332,10 @@ def create_experiment(
             if not pet_name:
                 raise AuthoringError("--pet-name must not be empty")
         if kind in {"art", "pet"}:
-            if not prompt_file or not references or not provider or not model:
-                raise AuthoringError(f"{kind} experiment requires prompt, reference, provider, and model")
+            if not prompt_file or not provider or not model:
+                raise AuthoringError(
+                    f"{kind} experiment requires prompt, provider, and model"
+                )
             if kind == "pet" and len(references) > 4:
                 raise AuthoringError(
                     "pet experiments accept at most four ordered reference designs "
@@ -351,9 +360,19 @@ def create_experiment(
                 copied["role"] = "finished_design"
                 reference_info.append(copied)
             record_inputs.update(prompt=prompt_info, references=reference_info)
+            input_mode = (
+                "reference-guided"
+                if reference_info
+                else ("prompt-only" if kind == "art" else "pet-and-prompt")
+            )
             generation = {
                 "provider": provider, "model": model,
-                "transport": "images.edits" if provider == "openai" else "interactions",
+                "transport": (
+                    "images.generations"
+                    if provider == "openai" and kind == "art" and not reference_info
+                    else "images.edits" if provider == "openai" else "interactions"
+                ),
+                "input_mode": input_mode,
                 "parameters": {
                     "quality": quality,
                     "output_format": "png",
@@ -407,9 +426,18 @@ def create_experiment(
                 art_attempt, art_run, expected_kind="art"
             )
             refs = sorted((art_experiment / "inputs").glob("reference-design-*"))
-            if not refs:
-                raise AuthoringError("selected art experiment has no reference design")
-            record_inputs["reference"] = _copy(refs[0], inputs / "reference-design.png")
+            if refs:
+                record_inputs["reference"] = _copy(
+                    refs[0], inputs / "reference-design.png"
+                )
+                record_inputs["reference_mode"] = "finished-design"
+            else:
+                record_inputs["reference_mode"] = "art-template"
+                if font_reference is not None or layout_reference is not None:
+                    raise AuthoringError(
+                        "--font-reference and --layout-reference require a finished-design "
+                        "reference in the selected art experiment"
+                    )
             if font_reference is not None:
                 try:
                     load_font_reference(font_reference, refs[0])
@@ -516,13 +544,18 @@ def _run_layout(
     pet_name: str | None,
     layout_file: Path | None,
     reference_text: str | None,
+    name_mode_without_layer: str,
 ) -> dict[str, Any]:
     inputs = meta["inputs"]
     outputs = stage / "outputs"
     outputs.mkdir(parents=True)
     shutil.copyfile(_relative_input(experiment, inputs["art"]), outputs / "art.png")
     shutil.copyfile(_relative_input(experiment, inputs["representative_pet"]), outputs / "transformed-pet.png")
-    reference = _relative_input(experiment, inputs["reference"])
+    reference = (
+        _relative_input(experiment, inputs["reference"])
+        if "reference" in inputs
+        else outputs / "art.png"
+    )
     font_reference = (
         _relative_input(experiment, inputs["font_reference"])
         if "font_reference" in inputs
@@ -577,6 +610,7 @@ def _run_layout(
             art=outputs / "art.png", reference=reference,
             pet=outputs / "transformed-pet.png", pet_name=pet_name or "PET",
             name_enabled=pet_name is not None,
+            name_mode_without_layer=name_mode_without_layer,
             font=None, output=outputs / "layout.json", font_catalogs=catalogs,
             font_reference=font_reference, layout_reference=layout_reference,
             reference_text=reference_text,
@@ -597,7 +631,9 @@ def _run_layout(
         fixture = {
             "schema_version": 1,
             "pet_name": pet_name if composition.text is not None else None,
-            "name_mode": "layout-text" if composition.text else "embedded-in-pet",
+            "name_mode": (
+                "layout-text" if composition.text else name_mode_without_layer
+            ),
             "layout_sha256": sha256(outputs / "layout.json"),
             "transformed_pet_sha256": sha256(
                 outputs / "transformed-pet.png"
@@ -705,6 +741,29 @@ def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
         layout_pet_name = (
             None if no_pet_name else (pet_name or "").strip() or "PET"
         )
+        product_root = experiment.parents[2]
+        pet_attempt_descriptor = meta.get("inputs", {}).get("pet_attempt", {})
+        pet_attempt_path = (
+            product_root / str(pet_attempt_descriptor.get("path", ""))
+        ).resolve()
+        if not pet_attempt_path.is_relative_to(product_root):
+            raise AuthoringError(
+                "layout representative pet attempt escapes its authoring product root"
+            )
+        representative_pet_record = _attempt_record(pet_attempt_path)
+        representative_prompt_variables = representative_pet_record.get(
+            "prompt_variables"
+        )
+        embedded_name = (
+            representative_prompt_variables.get("pet_name")
+            if isinstance(representative_prompt_variables, dict)
+            else None
+        )
+        name_mode_without_layer = (
+            "embedded-in-pet"
+            if isinstance(embedded_name, str) and embedded_name.strip()
+            else "none"
+        )
         representative_pet = meta.get("inputs", {}).get("representative_pet", {})
         record["layout_fixture"] = {
             "pet_name": layout_pet_name,
@@ -727,6 +786,7 @@ def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
                 layout_pet_name,
                 layout_file,
                 reference_text,
+                name_mode_without_layer,
             )
             record["layout_fixture"].update(
                 pet_name=saved_fixture["pet_name"],
@@ -1005,7 +1065,11 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
                 gates: dict[str, Any]
                 if kind in {"art", "pet"}:
                     filename = "art.png" if kind == "art" else "transformed-pet.png"
-                    gates = _image_gates(attempt / "outputs" / filename, expected_size)
+                    gates = _image_gates(
+                        attempt / "outputs" / filename,
+                        expected_size,
+                        allow_fully_transparent=kind == "art",
+                    )
                 else:
                     try:
                         layout = load_layout(attempt / "outputs")
@@ -1542,6 +1606,9 @@ def prepare_print_candidate(
     layout_fixture_name = str(
         records["layout"].get("layout_fixture", {}).get("pet_name") or ""
     ).strip() or None
+    layout_name_mode = records["layout"].get("layout_fixture", {}).get(
+        "name_mode"
+    )
     pet_prompt_variables = records["pet"].get("prompt_variables")
     pet_prompt_name = (
         pet_prompt_variables.get("pet_name", "").strip() or None
@@ -1551,8 +1618,13 @@ def prepare_print_candidate(
     )
     supplied_pet_name = (pet_name or "").strip() or None
     if preview_layout.has_name:
+        if layout_name_mode != "layout-text":
+            raise AuthoringError(
+                "selected layout has a name layer but its fixture does not declare "
+                "name_mode=layout-text"
+            )
         pet_name = supplied_pet_name or layout_fixture_name
-    else:
+    elif layout_name_mode == "embedded-in-pet":
         if not pet_prompt_name:
             raise AuthoringError(
                 "embedded-name layout requires the selected representative pet "
@@ -1567,7 +1639,24 @@ def prepare_print_candidate(
                 )
             )
         pet_name = pet_prompt_name
-    if not pet_name:
+    elif layout_name_mode == "none":
+        if supplied_pet_name:
+            raise AuthoringError(
+                "selected layout declares name_mode=none, so --pet-name has no "
+                "layout or prompt consumer"
+            )
+        if pet_prompt_name:
+            raise AuthoringError(
+                "selected layout declares name_mode=none but the representative pet "
+                "attempt records an applied {{PET_NAME}} value"
+            )
+        pet_name = None
+    else:
+        raise AuthoringError(
+            "fontless layout must declare name_mode=embedded-in-pet or none; "
+            f"actual={layout_name_mode!r}"
+        )
+    if layout_name_mode != "none" and not pet_name:
         source = (
             "layout fixture"
             if preview_layout.has_name
@@ -1643,6 +1732,7 @@ def prepare_print_candidate(
             "pet": backend,
         },
         "pet_name": pet_name,
+        "name_mode": layout_name_mode,
         "sources": {
             "art_attempt": _product_relative(art_attempt, authoring_product),
             "pet_attempt": _product_relative(pet_attempt, authoring_product),

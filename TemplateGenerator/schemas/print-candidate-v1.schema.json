@@ -10,6 +10,7 @@
     "product_profile_id",
     "status",
     "pet_name",
+    "name_mode",
     "backends",
     "sources",
     "source_hashes",
@@ -22,7 +23,8 @@
       "pattern": "^[a-z0-9][a-z0-9-]+[a-z0-9]$"
     },
     "status": {"enum": ["running", "succeeded", "failed"]},
-    "pet_name": {"type": "string", "minLength": 1},
+    "pet_name": {"type": ["string", "null"], "minLength": 1},
+    "name_mode": {"enum": ["layout-text", "embedded-in-pet", "none"]},
     "backends": {
       "type": "object",
       "additionalProperties": false,

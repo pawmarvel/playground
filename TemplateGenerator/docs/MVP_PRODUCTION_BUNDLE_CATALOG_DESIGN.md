@@ -88,7 +88,7 @@ s3://<bucket>/<environment-prefix>/
     layout.json                          # composition-only preview layout-v2
     print/art.png                        # reusable profile-sized print art
     layout-print.json                    # mechanically scaled print layout-v2
-    reference-design.png                 # primary runtime reference
+    reference-design.png                 # optional primary runtime reference
     reference-designs/                   # optional ordered references 0002+
       reference-design-0002.png
     art-template-{gpt|gemini}.md          # offline provenance artifact
@@ -114,8 +114,8 @@ fields and canonical paths, never filename scanning or authoring conventions.
 | Phase | FE/application reads from bundle | FE/application supplies or creates |
 | --- | --- | --- |
 | Import | `bundle.json`, asset inventory, profile, layouts, prompt, references, and conditional font/license | Verified immutable application copy/cache and draft record |
-| Pet transform | `runtime.provider`, `runtime.model`, `runtime.transport`, closed `runtime.request_parameters`, `runtime.prompt`, ordered `runtime.reference_assets`, output/normalization policy | Customer pet as image 1; declared references afterward; transformed-pet PNG |
-| Preview | `art.png`, `layout.json`, renderer and `personalization.pet_name` semantics; selected OFL font only in `layout-text` mode | Validated customer name and transformed pet |
+| Pet transform | `runtime.provider`, `runtime.model`, `runtime.transport`, closed `runtime.request_parameters`, `runtime.prompt`, ordered `runtime.reference_assets`, output/normalization policy | Customer pet as image 1; zero or more declared references afterward; transformed-pet PNG |
+| Preview | `art.png`, `layout.json`, renderer and optional `personalization.pet_name` semantics; selected OFL font only in `layout-text` mode | Transformed pet and, except for `name_mode: none`, a validated customer name |
 | Approved print | `print/art.png`, `layout-print.json`, profile, renderer semantics, and conditional font | Upscaled approved transformed pet and final print composition |
 
 Preview and print must use the same bundle revision and customer values. FE
@@ -124,9 +124,11 @@ customer-image handling, and print rendering run in a trusted application
 backend/job, not browser code.
 
 Layout V2 is a closed composition contract with an optional top-level `name`.
-Its absence means the personalized lettering is already embedded in the
-transformed-pet pixels; the renderer composes only `art` and `pet`, and the
-bundle omits font assets. When `name` is present, `name.font_size_px` is the nominal
+Its absence means either personalized lettering is already embedded in the
+transformed-pet pixels or the product has no name input; `renderer.name_mode`
+distinguishes `embedded-in-pet` from `none`. In both cases the renderer
+composes only `art` and `pet`, and the bundle omits font assets. When `name` is
+present, `name.font_size_px` is the nominal
 preview size, `name.min_font_size_px` is the smallest allowed fallback,
 `name.fit` is `shrink_only`, and `name.padding_px` is a uniform inset. Short
 names stay at nominal size; longer names shrink only as needed. Print layout
@@ -478,7 +480,7 @@ exist. Each experiment snapshots every resolved non-secret input it consumes.
 ```text
 design-inputs/
   <design-id>/
-    reference-design.png
+    reference-design.png     # optional; omit for prompt-specified designs
     art-template-<provider>.md
     pet-transform-<provider>.md
     reference-designs/       # optional supporting references
@@ -706,8 +708,8 @@ s3://<bucket>/<environment-prefix>/
         layout.json
         print/art.png
         layout-print.json
-        reference-design.png
-        reference-designs/reference-design-0002.png
+        reference-design.png                         # optional
+        reference-designs/reference-design-0002.png  # optional, requires primary
         pet-transform-gpt.md
         art-template-{gpt|gemini}.md
         fonts/<font>.ttf                  # layout-text mode only
@@ -862,8 +864,8 @@ not a viable fallback.
     "model": "gpt-image-2",
     "transport": "images.edits",
     "prompt": "pet-transform-gpt.md",
-    "reference_assets": ["reference-design.png"],
-    "input_image_order": ["user_pet", "reference_1"],
+    "reference_assets": [],
+    "input_image_order": ["user_pet"],
     "request_parameters": {
       "quality": "low",
       "size": "816x816",
@@ -957,7 +959,8 @@ Integrity verification occurs on application import or first immutable bundle
 cache-fill, not once per customer personalization. Subsequent runtime reads use
 the application's verified immutable copy/cache.
 
-The manifest carries the customer-name policy separately from layout geometry.
+For `layout-text` and `embedded-in-pet`, the manifest carries the customer-name
+policy separately from layout geometry.
 Before measuring length, the consumer applies NFC normalization, trims leading
 and trailing whitespace, and collapses each internal whitespace run to one
 ASCII space. It then permits Unicode general categories Letter, Mark, and
@@ -979,9 +982,11 @@ emits a diagnostic warning and continues without modifying the prompt. This is
 literal substitution only—there is no general-purpose prompt-template
 language. If the prompt generates the name inside the transformed-pet pixels,
 `layout.json` omits `name` and
-`bundle.json.renderer.name_mode` is `embedded-in-pet`. Otherwise the layout
-contains `name`, the bundle carries its OFL assets, and `name_mode` is
-`layout-text`. The application must reject disagreement between these fields.
+`bundle.json.renderer.name_mode` is `embedded-in-pet`. If the layout contains
+`name`, the bundle carries its OFL assets and declares `layout-text`. A prompt
+without `{{PET_NAME}}` plus a layout without `name` declares `none`; in that
+mode `personalization` is empty and the QA pet name is null. The application
+must reject disagreement between these fields.
 
 ### 8.3 Runtime provider and model scope
 
@@ -1041,20 +1046,32 @@ application sends:
 
 Prompts refer to the customer pet and reference assets by role, never “image 1”
 or “image 2.” Bundle-v1 JSON Schema defines `reference_assets` with
-`minItems: 1` and `maxItems: 4`; that limit covers finished-design references
-only and is not instance-configurable. The primary reference is
-`reference-design.png`. Optional supporting references are stored as
+`minItems: 0` and `maxItems: 4`; that limit covers finished-design references
+only and is not instance-configurable. An empty array means the prompt fully
+specifies the target style and the only image input is the customer pet. When
+present, the primary reference is `reference-design.png`. Supporting references are stored as
 `reference-designs/reference-design-0002.png` and later numbers, matching the
 manifest array order. Bundle construction applies EXIF orientation and
 canonicalizes each finished reference to PNG so FE and the authoring run use
 the same visual orientation.
 
 The current MVP does not send a generated transformed-pet exemplar as a runtime
-reference. Reusable pet-only prompting proved unreliable, so each transform
-uses the customer pet followed by one or more selected finished-design
-references. Adding an exemplar role later would change prompt semantics and
+reference. A transform uses the customer pet followed by the selected zero or
+more finished-design references. No-reference mode is explicit and is not
+represented by a blank or placeholder asset. Adding an exemplar role later would change prompt semantics and
 must be represented by a future schema/contract decision rather than inferred
 from `qa/` files.
+
+No-reference mode is supported through the entire authoring and publication
+lifecycle. Its art experiment uses prompt-to-image generation with
+`references: []`; its pet experiment still requires the user pet but obtains
+all target pose/style/crop instructions from its prompt. Layout authoring uses
+the generated `art.png` as the comparison canvas and lets the operator place
+the pet and optional name regions manually. The resulting bundle contains both
+prompts, both art resolutions, both layouts, QA assets, and product profile,
+but contains neither `reference-design.png` nor `reference-designs/`.
+Release construction, validation, and S3 publication use the same commands as
+the reference-guided path.
 
 `runtime.input_image_order` makes the invariant explicit for inspection, while
 `runtime.reference_assets` is the authoritative ordered path list. Changing a
@@ -1080,7 +1097,9 @@ Production bundles use composition layout schema version 2. Always preserve
 pet geometry. When the optional `name` object exists, also preserve its
 coordinates, nominal/minimum font sizes, uniform padding, RGBA color,
 horizontal alignment, fit policy, and relative font path. When it is absent,
-do not render text or require font assets. Keep
+use `renderer.name_mode`: `embedded-in-pet` means prompt substitution produced
+lettering inside the pet pixels, while `none` means the product accepts no name
+input. In either case, do not render text or require font assets. Keep
 `model`, provider, prompt, API transport, reference order, and output
 normalization out of the layout. The renderer begins at `font_size_px`, shrinks
 only as needed to contain visible text ink inside the padded name box, and
@@ -1114,9 +1133,10 @@ the selected representative attempt before canonical PNG conversion. The MVP
 records a lightweight source/rights check operationally but does not require or
 validate formal license evidence in the bundle.
 `qa/transformed-pet.png` is that attempt's representative authoring output used to compose
-`qa/golden-preview.png` and `qa/golden-preview-debug.png`. The publisher uses
-the exact pet name from the selected print candidate and records it under
-`bundle.json.provenance.qa_fixture`. These files are
+`qa/golden-preview.png` and `qa/golden-preview-debug.png`. For named modes, the
+publisher uses the exact pet name from the selected print candidate and records
+it under `bundle.json.provenance.qa_fixture`. For `name_mode: none`, it records
+`pet_name: null`. These files are
 review aids, not runtime references or cross-renderer pixel oracles. Automated
 consumer diagnostics can replay the declared model call and cover role order,
 request settings, manifest integrity, alpha, and geometry/renderer semantics;
@@ -1152,9 +1172,7 @@ turning the generator into a workflow service. A minimal record is:
   "inputs": {
     "prompt": {"path": "inputs/pet-transform-gemini.md", "sha256": "<sha256>"},
     "product_profile": {"path": "inputs/product-profile.json", "sha256": "<sha256>"},
-    "references": [
-      {"role": "finished_design", "path": "inputs/reference-design.png", "sha256": "<sha256>"}
-    ]
+    "references": []
   },
   "generation": {
     "provider": "gemini",
@@ -1327,8 +1345,11 @@ instead obtains the already-rendered name from the representative pet attempt's
 applied prompt variables. The
 `--pet-name` print option is therefore only an explicit diagnostic override,
 and an embedded-name override must match the name already present in the pet
-pixels. The resolved print candidate always records a non-empty QA name for
-bundle replay and policy validation.
+pixels. In `none` mode, the pet prompt has no applied name variable, the layout
+has no name layer, and print preparation records a null QA name. The resolved
+print candidate records both the explicit name mode and either its non-empty QA
+name or null, so bundle construction never infers product intent from missing
+font files alone.
 
 The application owner records the winning assembly in
 `graduations/<graduation-id>/selection.json` before the generator allocates a
@@ -1609,7 +1630,7 @@ roles/order, and renderer/name semantics.
 11. **Declare runtime policy.** Capture provider/model/API transport, closed
     provider request parameters, exact reference order, provider-specific output
     normalization and alpha requirements, name validation, renderer behavior,
-    and preview/print art ownership in the manifest. Enforce one-to-four runtime
+    and preview/print art ownership in the manifest. Enforce zero-to-four runtime
     references in bundle-v1 schema.
 12. **Use safe cleanup.** `pawmarvel-author cleanup` defaults to dry-run,
     deletes only failed/discarded state by default, understands retention age,
@@ -1650,7 +1671,7 @@ Resolve these in order during kickoff:
 | 1 | Who owns activation and rollback? | Application draft/publish flow; generator delivers immutable bundles and release catalog | Accept at kickoff |
 | 2 | Which revision is authoritative? | Generator `bundle_revision`; importer records it verbatim and uses a differently named internal ID if needed | Accept at kickoff |
 | 3 | Does FE adopt `bundle.json`? | Yes, mandatory for the dual-art contract; declining it reopens print-art architecture | Accept at kickoff |
-| 4 | Which runtime references are sent? | Customer pet first, then one-to-four bundle-declared finished-design references in manifest order | Proposed decision |
+| 4 | Which runtime references are sent? | Customer pet first, then zero-to-four bundle-declared finished-design references in manifest order | Proposed decision |
 | 5 | Which model paths are in MVP? | GPT Image 2 is the default for art and pet transformation; Gemini is an optional measured candidate and cannot be selected until it passes identity/composition/alpha gates | Product and FE acceptance required |
 | 6 | Who creates print art? | Generator ships profile-specific high-resolution art; FE upscales only customer pet | Proposed decision |
 | 7 | How are runtime and QA references separated? | `runtime.reference_assets` names only finished-design assets; nothing under `qa/` is a runtime input | Proposed decision |

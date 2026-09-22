@@ -22,12 +22,30 @@
     },
     "kind": {"enum": ["art", "pet", "layout"]},
     "status": {"enum": ["draft", "evaluated", "discarded"]},
-    "inputs": {"type": "object"},
+    "inputs": {
+      "type": "object",
+      "properties": {
+        "references": {
+          "type": "array",
+          "minItems": 0,
+          "items": {"type": "object"}
+        },
+        "reference_mode": {
+          "enum": ["finished-design", "art-template"]
+        }
+      }
+    },
     "generation": {
       "type": ["object", "null"],
       "properties": {
         "provider": {"enum": ["openai", "gemini"]},
         "model": {"type": "string"},
+        "transport": {
+          "enum": ["images.edits", "images.generations", "interactions"]
+        },
+        "input_mode": {
+          "enum": ["reference-guided", "prompt-only", "pet-and-prompt"]
+        },
         "parameters": {
           "type": "object",
           "properties": {

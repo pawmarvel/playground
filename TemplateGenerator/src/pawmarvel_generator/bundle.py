@@ -140,6 +140,7 @@ def validate_raster(
     require_alpha: bool = False,
     expected_size: tuple[int, int] | None = None,
     allow_large: bool = False,
+    allow_fully_transparent: bool = False,
 ) -> tuple[int, int]:
     resolved = path.expanduser().resolve()
     try:
@@ -161,7 +162,7 @@ def validate_raster(
                     if "A" not in image.getbands() and "transparency" not in image.info:
                         raise BundleError(f"{label} must contain an alpha channel: {resolved}")
                     low, high = image.convert("RGBA").getchannel("A").getextrema()
-                    if high == 0:
+                    if high == 0 and not allow_fully_transparent:
                         raise BundleError(f"{label} is fully transparent: {resolved}")
                     if low == 255:
                         raise BundleError(f"{label} has no transparent pixels: {resolved}")
@@ -173,10 +174,12 @@ def validate_raster(
 
 
 def canonical_reference_paths(count: int) -> list[str]:
-    if not 1 <= count <= MAX_RUNTIME_REFERENCES:
+    if not 0 <= count <= MAX_RUNTIME_REFERENCES:
         raise BundleError(
-            f"runtime requires one to {MAX_RUNTIME_REFERENCES} finished-design references"
+            f"runtime accepts zero to {MAX_RUNTIME_REFERENCES} finished-design references"
         )
+    if count == 0:
+        return []
     return ["reference-design.png"] + [
         f"{SUPPORTING_REFERENCES_DIR}/reference-design-{index:04d}.png"
         for index in range(2, count + 1)

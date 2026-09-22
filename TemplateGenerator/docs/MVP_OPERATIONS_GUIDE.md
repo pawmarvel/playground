@@ -20,7 +20,8 @@ selection, or print-candidate paths.
 For a brand-new design, follow sections 2 through 9 in order. The shortest
 supported path is:
 
-1. configure private inputs and ordered references;
+1. configure private inputs and an ordered reference set (the default), or
+   deliberately select the documented no-reference variant;
 2. tune art in disposable scratch, then record one immutable art candidate;
 3. tune the pet prompt against one pet, then run smoke and release fixtures;
 4. author one layout against the selected art and a successful release fixture;
@@ -59,7 +60,7 @@ comparison tooling.
 
 ```mermaid
 flowchart TD
-    A[Choose reference design and product profile] --> B[Iterate art prompt and art attempts]
+    A[Choose design inputs and product profile] --> B[Iterate art prompt and art attempts]
     B --> C{Art accepted?}
     C -- no --> B
     C -- yes --> D[Iterate pet prompt/model with fixed pet fixtures]
@@ -174,13 +175,19 @@ the design. Missing optional references are exported as empty values instead
 of invalid paths. For a private production design, copy its approved source
 files into the same folder; do not add them to `examples/` or Git.
 
-### 3.1 Configure one or more finished-design references
+If this design intentionally has no finished-design reference, do not create a
+placeholder `reference-design.png`. Keep `reference-designs/` absent or empty,
+set `PAWMARVEL_SAMPLE=""` in the generated private config, and make both prompt
+files fully self-contained. The reference-array setup below then selects
+no-reference mode automatically.
 
-`reference-design.png` is always the primary reference. It should show the
-complete finished design whose composition is being reproduced. Put optional
-supporting references directly under `reference-designs/` as PNG files. The
-loader sorts their filenames byte-for-byte, so descriptive, zero-padded names
-make their model input order obvious and reproducible.
+### 3.1 Configure zero or more finished-design references
+
+When present, `reference-design.png` is always the primary reference. It should
+show the complete finished design whose composition is being reproduced. Put
+optional supporting references directly under `reference-designs/` as PNG
+files. The loader sorts their filenames byte-for-byte, so descriptive,
+zero-padded names make their model input order obvious and reproducible.
 
 ```text
 work/design-inputs/<design-id>/
@@ -198,17 +205,25 @@ background/text treatments. More references are not automatically better;
 ambiguous evidence usually reduces generation consistency.
 
 After sourcing the configuration, build one shared ordered reference list and
-the CLI arguments automatically. The primary reference is always first; every
-top-level `*.png` in `reference-designs/` follows in sorted filename order. The
-same list is used for art-template and transformed-pet experiments. Pet
-experiments accept at most four finished-design references, so the directory
-may contain at most three supporting PNGs.
+the CLI arguments automatically. If the configured primary reference exists,
+it is first and every top-level `*.png` in `reference-designs/` follows in
+sorted filename order. If `PAWMARVEL_SAMPLE` is empty, the supporting directory
+must also be empty and both arrays remain intentionally empty. The same list is
+used for art-template and transformed-pet iteration. Pet experiments accept at
+most four finished-design references, so a reference-guided input may contain
+at most three supporting PNGs.
 
 ```bash
 PAWMARVEL_REFERENCE_DESIGN_DIR="$PAWMARVEL_DESIGN_INPUT/reference-designs"
-PAWMARVEL_REFERENCE_DESIGNS=("$PAWMARVEL_SAMPLE")
+typeset -a PAWMARVEL_REFERENCE_DESIGNS
+typeset -a PAWMARVEL_REFERENCE_ARGS
+PAWMARVEL_REFERENCE_DESIGNS=()
+PAWMARVEL_REFERENCE_ARGS=()
 
-if test -d "$PAWMARVEL_REFERENCE_DESIGN_DIR"; then
+if test -n "${PAWMARVEL_SAMPLE:-}"; then
+  test -f "$PAWMARVEL_SAMPLE"
+  PAWMARVEL_REFERENCE_DESIGNS+=("$PAWMARVEL_SAMPLE")
+
   while IFS= read -r reference; do
     PAWMARVEL_REFERENCE_DESIGNS+=("$reference")
   done < <(
@@ -221,26 +236,38 @@ for path in sorted(Path(sys.argv[1]).glob("*.png"), key=lambda item: item.name.e
         print(path.resolve())
 ' "$PAWMARVEL_REFERENCE_DESIGN_DIR"
   )
+elif test -d "$PAWMARVEL_REFERENCE_DESIGN_DIR" && \
+     find "$PAWMARVEL_REFERENCE_DESIGN_DIR" -maxdepth 1 -type f -name '*.png' -print -quit | grep -q .; then
+  printf 'error: supporting references require a primary PAWMARVEL_SAMPLE\n' >&2
+  return 2 2>/dev/null || exit 2
 fi
 
 test "${#PAWMARVEL_REFERENCE_DESIGNS[@]}" -le 4
 
-PAWMARVEL_REFERENCE_ARGS=()
 for reference in "${PAWMARVEL_REFERENCE_DESIGNS[@]}"; do
   test -f "$reference"
   PAWMARVEL_REFERENCE_ARGS+=(--reference-design "$reference")
 done
 
-printf 'art and pet references, in order:\n'
-printf '  %s\n' "${PAWMARVEL_REFERENCE_DESIGNS[@]}"
+if test "${#PAWMARVEL_REFERENCE_DESIGNS[@]}" -eq 0; then
+  PAWMARVEL_DESIGN_REFERENCE_MODE="none"
+  printf 'design reference mode: none (prompt-defined generation)\n'
+else
+  PAWMARVEL_DESIGN_REFERENCE_MODE="ordered"
+  printf 'design references, in order:\n'
+  printf '  %s\n' "${PAWMARVEL_REFERENCE_DESIGNS[@]}"
+fi
 ```
 
 `--reference-design` is the shared repeatable option used by
 `pawmarvel-generate`, `pawmarvel-author create-experiment`,
-`pawmarvel-pipeline`, and `pawmarvel-poc-run`. Reuse this array directly; do not
-translate it to a tool-specific synonym.
+`pawmarvel-poc-run`, and the reference-guided scratch pipeline. Reuse this array
+directly; do not translate it to a tool-specific synonym. The optional
+`pawmarvel-pipeline` remains a reference-guided scratch wrapper; the
+supported no-reference E2E path is the focused section 5/6 commands followed
+by immutable authoring through section 9.
 
-For transformed-pet generation, the API image order is always:
+For reference-guided transformed-pet generation, the API image order is always:
 
 1. the user pet supplied to `run-attempt --pet-image`;
 2. the primary finished-design reference; and
@@ -304,7 +331,6 @@ private backed-up POSIX location outside Git. Do not point them at S3.
 Validate the loaded configuration before any paid call:
 
 ```bash
-test -f "$PAWMARVEL_SAMPLE"
 test -f "$PAWMARVEL_ART_PROMPT"
 test -f "$PAWMARVEL_PET_PROMPT"
 test -f "$PAWMARVEL_PET"
@@ -313,9 +339,15 @@ test -d "$PAWMARVEL_FONT_CATALOG"
 test -f "$PAWMARVEL_EVALUATION_PROTOCOL"
 test -f "$PAWMARVEL_SMOKE_FIXTURE_SET"
 test -f "$PAWMARVEL_RELEASE_FIXTURE_SET"
-test "${#PAWMARVEL_REFERENCE_DESIGNS[@]}" -ge 1
 test "${#PAWMARVEL_REFERENCE_DESIGNS[@]}" -le 4
 for reference in "${PAWMARVEL_REFERENCE_DESIGNS[@]}"; do test -f "$reference"; done
+if test "$PAWMARVEL_DESIGN_REFERENCE_MODE" = none; then
+  test "${#PAWMARVEL_REFERENCE_DESIGNS[@]}" -eq 0
+  test "${#PAWMARVEL_REFERENCE_ARGS[@]}" -eq 0
+else
+  test "${#PAWMARVEL_REFERENCE_DESIGNS[@]}" -ge 1
+  test -f "$PAWMARVEL_SAMPLE"
+fi
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" validate-fixture-set \
   --fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET"
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" validate-fixture-set \
@@ -359,14 +391,44 @@ different aspect ratios, `pawmarvel-generate` prints a warning for every
 mismatched reference. The call continues using the profile dimensions; inspect
 the generated art for unintended cropping, stretching, or reflow.
 
+### 3.2 Choose one complete E2E variant
+
+The default and recommended first run is **reference-guided with a separate
+name layer**: keep `reference-design.png`, build the ordered reference array,
+use the section 6.1 pet-only prompt, and save a layout with both pet and name
+regions. Sections 5 through 9 can then be followed exactly as written.
+
+Two alternatives are also complete E2E contracts, not partial debug modes:
+
+| Variant | References | Pet prompt | Saved layout | Bundle contract |
+| --- | --- | --- | --- | --- |
+| Default | One to four | No `{{PET_NAME}}` | Pet + name regions | Reference assets, `name_mode: layout-text`, OFL font |
+| No personalized name | Zero to four | No `{{PET_NAME}}` | Pet region only | `name_mode: none`, no name policy/font |
+| No reference image | Zero | Fully specifies target pet treatment | Pet region, plus optional name region | No reference files; runtime input order is only `user_pet` |
+
+The no-reference variant may use either `layout-text` or `none`. Set
+`PAWMARVEL_SAMPLE=""`, leave `reference-designs/` empty, and keep the two
+reference arrays empty. Use the prompt-only art command in section 5 and the
+pet-plus-prompt command in section 6. The immutable art experiment records
+`input_mode: prompt-only`; the pet experiment records
+`input_mode: pet-and-prompt`. Layout, review, print, graduation, bundle,
+release, and S3 commands are unchanged. The layout editor uses generated
+`art.png` as its canvas and still lets the operator place the pet and optional
+name regions manually.
+
+For a product with no personalized name anywhere, follow section 6.3 before
+layout authoring. Do not confuse it with section 6.2: `embedded-in-pet` still
+personalizes a name through the image prompt, while `none` has no name input at
+all.
+
 ## 4. Artifact lifecycle
 
 Operator-supplied design sources are separate from generated experiments:
 
 ```text
 work/design-inputs/cooper/
-  reference-design.png
-  reference-designs/                  # optional supporting finished-design views
+  reference-design.png                # optional; primary when present
+  reference-designs/                  # optional; valid only with a primary
     01-reference-design.png
     02-reference-design.png
   art-template-gpt.md
@@ -400,7 +462,7 @@ work/authoring/cooper/blanket-king-9375x12375/
   experiments/
     art/art-gpt-v01/
       experiment.json
-      inputs/                         # prompt, references, profile snapshots
+      inputs/                         # prompt, reference(s), profile snapshots
       attempts/
         attempt-0001/{run.json,outputs/,qa/}
         attempt-0002/{run.json,outputs/,qa/}
@@ -412,7 +474,7 @@ work/authoring/cooper/blanket-king-9375x12375/
         attempt-0002/{run.json,outputs/,qa/}
     pet/pet-gpt-v01/
       experiment.json
-      inputs/                         # prompt, references, profile snapshots
+      inputs/                         # prompt, reference(s), profile snapshots
       attempts/
         smoke-*/{run.json,inputs/,outputs/,qa/}
         release-*/{run.json,inputs/,outputs/,qa/}
@@ -529,6 +591,13 @@ comparing prompt revisions:
 | Create artwork entirely from its written specification | None | Prompt-only image generation |
 | Create a simple transparent canvas with no inherited design elements | None | Prompt-only image generation |
 
+The loaded design input decides the mode. When
+`PAWMARVEL_DESIGN_REFERENCE_MODE=none`, always use the prompt-only art command;
+do not run the reference-guided command and do not add a temporary reference.
+When the mode is `ordered`, use the reference-guided command unless the
+experiment is deliberately testing removal of all reference influence as a
+separate scratch hypothesis.
+
 Do not pass a blank `--reference-design` value or a placeholder image for the
 prompt-only scenarios. Omit the option completely. In both modes keep the
 provider, model, quality, product profile, and output dimensions fixed while
@@ -623,14 +692,12 @@ before retrying. Image generation is stochastic; when the permanent product
 requirement is literally an empty transparent canvas, a deterministic RGBA
 canvas generator is more reliable and cheaper than repeated AI calls.
 
-Prompt-only generation in this section is a disposable `pawmarvel-generate`
-scratch workflow. The current immutable `pawmarvel-author` art experiment still
-requires at least one snapshotted finished-design reference. Do not promote a
-prompt-only scratch result into the reference-guided experiment block below and
-expect an equivalent request: adding a reference changes the API operation and
-the generation behavior. Use the prompt-only scratch output for exploratory or
-manual validation until tracked prompt-only art experiments are explicitly
-added to the authoring contract.
+Prompt-only generation is supported by both disposable scratch and immutable
+authoring experiments. Keep `PAWMARVEL_REFERENCE_ARGS` empty when promoting a
+prompt-only candidate. The experiment records `references: []`,
+`input_mode: prompt-only`, and OpenAI transport `images.generations`; adding a
+reference later is a different experiment because it changes the request and
+the generation behavior.
 
 First inspect `template/art.png` by itself. It must contain all reusable fixed
 artwork but no example pet, personalized name, mockup, garment, or placeholder
@@ -644,11 +711,11 @@ sections 6 and 7 produce transformed-pet and layout candidates, section 10.1
 provides the optional composition-aware scratch loop used for later design
 improvements and preview feedback.
 
-When a **reference-guided** art-only result is satisfactory, promote only the
+When an art-only result is satisfactory, promote only the
 prompt text. The scratch art is disposable. The immutable experiment must
 regenerate `art.png`, and the real layout remains a later product of the
-selected immutable art and pet attempts. For a prompt-only result, stop at the
-boundary described above rather than running this promotion block.
+selected immutable art and pet attempts. The same promotion block works in
+both modes because the reference array expands to zero arguments when absent.
 
 ```bash
 mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
@@ -664,7 +731,7 @@ across the fixture benchmark. This separation prevents pet variability from
 being misreported as art-generation reliability.
 
 Create the first art experiment. `create-experiment` snapshots the exact
-product profile, prompt, and ordered reference images.
+product profile and prompt plus zero or more ordered reference images.
 
 ```bash
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
@@ -752,8 +819,8 @@ promoted from scratch, every changed prompt or request configuration becomes a
 new experiment. The current one-attempt fixture tiers measure cross-pet coverage
 and comparative latency; they do not claim repeat-run reliability for any one
 pet.
-At runtime, the customer pet is always the first image and the finished-design
-references follow in recorded order.
+At runtime, the customer pet is always the first image. Finished-design
+references follow in recorded order only when they exist.
 
 When comparing pet prompts or models, hold the ordered reference list constant;
 otherwise the comparison changes two variables at once. If the purpose of an
@@ -762,6 +829,28 @@ reference improves results, create a new pet experiment with the revised
 `PAWMARVEL_REFERENCE_DESIGNS` list, keep prompt/model/quality fixed, and compare it
 against the baseline. Record the winning experiment normally. Its snapshotted
 reference list becomes the runtime reference contract carried into the bundle.
+
+If `PAWMARVEL_DESIGN_REFERENCE_MODE=none`, always leave
+`PAWMARVEL_REFERENCE_ARGS` empty throughout transformed-pet scratch iteration.
+The request still includes `--pet-image`; therefore OpenAI uses `images.edit`,
+not `images.generate`. “Prompt-only transformed-pet” in this guide means that
+the transformation target is defined only by the prompt—there is no finished-
+design style/pose image. The prompt must explicitly define the desired pose,
+expression, crop, rendering style, palette, edge treatment, and transparent-
+background isolation. Never omit the pet image, because doing so would generate
+an unrelated animal rather than transform the user pet.
+
+When `PAWMARVEL_DESIGN_REFERENCE_MODE=none`, keep
+`PAWMARVEL_REFERENCE_ARGS` empty for every art and transformed-pet iteration:
+
+- art generation receives only the prompt and therefore uses text-to-image
+  generation;
+- transformed-pet generation receives the user pet plus the prompt and no
+  finished-design images. This is not literally text-only—the pet image is
+  required to preserve customer identity—but all target pose, crop, expression,
+  and style instructions must come from the prompt; and
+- never add an unrelated placeholder reference merely to make a command look
+  like the reference-guided example.
 
 ### 6.1 Default pet-only workflow: tune, benchmark, and select
 
@@ -822,13 +911,26 @@ cp "$PAWMARVEL_PET_PROMPT" "$PAWMARVEL_PET_SCRATCH_PROMPT"
   --force
 ```
 
-Compare the current `transformed-pet.png` directly with the user pet and all
-finished-design references. Before paying for a smoke benchmark, confirm:
+The same command covers both input modes. With references, the empty-safe array
+expands to ordered `--reference-design` arguments. Without references, it
+expands to no arguments and the call contains only the pet image and prompt.
+Before paying for the call, confirm the mode when needed:
+
+```bash
+printf 'design reference mode: %s\n' "$PAWMARVEL_DESIGN_REFERENCE_MODE"
+printf 'design reference count: %s\n' "${#PAWMARVEL_REFERENCE_DESIGNS[@]}"
+```
+
+Compare the current `transformed-pet.png` directly with the user pet and, when
+present, all finished-design references. Before paying for a smoke benchmark,
+confirm:
 
 - the user pet's recognizable identity, markings, and important features remain;
 - pose, expression, crop, palette, and rendering style follow the primary
-  finished-design reference;
-- supporting references clarify style without overriding the primary reference;
+  finished-design reference when present, or the explicit prompt specification
+  in no-reference mode;
+- any supporting references clarify style without overriding the primary
+  reference;
 - the PNG contains only the transformed pet with usable transparency—no design
   background, template artwork, shadow, or mockup. It also contains no text
   unless this experiment intentionally uses the artistic-name mode below; and
@@ -854,6 +956,13 @@ the model or quality must change, update the corresponding config value and the
 candidate filename/experiment ID before promotion. The overwritten scratch
 states require no cleanup or retention; the immutable experiment is the first
 durable record.
+
+The immutable pet-experiment commands below support zero references. In that
+mode the experiment records `references: []` and `input_mode: pet-and-prompt`;
+OpenAI still uses `images.edits` because the user pet is the required first
+image. The same empty reference list is retained by attempts, benchmarks,
+reviews, the selected bundle, and release validation. Never add a placeholder
+reference.
 
 Use the two fixture tiers deliberately:
 
@@ -1228,6 +1337,35 @@ no `fonts/` assets. The bundle declares `renderer.name_mode` as
 `font_sha256: null`. This completes the alternative E2E path without changing
 the default path.
 
+### 6.3 Optional: product with no personalized pet name
+
+Use this variant only when neither the transformed-pet pixels nor the
+deterministic layout should contain a pet name. Keep the pet prompt free of the
+exact `{{PET_NAME}}` token. Run pet scratch, experiment creation, attempts, and
+benchmarks exactly as in section 6.1 without `--pet-name`.
+
+After creating `PAWMARVEL_LAYOUT_EXPERIMENT` with the first command in section
+7, replace that section's normal layout `run-attempt` command with this one to
+start the selected layout attempt with the name layer disabled:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
+  --experiment "$PAWMARVEL_LAYOUT_EXPERIMENT" \
+  --attempt-id attempt-0001 \
+  --no-pet-name
+```
+
+In the editor, place and save the pet region and leave **Render a separate
+pet-name text layer** disabled. Continue with the normal layout/assembly
+reviews, print finalist, graduation, bundle, release, and publication commands
+in sections 7 through 9. Do not add `--pet-name` to print or consumer replay
+commands.
+
+This path records `name_mode: none` in the layout attempt, print candidate, and
+bundle. `layout.json` and `layout-print.json` omit `name`; the bundle omits
+`fonts/`, sets `personalization` to `{}`, and records a null QA pet name. The FE
+must not request, validate, substitute, or render a pet name for this bundle.
+
 ## 7. Iterate layout and font
 
 Create a layout experiment pinned to the exact short-listed art and pet
@@ -1260,26 +1398,31 @@ PAWMARVEL_LAYOUT_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/layout/lay
 `--pet-name` only initializes the assembled preview and may be omitted; its
 default is `PET`. Use `--no-pet-name` when the selected transformed-pet pixels
 already contain the artistic name, or when the product has no personalized
-text. That explicit option starts with **Render a separate pet-name text
-layer** disabled and saves a fontless layout unless the operator enables the
-layer and enters preview text. The value in the **Preview pet name** field at
-Save time becomes the QA fixture recorded for a separate-text attempt. It is
-deliberately independent from the exact lettering in the finished reference.
+text. The tool distinguishes those cases from the selected pet attempt: an
+applied `{{PET_NAME}}` value produces `embedded-in-pet`; no applied value
+produces `none`. That explicit option starts with **Render a separate pet-name
+text layer** disabled and saves a fontless layout unless the operator enables
+the layer and enters preview text. The value in the **Preview pet name** field
+at Save time becomes the QA fixture recorded for a separate-text attempt. It
+is deliberately independent from the exact lettering in the finished
+reference.
 
 The Cooper example intentionally starts without checked-in layout or font
 reference JSON. In its first layout experiment, omit both
-`--layout-reference` and `--font-reference`. In the reference canvas, use
-**Select pet region** to
-draw the intended replaceable-pet placement envelope. Then use **Select name
-region** to draw a tight rectangle around the complete personalized-name line,
-type the exact visible characters in **Reference text as shown**, and select
-**Apply reference geometry**. Analyze fonts and review the authoritative
-Pillow preview before saving. Saving writes `qa/layout-reference.json` and
+`--layout-reference` and `--font-reference`. For a reference-guided design, use
+the reference canvas to select the pet and name regions, enter the exact
+visible reference text, apply the geometry, analyze fonts, and review the
+authoritative Pillow preview. Saving writes `qa/layout-reference.json` and
 `qa/font-reference.json`; pass both files to later layout experiments using the
-same reference bytes. Both artifacts deliberately use the same name region.
-Use `--reference-text "CHARLIE"` only as an initial UI convenience when no saved
-region artifact exists. This value must match the visible text in the primary
-reference; it is separate from the `COOPER` personalized preview name.
+same reference bytes. Use `--reference-text "CHARLIE"` only as an initial UI
+convenience when no saved region artifact exists.
+
+For a no-reference design, the editor uses the generated `art.png` as its
+comparison canvas so the UI remains usable, but there is no screenshot geometry
+or lettering to infer. Do not pass `--layout-reference`, `--font-reference`, or
+`--reference-text`. Adjust the pet/name boxes directly against the exact
+assembled preview and choose the font manually. The saved layout, preview, and
+print scaling are otherwise identical to the reference-guided path.
 
 For an experiment whose selected transformed-pet output already contains its
 artistic name, turn off **Render a separate pet-name text layer** before drawing
@@ -1287,7 +1430,9 @@ geometry. Select and apply only the pet region, which must contain both the pet
 and its generated lettering. Do not select a name region or font. The editor
 saves a layout with only `art` and `pet`, records `name_mode` as
 `embedded-in-pet`, and does not create `fonts/`, `qa/font-reference.json`, or
-`qa/font-recommendation.json`. The same preview renderer remains authoritative.
+`qa/font-recommendation.json`. If the selected pet prompt has no applied
+`{{PET_NAME}}`, the same fontless save records `none` instead. The same preview
+renderer remains authoritative.
 
 The mapped boxes are initial recommendations. A screenshot can have a different
 aspect ratio, and generated art can reflow fixed decorations, so adjust the
@@ -1564,6 +1709,7 @@ mode it uses the selected layout attempt's saved preview fixture. In
 `--pet-name`. An explicit override remains
 available for diagnostics; for embedded lettering it must match the name that
 was used to generate the selected pet pixels.
+In `none` mode no name is inferred or accepted.
 
 Inspect:
 
@@ -1692,13 +1838,22 @@ printf 'bundle revision: %s\n' "$PAWMARVEL_BUNDLE"
   --bundle "$PAWMARVEL_BUNDLE"
 ```
 
+For a no-reference design, bundle construction deliberately writes no
+`reference-design.png` or `reference-designs/` directory. Its manifest declares
+`runtime.reference_assets: []` and `runtime.input_image_order: ["user_pet"]`.
+That is a complete production contract, not a partial bundle. The normal
+release build, local release validation, S3 dry run, and S3 publication commands
+below require no special no-reference option.
+
 Choose `--pet-name-max-length` for the usable name box in `layout-text` mode or
 for the tested artistic-lettering capacity in `embedded-in-pet` mode. It is
 stored in `bundle.json.personalization.pet_name`. The application must apply
 that policy before either font rendering or prompt substitution and must reuse
 the normalized value for preview and print. Twelve Unicode code points is the
 CLI default, but spelling the value out during graduation makes the product
-decision reviewable.
+decision reviewable. In `none` mode this CLI option is accepted for a uniform
+command line but is intentionally ignored; the bundle contains
+`personalization: {}` and FE must not collect a pet name.
 
 `--qa-input-pet` must be an operator-reviewed, non-customer fixture and must
 byte-match the input saved by the representative pet attempt used by the print
@@ -1792,8 +1947,8 @@ s3://alphapaw-pod-designer-prod/Template/MVP-test/
         layout-print.json                   # print-resolution composition
         art-template-gpt.md                 # offline art-generation provenance
         pet-transform-gpt.md                # production pet-transform prompt
-        reference-design.png                # primary runtime reference
-        reference-designs/                  # present only with extra references
+        reference-design.png                # only in a reference-guided bundle
+        reference-designs/                  # only with supporting references
           reference-design-0002.png
         print/
           art.png                           # high-resolution reusable print art
@@ -2087,13 +2242,19 @@ literal values into application code.
 PAWMARVEL_SECOND_PET="$PAWMARVEL_PROJECT/examples/pet-inputs/white-fluffy-dog.png"
 PAWMARVEL_SECOND_RUN="$PAWMARVEL_PROJECT/work/consumer-tests/cooper--blanket-king-9375x12375/v000001/white-fluffy-dog"
 PAWMARVEL_SECOND_PET_QUALITY="$("$PAWMARVEL_PROJECT/.venv/bin/python" -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["runtime"]["request_parameters"]["quality"])' "$PAWMARVEL_BUNDLE/bundle.json")"
+typeset -a PAWMARVEL_BUNDLE_REFERENCE_ARGS=()
+while IFS= read -r reference_asset; do
+  PAWMARVEL_BUNDLE_REFERENCE_ARGS+=(
+    --reference-design "$PAWMARVEL_BUNDLE/$reference_asset"
+  )
+done < <("$PAWMARVEL_PROJECT/.venv/bin/python" -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1], encoding="utf-8"))["runtime"]["reference_assets"]))' "$PAWMARVEL_BUNDLE/bundle.json")
 test "$PAWMARVEL_SECOND_PET_QUALITY" = "$PAWMARVEL_PET_QUALITY"
 mkdir -p "$PAWMARVEL_SECOND_RUN/preview" "$PAWMARVEL_SECOND_RUN/print"
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-poc-run" \
   --template-dir "$PAWMARVEL_BUNDLE" \
   --pet-image "$PAWMARVEL_SECOND_PET" \
-  --reference-design "$PAWMARVEL_BUNDLE/reference-design.png" \
+  "${PAWMARVEL_BUNDLE_REFERENCE_ARGS[@]}" \
   --prompt-file "$PAWMARVEL_BUNDLE/pet-transform-gpt.md" \
   --provider openai \
   --model gpt-image-2 \
@@ -2117,33 +2278,14 @@ generation because the bundled pet prompt has no `{{PET_NAME}}` token. In an
 prompt contains the token, so the wrapper forwards `FLUFFY` to pet generation,
 and the fontless layout does not render a second name. Omitting `--pet-name` is
 valid only when the layout has no name layer and the prompt has no token.
+For that `none` bundle, omit the `--pet-name FLUFFY` line from the example.
 
-The command above is the single-reference form. If the manifest contains
-supporting references, use the following form instead; do not run both commands
-into the same output directory. Repeat `--reference-design` in the
-exact order declared by `bundle.json.runtime.reference_assets`. The first entry
-is the primary `reference-design.png`; later entries resolve under
-`reference-designs/`. For example, if the manifest declares two references:
-
-```bash
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-poc-run" \
-  --template-dir "$PAWMARVEL_BUNDLE" \
-  --pet-image "$PAWMARVEL_SECOND_PET" \
-  --reference-design "$PAWMARVEL_BUNDLE/reference-design.png" \
-  --reference-design "$PAWMARVEL_BUNDLE/reference-designs/reference-design-0002.png" \
-  --prompt-file "$PAWMARVEL_BUNDLE/pet-transform-gpt.md" \
-  --provider openai \
-  --model gpt-image-2 \
-  --pet-name FLUFFY \
-  --size 816x816 \
-  --quality "$PAWMARVEL_SECOND_PET_QUALITY" \
-  --output-dir "$PAWMARVEL_SECOND_RUN/preview"
-```
-
-This literal two-reference command is illustrative. FE and reusable diagnostics
-must read the ordered asset paths from the manifest rather than assume a count
-or synthesize numbered filenames. Passing a different order changes the model
-request and violates the bundle runtime contract.
+The manifest-driven array covers every valid bundle: it expands to no arguments
+for a no-reference design, one argument for the primary reference, or ordered
+arguments for primary plus supporting references. FE and reusable diagnostics
+must use `runtime.reference_assets` rather than assume a count or synthesize
+numbered filenames. Passing a different order changes the model request and
+violates the bundle runtime contract.
 
 Scale only the approved customer pet and compose it with bundled print art:
 
@@ -2216,6 +2358,10 @@ path.
 Use the pipeline only to reproduce the whole visual flow quickly or isolate a
 stage. It overwrites explicitly selected outputs, records `run.json`, and never
 creates a production bundle.
+This wrapper requires at least one finished-design reference. Skip it for a
+no-reference design: the main section 5-9 flow is the authoritative full E2E
+path and already provides prompt-only art, pet-plus-prompt transformation,
+layout, print, bundle, release, and publication support.
 
 ```bash
 PAWMARVEL_SCRATCH_PRODUCT="$PAWMARVEL_PROJECT/work/scratch/$PAWMARVEL_DESIGN_ID/$PAWMARVEL_PRODUCT_PROFILE_ID"
