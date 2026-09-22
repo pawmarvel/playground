@@ -91,7 +91,7 @@ s3://<bucket>/<environment-prefix>/
     reference-design.png                 # optional primary runtime reference
     reference-designs/                   # optional ordered references 0002+
       reference-design-0002.png
-    art-template-{gpt|gemini}.md          # offline provenance artifact
+    art-template-{gpt|gemini}.md          # generated-art provenance; absent for deterministic empty art
     pet-transform-gpt.md                  # MVP production pet-transform prompt
     fonts/<selected-font>.ttf              # layout-text mode only
     fonts/OFL.txt                          # layout-text mode only
@@ -949,6 +949,10 @@ not a viable fallback.
 }
 ```
 
+For a deterministic empty-canvas art experiment, `prompts.art_template` is
+`null` and no art-prompt asset is present. The selected preview and print
+`art.png` files remain required and hash-bound like every other bundle.
+
 The real `assets` array contains every file except `bundle.json`. Each entry
 has `path`, `media_type`, `bytes`, and `sha256`; raster images also include
 dimensions. Paths are unique, bundle-relative, and cannot escape the directory.
@@ -1015,15 +1019,18 @@ edits. Evaluating a Responses-based image transport is a separate future
 experiment and must not be implemented by passing an undocumented body field.
 
 Prompt filenames are provider-qualified:
-`art-template-{gpt|gemini}.md` and `pet-transform-gpt.md`. Each released bundle
-contains one selected file for each role. `runtime.request_parameters` is the
+`art-template-{gpt|gemini}.md` and `pet-transform-gpt.md`. Every released bundle
+contains the selected pet-transform prompt. A generated-art bundle also contains
+one selected art prompt; a deterministic empty-canvas bundle instead declares
+`prompts.art_template: null`. `runtime.request_parameters` is the
 closed OpenAI field set the trusted application adapter passes
 without inventing defaults. For OpenAI this includes quality, requested size,
 background, output format, count, and input fidelity when required by the
 selected model. The manifest identifies the runtime pet prompt under
-`runtime.prompt` and the offline art prompt under `prompts.art_template`;
+`runtime.prompt` and identifies an offline generated-art prompt—or `null` for
+deterministic empty art—under `prompts.art_template`;
 `prompts.pet_transform` repeats the runtime prompt path for convenient role
-lookup. Both prompt files also appear in `assets` with their content hashes.
+lookup. Each declared prompt file also appears in `assets` with its content hash.
 The runtime pet prompt must use the GPT category. Authoring may retain Gemini
 variants privately for side-by-side evaluation. Private experiment filenames may add a
 lowercase variant suffix, such as `art-template-gpt-v02.md`; bundle graduation

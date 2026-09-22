@@ -30,6 +30,12 @@
           "minItems": 0,
           "items": {"type": "object"}
         },
+        "layout_references": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4,
+          "items": {"type": "object"}
+        },
         "reference_mode": {
           "enum": ["finished-design", "art-template"]
         }
@@ -38,13 +44,13 @@
     "generation": {
       "type": ["object", "null"],
       "properties": {
-        "provider": {"enum": ["openai", "gemini"]},
+        "provider": {"enum": ["openai", "gemini", "local"]},
         "model": {"type": "string"},
         "transport": {
-          "enum": ["images.edits", "images.generations", "interactions"]
+          "enum": ["images.edits", "images.generations", "interactions", "local.empty-canvas"]
         },
         "input_mode": {
-          "enum": ["reference-guided", "prompt-only", "pet-and-prompt"]
+          "enum": ["reference-guided", "prompt-only", "pet-and-prompt", "empty-canvas"]
         },
         "parameters": {
           "type": "object",
@@ -68,5 +74,36 @@
         "version": {"type": "string"}
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "generation": {
+            "type": "object",
+            "properties": {"input_mode": {"const": "empty-canvas"}},
+            "required": ["input_mode"]
+          }
+        },
+        "required": ["generation"]
+      },
+      "then": {
+        "properties": {
+          "kind": {"const": "art"},
+          "inputs": {
+            "properties": {"references": {"maxItems": 0}},
+            "not": {"required": ["prompt"]}
+          },
+          "generation": {
+            "properties": {
+              "provider": {"const": "local"},
+              "model": {"const": "deterministic-empty-canvas-v1"},
+              "transport": {"const": "local.empty-canvas"}
+            },
+            "required": ["provider", "model", "transport", "input_mode", "parameters"]
+          }
+        }
+      }
+    }
+  ]
 }

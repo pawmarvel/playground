@@ -382,13 +382,16 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("prompts must identify exactly the art and pet prompt assets")
     art_prompt_name = prompts.get("art_template")
     pet_prompt_name = prompts.get("pet_transform")
-    if not isinstance(art_prompt_name, str) or not isinstance(pet_prompt_name, str):
-        raise BundleError("prompt paths must be strings")
-    art_match = re.fullmatch(r"art-template-(gpt|gemini)\.md", art_prompt_name)
-    if art_match is None:
-        raise BundleError("art template prompt has an invalid provider-qualified path")
-    art_provider = "openai" if art_match.group(1) == "gpt" else "gemini"
-    prompt_contract(root / art_prompt_name, "art-template", art_provider)
+    if art_prompt_name is not None:
+        if not isinstance(art_prompt_name, str):
+            raise BundleError("prompts.art_template must be a string or null")
+        art_match = re.fullmatch(r"art-template-(gpt|gemini)\.md", art_prompt_name)
+        if art_match is None:
+            raise BundleError("art template prompt has an invalid provider-qualified path")
+        art_provider = "openai" if art_match.group(1) == "gpt" else "gemini"
+        prompt_contract(root / art_prompt_name, "art-template", art_provider)
+    if not isinstance(pet_prompt_name, str):
+        raise BundleError("prompts.pet_transform must be a string")
     prompt_contract(root / pet_prompt_name, "pet-transform", str(provider))
     if runtime.get("prompt") != pet_prompt_name:
         raise BundleError(
@@ -692,7 +695,6 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         "print/art.png",
         "layout.json",
         "layout-print.json",
-        art_prompt_name,
         pet_prompt_name,
         *refs,
         "qa/transformed-pet.png",
@@ -700,6 +702,8 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         "qa/golden-preview.png",
         "qa/golden-preview-debug.png",
     }
+    if art_prompt_name is not None:
+        required_assets.add(art_prompt_name)
     if preview.has_name:
         assert preview.font_relative is not None
         required_assets.update(
@@ -937,7 +941,14 @@ def build_from_selection(
         (art_experiment, art_meta),
         (pet_experiment, pet_meta),
     ):
-        for label in ("prompt", "product_profile"):
+        generation_contract = metadata.get("generation")
+        labels = ["product_profile"]
+        if not (
+            isinstance(generation_contract, dict)
+            and generation_contract.get("input_mode") == "empty-canvas"
+        ):
+            labels.append("prompt")
+        for label in labels:
             descriptor = metadata.get("inputs", {}).get(label)
             if not isinstance(descriptor, dict):
                 raise BundleError(f"selected experiment is missing {label} input")
@@ -1405,11 +1416,31 @@ def build_from_selection(
             raise BundleError(
                 "selected art and pet experiments require generation contracts"
             )
-        art_prompt, art_prompt_name = authoring_prompt_contract(
-            art_experiment / str(art_meta["inputs"]["prompt"]["path"]),
-            "art-template",
-            str(art_generation.get("provider")),
-        )
+        if art_generation.get("input_mode") == "empty-canvas":
+            expected_empty_art = {
+                "provider": "local",
+                "model": "deterministic-empty-canvas-v1",
+                "transport": "local.empty-canvas",
+            }
+            actual_empty_art = {
+                key: art_generation.get(key) for key in expected_empty_art
+            }
+            if actual_empty_art != expected_empty_art:
+                raise BundleError(
+                    mismatch(
+                        "selected empty-canvas art generation contract",
+                        expected=expected_empty_art,
+                        actual=actual_empty_art,
+                    )
+                )
+        art_prompt: Path | None = None
+        art_prompt_name: str | None = None
+        if art_generation.get("input_mode") != "empty-canvas":
+            art_prompt, art_prompt_name = authoring_prompt_contract(
+                art_experiment / str(art_meta["inputs"]["prompt"]["path"]),
+                "art-template",
+                str(art_generation.get("provider")),
+            )
         pet_prompt, pet_prompt_name = authoring_prompt_contract(
             pet_experiment / str(pet_meta["inputs"]["prompt"]["path"]),
             "pet-transform",
@@ -1447,7 +1478,8 @@ def build_from_selection(
         except OSError as exc:
             raise BundleError(f"QA input pet is not a readable image: {qa_input_pet}") from exc
         shutil.copyfile(profile_path, partial / "product-profile.json")
-        shutil.copyfile(art_prompt, partial / art_prompt_name)
+        if art_prompt is not None and art_prompt_name is not None:
+            shutil.copyfile(art_prompt, partial / art_prompt_name)
         shutil.copyfile(pet_prompt, partial / pet_prompt_name)
         if preview_layout.has_name:
             assert preview_layout.font_path is not None and font_license is not None

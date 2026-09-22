@@ -158,6 +158,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     create.add_argument("--prompt-file", type=_path_argument)
     create.add_argument(
+        "--empty-canvas",
+        action="store_true",
+        help=(
+            "create a deterministic all-zero transparent art experiment; "
+            "valid only with --kind art and incompatible with prompts, "
+            "providers, and models; reference designs are retained only as "
+            "layout evidence and are never sent to canvas generation"
+        ),
+    )
+    create.add_argument(
         "--pet-name",
         help=(
             "optional default value for {{PET_NAME}} in a pet experiment; "
@@ -397,6 +407,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 authoring_root=args.authoring_root,
                 references=args.reference_design,
                 prompt_file=args.prompt_file,
+                empty_canvas=args.empty_canvas,
                 pet_name=args.pet_name,
                 provider=args.provider,
                 model=args.model,

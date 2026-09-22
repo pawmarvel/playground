@@ -259,6 +259,76 @@ class CliTests(unittest.TestCase):
         )
         self.assertNotIn("image", client.images.kwargs)
 
+    def test_empty_canvas_creates_all_zero_rgba_png_without_api(self) -> None:
+        output_dir = self.root / "empty-output"
+        args = build_parser().parse_args(
+            [
+                "--empty-canvas",
+                "--size",
+                "321x123",
+                "--output-dir",
+                str(output_dir),
+                "--output-name",
+                "art.png",
+            ]
+        )
+        client = FakeClient()
+
+        output = generate(args, client=client)
+
+        self.assertEqual(output, output_dir.resolve() / "art.png")
+        self.assertEqual(client.images.call_count, 0)
+        with Image.open(output) as image:
+            self.assertEqual(image.mode, "RGBA")
+            self.assertEqual(image.size, (321, 123))
+            self.assertEqual(image.getextrema(), ((0, 0),) * 4)
+
+    def test_empty_canvas_uses_product_profile_art_size(self) -> None:
+        profile = write_product_profile(
+            self.root / "product-profile.json",
+            create_product_profile(
+                profile_id="blanket-king-9375x12375",
+                print_size=ImageSize(9375, 12375),
+            ),
+        )
+        args = build_parser().parse_args(
+            [
+                "--empty-canvas",
+                "--product-profile",
+                str(profile),
+                "--profile-layer",
+                "art",
+                "--output-dir",
+                str(self.root / "empty-output"),
+            ]
+        )
+
+        output = generate(args, client=FakeClient())
+
+        with Image.open(output) as image:
+            self.assertEqual(image.size, (800, 1056))
+            self.assertEqual(image.getextrema(), ((0, 0),) * 4)
+
+    def test_empty_canvas_rejects_generation_inputs_and_implicit_size(self) -> None:
+        with self.assertRaisesRegex(UserInputError, "requires --size"):
+            generate(
+                build_parser().parse_args(["--empty-canvas"]),
+                client=FakeClient(),
+            )
+        with self.assertRaisesRegex(UserInputError, "cannot be combined"):
+            generate(
+                build_parser().parse_args(
+                    [
+                        "--empty-canvas",
+                        "--size",
+                        "100x100",
+                        "--prompt-file",
+                        str(self.prompt),
+                    ]
+                ),
+                client=FakeClient(),
+            )
+
     def test_gemini_prompt_only_uses_text_input(self) -> None:
         gemini_key = self.root / "GEMINI_API_KEY.txt"
         gemini_key.write_text("test-gemini-key", encoding="utf-8")

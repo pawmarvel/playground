@@ -77,6 +77,7 @@ def _design_template(
         "export PAWMARVEL_PET_NAME_MAX_LENGTH='12'",
         "",
         "# Default experiment configuration",
+        "export PAWMARVEL_ART_TEMPLATE_MODE='generated'  # generated | empty-canvas",
         "export PAWMARVEL_ART_PROVIDER='openai'",
         "export PAWMARVEL_ART_MODEL='gpt-image-2'",
         "export PAWMARVEL_ART_QUALITY='high'",

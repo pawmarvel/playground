@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PIL import Image
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 
 from helpers import copy_font, layout_data, make_image, make_transparent_mark
 from pawmarvel_generator.artifact_io import sha256
@@ -895,6 +895,124 @@ class AuthoringLifecycleTests(unittest.TestCase):
         self.assertEqual(record["status"], "succeeded")
         self.assertEqual(record["outputs"][0]["path"], "outputs/art.png")
         self.assertNotIn("experiment_path", record)
+
+    def test_empty_canvas_art_experiment_runs_locally_and_records_contract(self) -> None:
+        experiment = create_experiment(
+            kind="art",
+            experiment_id="art-empty-v01",
+            design_id="life-is-good",
+            product_profile=self.profile,
+            authoring_root=self.authoring,
+            references=[self.reference],
+            prompt_file=None,
+            provider=None,
+            model=None,
+            quality="high",
+            art_attempt=None,
+            pet_attempt=None,
+            font_catalogs=[],
+            parent_experiment_id=None,
+            base_bundle_revision=None,
+            created_by="test",
+            empty_canvas=True,
+        )
+
+        attempt = run_attempt(
+            experiment=experiment,
+            attempt_id="attempt-0001",
+            pet_image=None,
+        )
+
+        metadata = json.loads(
+            (experiment / "experiment.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(metadata["generation"]["provider"], "local")
+        self.assertEqual(metadata["generation"]["input_mode"], "empty-canvas")
+        self.assertEqual(metadata["inputs"]["references"], [])
+        self.assertEqual(len(metadata["inputs"]["layout_references"]), 1)
+        self.assertEqual(
+            metadata["inputs"]["layout_references"][0]["role"],
+            "finished_design_layout_evidence",
+        )
+        self.assertNotIn("prompt", metadata["inputs"])
+        with Image.open(attempt / "outputs" / "art.png") as image:
+            self.assertEqual(image.mode, "RGBA")
+            self.assertEqual(image.size, (672, 1008))
+            self.assertEqual(image.getextrema(), ((0, 0),) * 4)
+        self._validate_schema(experiment / "experiment.json", "experiment-v1.schema.json")
+
+        invalid = dict(metadata)
+        invalid["generation"] = dict(metadata["generation"])
+        invalid["generation"]["provider"] = "openai"
+        schema = json.loads(
+            (
+                Path(__file__).resolve().parents[1]
+                / "schemas"
+                / "experiment-v1.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        with self.assertRaises(ValidationError):
+            Draft202012Validator(schema).validate(invalid)
+
+        pet_experiment = self._experiment(
+            "pet", "pet-for-empty-v01", self.pet_prompt
+        )
+        pet_attempt = self._fake_attempt(
+            pet_experiment,
+            "attempt-0001",
+            "transformed-pet.png",
+            (816, 816),
+            pet_source=self.pet,
+        )
+        layout_experiment = create_experiment(
+            kind="layout",
+            experiment_id="layout-for-empty-v01",
+            design_id="life-is-good",
+            product_profile=self.profile,
+            authoring_root=self.authoring,
+            references=[],
+            prompt_file=None,
+            provider=None,
+            model=None,
+            quality="high",
+            art_attempt=attempt,
+            pet_attempt=pet_attempt,
+            font_catalogs=[],
+            parent_experiment_id=None,
+            base_bundle_revision=None,
+            created_by="test",
+        )
+        layout_metadata = json.loads(
+            (layout_experiment / "experiment.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            layout_metadata["inputs"]["reference_mode"], "finished-design"
+        )
+        self.assertTrue(
+            (layout_experiment / "inputs" / "reference-design.png").is_file()
+        )
+
+    def test_empty_canvas_art_experiment_rejects_ai_inputs(self) -> None:
+        with self.assertRaisesRegex(AuthoringError, "cannot be combined"):
+            create_experiment(
+                kind="art",
+                experiment_id="art-empty-v01",
+                design_id="life-is-good",
+                product_profile=self.profile,
+                authoring_root=self.authoring,
+                references=[],
+                prompt_file=self.art_prompt,
+                provider="openai",
+                model="gpt-image-2",
+                quality="high",
+                art_attempt=None,
+                pet_attempt=None,
+                font_catalogs=[],
+                parent_experiment_id=None,
+                base_bundle_revision=None,
+                created_by="test",
+                empty_canvas=True,
+            )
 
     def test_real_pet_attempt_runs_generation_adapter_and_records_input(self) -> None:
         self.pet_prompt.write_text(

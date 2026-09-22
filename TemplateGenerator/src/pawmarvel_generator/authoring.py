@@ -289,6 +289,7 @@ def create_experiment(
     created_by: str, font_reference: Path | None = None,
     layout_reference: Path | None = None,
     pet_name: str | None = None,
+    empty_canvas: bool = False,
 ) -> Path:
     if kind not in KINDS:
         raise AuthoringError(f"kind must be one of: {', '.join(sorted(KINDS))}")
@@ -331,7 +332,46 @@ def create_experiment(
             pet_name = pet_name.strip()
             if not pet_name:
                 raise AuthoringError("--pet-name must not be empty")
-        if kind in {"art", "pet"}:
+        if empty_canvas and kind != "art":
+            raise AuthoringError("--empty-canvas is valid only for an art experiment")
+        if empty_canvas:
+            incompatible = {
+                "--prompt-file": prompt_file,
+                "--provider": provider,
+                "--model": model,
+            }
+            supplied = [option for option, value in incompatible.items() if value]
+            if supplied:
+                raise AuthoringError(
+                    "--empty-canvas cannot be combined with " + ", ".join(supplied)
+                )
+            if len(references) > 4:
+                raise AuthoringError(
+                    "empty-canvas art experiments accept at most four ordered "
+                    "finished-design references as layout evidence"
+                )
+            layout_reference_info = []
+            for index, reference in enumerate(references, 1):
+                suffix = reference.suffix.lower() or ".png"
+                target = inputs / f"layout-reference-design-{index:04d}{suffix}"
+                copied = _copy(reference, target)
+                copied["role"] = "finished_design_layout_evidence"
+                layout_reference_info.append(copied)
+            record_inputs.update(
+                references=[],
+                layout_references=layout_reference_info,
+            )
+            generation = {
+                "provider": "local",
+                "model": "deterministic-empty-canvas-v1",
+                "transport": "local.empty-canvas",
+                "input_mode": "empty-canvas",
+                "parameters": {
+                    "output_format": "png",
+                    "background": "transparent",
+                },
+            }
+        elif kind in {"art", "pet"}:
             if not prompt_file or not provider or not model:
                 raise AuthoringError(
                     f"{kind} experiment requires prompt, provider, and model"
@@ -422,10 +462,20 @@ def create_experiment(
                     "sha256": sha256(pet_attempt / "run.json"),
                 },
             )
-            art_experiment, _ = _attempt_experiment(
+            art_experiment, art_metadata = _attempt_experiment(
                 art_attempt, art_run, expected_kind="art"
             )
-            refs = sorted((art_experiment / "inputs").glob("reference-design-*"))
+            reference_descriptors = art_metadata.get("inputs", {}).get(
+                "references", []
+            )
+            if not reference_descriptors:
+                reference_descriptors = art_metadata.get("inputs", {}).get(
+                    "layout_references", []
+                )
+            refs = [
+                _relative_input(art_experiment, descriptor)
+                for descriptor in reference_descriptors
+            ]
             if refs:
                 record_inputs["reference"] = _copy(
                     refs[0], inputs / "reference-design.png"
@@ -511,6 +561,19 @@ def _run_generation(
     inputs = meta["inputs"]
     generation = meta["generation"]
     output_name = "art.png" if kind == "art" else "transformed-pet.png"
+    if generation.get("input_mode") == "empty-canvas":
+        args = [
+            "--empty-canvas",
+            "--output-dir", str(stage / "outputs"),
+            "--output-name", output_name,
+            "--product-profile", str(
+                _relative_input(experiment, inputs["product_profile"])
+            ),
+            "--profile-layer", "art",
+            "--output-format", "png",
+        ]
+        generate(build_generate_parser().parse_args(args))
+        return
     args = [
         "--provider", str(generation["provider"]), "--model", str(generation["model"]),
         "--prompt-file", str(_relative_input(experiment, inputs["prompt"])),

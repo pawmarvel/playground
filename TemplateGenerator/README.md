@@ -128,6 +128,20 @@ canvas without exposing the model to a finished-design screenshot:
 
 Prompt-only mode defaults the output filename to the prompt-file stem when
 `--output-name` is omitted.
+For a truly empty background template, use the local deterministic mode rather
+than an image prompt:
+
+```bash
+.venv/bin/pawmarvel-generate \
+  --empty-canvas \
+  --size 800x1056 \
+  --output-dir work/scratch/template \
+  --output-name art.png
+```
+
+It writes an all-zero transparent RGBA PNG without a provider call. Immutable
+authoring exposes the same behavior through `pawmarvel-author
+create-experiment --kind art --empty-canvas`.
 It can instead reuse `--transformed-pet` with an explicit `--layout`, which is
 the no-generation path used to inspect a prepared print bundle.
 For the full authoring flow, `pawmarvel-author init-shared-config` creates the
@@ -200,11 +214,12 @@ cannot be guaranteed because its image model does not support transparent
 background output. A Gemini result that uses its permitted flat-white fallback
 requires a separate background-removal/matting step before it satisfies the
 bundle alpha contract. Working directories and
-published bundles do not carry customer source data. Each bundle carries its
-selected `art-template-{gpt|gemini}.md` and the MVP production
-`pet-transform-gpt.md` contract file without removing the art provider
-category; `bundle.json` identifies both paths, exact runtime request fields, and
-an operator-reviewed, non-customer QA replay input/output pair.
+published bundles do not carry customer source data. Each bundle carries the
+MVP production `pet-transform-gpt.md` contract. Generated-art bundles also
+carry their selected `art-template-{gpt|gemini}.md`; deterministic empty-canvas
+bundles declare `prompts.art_template: null`. `bundle.json` identifies the
+declared prompt paths, exact runtime request fields, and an operator-reviewed,
+non-customer QA replay input/output pair.
 
 The layout editor compares the checked-in curated OFL catalog with lettering in
 the reference. The catalog is the default when neither `--font` nor

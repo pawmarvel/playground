@@ -95,13 +95,13 @@
       "additionalProperties": false,
       "required": ["art_template", "pet_transform"],
       "properties": {
-        "art_template": {"type": "string", "pattern": "^art-template-(gpt|gemini)\\.md$"},
+        "art_template": {"type": ["string", "null"], "pattern": "^art-template-(gpt|gemini)\\.md$"},
         "pet_transform": {"type": "string", "pattern": "^pet-transform-(gpt|gemini)\\.md$"}
       }
     },
     "assets": {
       "type": "array",
-      "minItems": 11,
+      "minItems": 10,
       "maxItems": 19,
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/asset"}

@@ -3,7 +3,8 @@
 This guide starts with the supported immutable development flow:
 
 ```text
-art prompt + art.png -> art evaluation + decision
+generated art prompt or deterministic empty canvas + art.png
+        -> art evaluation + decision
         -> pet-transform candidates -> pet evaluation + decision
         -> layout/font -> layout and assembly evaluations + decisions
         -> print upscale/finalist
@@ -21,7 +22,8 @@ For a brand-new design, follow sections 2 through 9 in order. The shortest
 supported path is:
 
 1. configure private inputs and an ordered reference set (the default), or
-   deliberately select the documented no-reference variant;
+   deliberately select the documented prompt-only/no-reference or deterministic
+   empty-canvas variant;
 2. tune art in disposable scratch, then record one immutable art candidate;
 3. tune the pet prompt against one pet, then run smoke and release fixtures;
 4. author one layout against the selected art and a successful release fixture;
@@ -60,7 +62,7 @@ comparison tooling.
 
 ```mermaid
 flowchart TD
-    A[Choose design inputs and product profile] --> B[Iterate art prompt and art attempts]
+    A[Choose design inputs and product profile] --> B[Generate art or deterministic empty-canvas attempt]
     B --> C{Art accepted?}
     C -- no --> B
     C -- yes --> D[Iterate pet prompt/model with fixed pet fixtures]
@@ -169,7 +171,10 @@ only when intentionally writing the private workspace under another checkout.
 The generated design paths point to
 `work/design-inputs/<design-id>/`, not directly to checked-in examples. Before
 creating a config, copy the primary reference and the prompt files required by
-the chosen providers into that private source folder. Copy optional
+the chosen providers into that private source folder. An empty-canvas art
+template is the one exception: it has no art prompt, provider, or API call, so
+set `PAWMARVEL_ART_TEMPLATE_MODE='empty-canvas'` and only provide the pet prompt.
+Copy optional
 `font-reference.json` and `layout-reference.json` only when they are valid for
 the design. Missing optional references are exported as empty values instead
 of invalid paths. For a private production design, copy its approved source
@@ -328,10 +333,17 @@ generated art, pet, and layout attempts available for reruns without an S3
 round trip. For valuable long-running work, the same variables may point to a
 private backed-up POSIX location outside Git. Do not point them at S3.
 
-Validate the loaded configuration before any paid call:
+Validate the loaded configuration before any paid call. The generated config
+defaults `PAWMARVEL_ART_TEMPLATE_MODE` to `generated`; keep that value for both
+reference-guided and prompt-only art. Change it to `empty-canvas` only when the
+permanent reusable background must be a fully transparent all-zero canvas.
 
 ```bash
-test -f "$PAWMARVEL_ART_PROMPT"
+case "$PAWMARVEL_ART_TEMPLATE_MODE" in
+  generated) test -f "$PAWMARVEL_ART_PROMPT" ;;
+  empty-canvas) : ;;
+  *) printf 'error: PAWMARVEL_ART_TEMPLATE_MODE must be generated or empty-canvas\n' >&2; return 2 2>/dev/null || exit 2 ;;
+esac
 test -f "$PAWMARVEL_PET_PROMPT"
 test -f "$PAWMARVEL_PET"
 test -f "$PAWMARVEL_PROFILE"
@@ -354,9 +366,9 @@ fi
   --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET"
 test -z "${PAWMARVEL_FONT_REFERENCE:-}" || test -f "$PAWMARVEL_FONT_REFERENCE"
 test -z "${PAWMARVEL_LAYOUT_REFERENCE:-}" || test -f "$PAWMARVEL_LAYOUT_REFERENCE"
-test "$PAWMARVEL_ART_PROVIDER" != openai || test -n "${OPENAI_API_KEY:-}"
+test "$PAWMARVEL_ART_TEMPLATE_MODE" = empty-canvas || test "$PAWMARVEL_ART_PROVIDER" != openai || test -n "${OPENAI_API_KEY:-}"
 test "$PAWMARVEL_PET_PROVIDER" != openai || test -n "${OPENAI_API_KEY:-}"
-test "$PAWMARVEL_ART_PROVIDER" != gemini || test -n "${GEMINI_API_KEY:-}"
+test "$PAWMARVEL_ART_TEMPLATE_MODE" = empty-canvas || test "$PAWMARVEL_ART_PROVIDER" != gemini || test -n "${GEMINI_API_KEY:-}"
 test "$PAWMARVEL_PET_PROVIDER" != gemini || test -n "${GEMINI_API_KEY:-}"
 test "$PAWMARVEL_UPSCALE_BACKEND" != bria || test -n "${BRIA_API_TOKEN:-}"
 ```
@@ -398,13 +410,14 @@ name layer**: keep `reference-design.png`, build the ordered reference array,
 use the section 6.1 pet-only prompt, and save a layout with both pet and name
 regions. Sections 5 through 9 can then be followed exactly as written.
 
-Two alternatives are also complete E2E contracts, not partial debug modes:
+Three alternatives are also complete E2E contracts, not partial debug modes:
 
 | Variant | References | Pet prompt | Saved layout | Bundle contract |
 | --- | --- | --- | --- | --- |
 | Default | One to four | No `{{PET_NAME}}` | Pet + name regions | Reference assets, `name_mode: layout-text`, OFL font |
 | No personalized name | Zero to four | No `{{PET_NAME}}` | Pet region only | `name_mode: none`, no name policy/font |
-| No reference image | Zero | Fully specifies target pet treatment | Pet region, plus optional name region | No reference files; runtime input order is only `user_pet` |
+| No reference image, prompt-only art | Zero | Fully specifies target pet treatment | Pet region, plus optional name region | No reference files; generated art prompt retained; runtime input order is only `user_pet` |
+| Empty transparent art | Zero to four as pet/layout evidence; never sent to canvas generation | Normal pet prompt for the chosen reference mode | Pet region, plus optional name region | Deterministic all-zero `art.png`; `prompts.art_template: null` |
 
 The no-reference variant may use either `layout-text` or `none`. Set
 `PAWMARVEL_SAMPLE=""`, leave `reference-designs/` empty, and keep the two
@@ -415,6 +428,17 @@ pet-plus-prompt command in section 6. The immutable art experiment records
 release, and S3 commands are unchanged. The layout editor uses generated
 `art.png` as its canvas and still lets the operator place the pet and optional
 name regions manually.
+
+The empty-transparent-art variant is independent of pet reference mode. Set
+`PAWMARVEL_ART_TEMPLATE_MODE='empty-canvas'`; section 5 then creates the art
+locally and deliberately passes no prompt or reference to the canvas generator.
+The experiment may snapshot the ordered references as layout evidence, but its
+local canvas generator never receives them. Section 6 still uses the configured
+pet prompt and the ordered reference array:
+it may be reference-guided, or it may be pet-plus-prompt when the array is
+empty. Sections 7 through 9 are unchanged. Do not set
+`PAWMARVEL_SAMPLE=""` merely because the background is empty if the finished
+design references are still required to guide pet transformation.
 
 For a product with no personalized name anywhere, follow section 6.3 before
 layout authoring. Do not confuse it with section 6.2: `embedded-in-pet` still
@@ -431,7 +455,7 @@ work/design-inputs/cooper/
   reference-designs/                  # optional; valid only with a primary
     01-reference-design.png
     02-reference-design.png
-  art-template-gpt.md
+  art-template-gpt.md                 # required for generated art; absent for empty-canvas art
   pet-transform-gpt.md
   font-reference.json                 # optional
   layout-reference.json               # optional
@@ -466,6 +490,11 @@ work/authoring/cooper/blanket-king-9375x12375/
       attempts/
         attempt-0001/{run.json,outputs/,qa/}
         attempt-0002/{run.json,outputs/,qa/}
+    art/art-empty-v01/                # alternative deterministic empty-canvas experiment
+      experiment.json
+      inputs/                         # profile plus optional layout evidence; no art prompt
+      attempts/
+        attempt-0001/{run.json,outputs/art.png,qa/}
     art/art-gpt-v02/                  # optional later prompt/configuration improvement
       experiment.json
       inputs/
@@ -552,7 +581,7 @@ these variables instead of reconstructing paths by hand.
 | Print finalist | Hash-bound print candidate and target-resolution render | Accepted low-resolution candidates |
 | Bundle graduation | Selection, immutable bundle revision, release entry | Nothing is rewritten; later improvement creates a new revision |
 
-## 5. Iterate the art prompt and `art.png`
+## 5. Develop generated or empty-canvas `art.png`
 
 Use experiments and attempts for different purposes:
 
@@ -561,6 +590,7 @@ Use experiments and attempts for different purposes:
 | Does a different prompt produce better fixed artwork? | Prompt file | New art experiment |
 | Is `high` visibly better enough to justify its latency/cost versus `low`? | `--quality` | New art experiment using the same prompt |
 | Is one exact prompt/model/quality configuration reliable? | Nothing | Multiple attempts in that experiment |
+| Does this product require no reusable fixed art at all? | Select `empty-canvas` once | One deterministic art experiment and attempt |
 
 For a clean comparison, change one variable between parent and child
 experiments. Two preview attempts per candidate are a useful screening
@@ -578,7 +608,7 @@ immutable layout dependency.
 For a brand-new design, this is intentionally an art-only workflow. A pet
 transformation and layout do not exist yet and are not prerequisites. Never
 pass a user pet to the art-generation request: reusable `art.png` must remain
-pet- and name-free. Each prompt iteration still makes one paid art call, but it
+pet- and name-free. Each generated-art prompt iteration makes one paid art call, but it
 avoids creating experiments and repeated stability attempts for an obviously
 unsatisfactory design.
 
@@ -589,19 +619,28 @@ comparing prompt revisions:
 | --- | --- | --- |
 | Preserve or reconstruct fixed artwork from a finished design | Ordered `PAWMARVEL_REFERENCE_ARGS` | Reference-guided image edit |
 | Create artwork entirely from its written specification | None | Prompt-only image generation |
-| Create a simple transparent canvas with no inherited design elements | None | Prompt-only image generation |
+| Create a true empty transparent canvas | None | Deterministic local generation; no prompt or API |
 
-The loaded design input decides the mode. When
-`PAWMARVEL_DESIGN_REFERENCE_MODE=none`, always use the prompt-only art command;
-do not run the reference-guided command and do not add a temporary reference.
-When the mode is `ordered`, use the reference-guided command unless the
-experiment is deliberately testing removal of all reference influence as a
-separate scratch hypothesis.
+`PAWMARVEL_ART_TEMPLATE_MODE` decides whether art is generated or empty. When
+it is `empty-canvas`, use only the deterministic command below; references may
+still remain configured for section 6 pet transformation. When it is
+`generated`, the loaded design input selects the API mode:
+`PAWMARVEL_DESIGN_REFERENCE_MODE=none` uses prompt-only art, while `ordered`
+uses reference-guided art.
 
 Do not pass a blank `--reference-design` value or a placeholder image for the
 prompt-only scenarios. Omit the option completely. In both modes keep the
 provider, model, quality, product profile, and output dimensions fixed while
 editing the prompt; otherwise one iteration changes more than the prompt.
+
+Initialize the shared scratch paths once:
+
+```bash
+PAWMARVEL_ART_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/art-prompt-tuning"
+PAWMARVEL_ART_SCRATCH_TEMPLATE="$PAWMARVEL_ART_SCRATCH/template"
+PAWMARVEL_ART_SCRATCH_PROMPT="$PAWMARVEL_ART_SCRATCH/art-template-draft-gpt.md"
+mkdir -p "$PAWMARVEL_ART_SCRATCH_TEMPLATE"
+```
 
 #### Reference-guided art scratch
 
@@ -609,11 +648,6 @@ Use this path when `art.png` must retain any fixed typography, motifs, colors,
 texture, or composition from the finished-design references.
 
 ```bash
-PAWMARVEL_ART_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/art-prompt-tuning"
-PAWMARVEL_ART_SCRATCH_TEMPLATE="$PAWMARVEL_ART_SCRATCH/template"
-PAWMARVEL_ART_SCRATCH_PROMPT="$PAWMARVEL_ART_SCRATCH/art-template-draft-gpt.md"
-
-mkdir -p "$PAWMARVEL_ART_SCRATCH_TEMPLATE"
 cp "$PAWMARVEL_ART_PROMPT" "$PAWMARVEL_ART_SCRATCH_PROMPT"
 
 # Repeat this edit-and-generate pair. --force replaces the prior scratch art.
@@ -634,24 +668,51 @@ cp "$PAWMARVEL_ART_PROMPT" "$PAWMARVEL_ART_SCRATCH_PROMPT"
   --force
 ```
 
-#### Prompt-only transparent art scratch
+#### Deterministic empty-canvas art scratch
 
-Use this path when the desired reusable art can be described without showing
-the model a finished-design screenshot. It is especially useful when
-`art.png` should be a simple transparent canvas that inherits no pet, text,
-shadow, motif, or other element from the example design.
+Use this path only when `PAWMARVEL_ART_TEMPLATE_MODE=empty-canvas`. The local
+mode reads the same profile-owned art
+dimensions, makes no API call, and guarantees that all four channels of every
+pixel are zero:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
+  --empty-canvas \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  --profile-layer art \
+  --output-dir "$PAWMARVEL_ART_SCRATCH_TEMPLATE" \
+  --output-name art.png \
+  --force
+```
+
+For a standalone resolution instead of a product profile, replace the two
+profile options with an explicit dimension such as `--size 800x1056`. Empty
+canvas mode requires PNG, accepts no prompt, pet, reference, or API-key input,
+and writes an RGBA `(0, 0, 0, 0)` canvas atomically. Use `--dry-run` to inspect
+the resolved output and dimensions without writing the file.
+
+Run the all-zero verification command below once. There is no prompt to tune
+and no reason to generate repeated scratch outputs.
+
+#### Prompt-only generated art scratch
+
+Use this separate path when `PAWMARVEL_ART_TEMPLATE_MODE=generated` and
+`PAWMARVEL_DESIGN_REFERENCE_MODE=none`. It remains useful when the desired art
+contains visible prompt-defined decoration. It must not be substituted for the
+deterministic empty-canvas path because stochastic output can retain faint or
+hidden pixels.
 
 Edit the scratch prompt so it describes only the requested output. Do not leave
 instructions such as “remove the pet from IMAGE A” or “match the reference” in
-a prompt-only file because no IMAGE A exists. For a deliberately empty
-transparent canvas, the prompt can be as small as:
+a prompt-only file because no IMAGE A exists. A minimal visible-decoration
+prompt might be:
 
 ```text
 BACKGROUND = TRANSPARENT
 
-Return one PNG canvas at the requested dimensions. Keep the entire canvas
-transparent. Draw no pet, name, text, shadow, motif, border, texture, mockup,
-checkerboard, or other visible element.
+Return one PNG canvas at the requested dimensions. Draw only the reusable
+fixed border and corner motifs described below. Draw no pet, personalized
+name, shadow, mockup, garment, or placeholder animal.
 ```
 
 Run the same scratch loop without `"${PAWMARVEL_REFERENCE_ARGS[@]}"`. No
@@ -680,17 +741,17 @@ is requested. The CLI prints `operation: generation` and
 the diagnostic output.
 
 Alpha-channel validation alone does not prove that every pixel is transparent.
-For an intentionally empty canvas, run this local check after every iteration:
+For the deterministic empty-canvas result, run this local contract check:
 
 ```bash
 "$PAWMARVEL_PROJECT/.venv/bin/python" -c \
-  'from pathlib import Path; from PIL import Image; p=Path("'"$PAWMARVEL_ART_SCRATCH_TEMPLATE"'/art.png"); im=Image.open(p).convert("RGBA"); assert im.getchannel("A").getbbox() is None, f"visible pixels remain in {p}"; print(f"fully transparent: {p} ({im.width}x{im.height})")'
+  'import sys; from pathlib import Path; from PIL import Image; p=Path(sys.argv[1]); im=Image.open(p).convert("RGBA"); assert im.getextrema() == ((0, 0),) * 4, f"non-zero RGBA pixels remain in {p}"; print(f"all-zero RGBA: {p} ({im.width}x{im.height})")' \
+  "$PAWMARVEL_ART_SCRATCH_TEMPLATE/art.png"
 ```
 
-If this check fails, inspect the image for faint pixels and tighten the prompt
-before retrying. Image generation is stochastic; when the permanent product
-requirement is literally an empty transparent canvas, a deterministic RGBA
-canvas generator is more reliable and cheaper than repeated AI calls.
+If this check fails, do not proceed; the local deterministic contract has been
+violated. Prompt-only API output is not required to pass an all-zero check
+because it intentionally contains visible fixed artwork.
 
 Prompt-only generation is supported by both disposable scratch and immutable
 authoring experiments. Keep `PAWMARVEL_REFERENCE_ARGS` empty when promoting a
@@ -698,6 +759,13 @@ prompt-only candidate. The experiment records `references: []`,
 `input_mode: prompt-only`, and OpenAI transport `images.generations`; adding a
 reference later is a different experiment because it changes the request and
 the generation behavior.
+
+Deterministic empty-canvas generation is also supported by immutable authoring,
+but it is a distinct experiment type. It records `provider: local`,
+`transport: local.empty-canvas`, `input_mode: empty-canvas`, no generation
+references, and no prompt. Optional finished-design references are snapshotted
+separately as layout evidence. The immutable command below regenerates and revalidates the canvas;
+never copy the scratch PNG into an experiment.
 
 First inspect `template/art.png` by itself. It must contain all reusable fixed
 artwork but no example pet, personalized name, mockup, garment, or placeholder
@@ -711,11 +779,13 @@ sections 6 and 7 produce transformed-pet and layout candidates, section 10.1
 provides the optional composition-aware scratch loop used for later design
 improvements and preview feedback.
 
-When an art-only result is satisfactory, promote only the
-prompt text. The scratch art is disposable. The immutable experiment must
-regenerate `art.png`, and the real layout remains a later product of the
-selected immutable art and pet attempts. The same promotion block works in
-both modes because the reference array expands to zero arguments when absent.
+When generated art is satisfactory, promote only the prompt text. The scratch
+art is disposable. The immutable experiment must regenerate `art.png`, and the
+real layout remains a later product of the selected immutable art and pet
+attempts. The generated-art promotion block works for both reference-guided
+and prompt-only modes because the reference array expands to zero arguments
+when absent. If `PAWMARVEL_ART_TEMPLATE_MODE=empty-canvas`, skip this prompt
+copy and the generated-art experiment block; use the empty-canvas block below.
 
 ```bash
 mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
@@ -730,8 +800,9 @@ attempts as its smoke/stability screen; section 6 then validates the pet runtime
 across the fixture benchmark. This separation prevents pet variability from
 being misreported as art-generation reliability.
 
-Create the first art experiment. `create-experiment` snapshots the exact
-product profile and prompt plus zero or more ordered reference images.
+For `PAWMARVEL_ART_TEMPLATE_MODE=generated`, create the first art experiment.
+`create-experiment` snapshots the exact product profile and prompt plus zero or
+more ordered reference images.
 
 ```bash
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
@@ -764,16 +835,51 @@ PAWMARVEL_ART_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/art/art-gpt-v
   --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
 ```
 
+For `PAWMARVEL_ART_TEMPLATE_MODE=empty-canvas`, run this block **instead of**
+the generated-art promotion and experiment commands above. It snapshots the
+product profile and any ordered references as layout-only evidence, creates one
+deterministic immutable attempt, and verifies that attempt through the normal
+art review. Those references are not sent to canvas generation. A second
+stability attempt would be byte-identical and adds no evidence.
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
+  --kind art \
+  --experiment-id art-empty-v01 \
+  --design-id "$PAWMARVEL_DESIGN_ID" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
+  --empty-canvas \
+  --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
+
+PAWMARVEL_ART_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/art/art-empty-v01"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
+  --experiment "$PAWMARVEL_ART_EXPERIMENT" \
+  --attempt-id attempt-0001
+
+"$PAWMARVEL_PROJECT/.venv/bin/python" -c \
+  'import sys; from pathlib import Path; from PIL import Image; p=Path(sys.argv[1]); im=Image.open(p).convert("RGBA"); assert im.getextrema() == ((0, 0),) * 4, f"non-zero RGBA pixels remain in {p}"; print(f"all-zero RGBA: {p} ({im.width}x{im.height})")' \
+  "$PAWMARVEL_ART_EXPERIMENT/attempts/attempt-0001/outputs/art.png"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
+  --kind art \
+  --review-id art-empty-baseline \
+  --experiment art-empty-v01 \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
+  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
+```
+
 Review each `attempts/<id>/outputs/art.png`. It must contain reusable fixed
 artwork only: no example pet, personalized name, product mockup, garment, or
 placeholder animal.
 
-The baseline evaluation measures variation and latency between stochastic runs
-of the exact prompt/configuration. If both attempts pass and the candidate is
-visually satisfactory, select it now. Do not create a second prompt or quality
-experiment solely for bookkeeping. Section 10.1 shows how to add and compare a
-successor after preview feedback or when this baseline exposes a specific
-improvement hypothesis.
+For generated art, the baseline evaluation measures variation and latency
+between stochastic runs of the exact prompt/configuration. For empty art, it
+records the deterministic candidate and pixel-validation evidence without a
+stability comparison. Select the applicable candidate when it passes. Do not
+create a second experiment solely for bookkeeping. Section 10.1 shows how to
+add and compare a generated-art successor after preview feedback.
 
 After reviewing the comparison, enter the winning review, experiment, and
 attempt once. The block records the immutable decision and derives every art
@@ -782,10 +888,15 @@ For a later multi-candidate review, change the three IDs to that review's actual
 winner before running the same block.
 
 ```bash
-# Operator selection inputs: edit only these three values.
+# Operator selection inputs for generated art (default).
 PAWMARVEL_ART_REVIEW_ID="art-baseline"
 PAWMARVEL_ART_SELECTED_EXPERIMENT_ID="art-gpt-v01"
 PAWMARVEL_ART_SELECTED_ATTEMPT_ID="attempt-0001"
+
+# Empty-canvas alternative: use these three values instead.
+# PAWMARVEL_ART_REVIEW_ID="art-empty-baseline"
+# PAWMARVEL_ART_SELECTED_EXPERIMENT_ID="art-empty-v01"
+# PAWMARVEL_ART_SELECTED_ATTEMPT_ID="attempt-0001"
 
 PAWMARVEL_ART_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/art/$PAWMARVEL_ART_REVIEW_ID"
 
@@ -1845,6 +1956,13 @@ That is a complete production contract, not a partial bundle. The normal
 release build, local release validation, S3 dry run, and S3 publication commands
 below require no special no-reference option.
 
+For a deterministic empty-canvas art selection, bundle construction also
+omits the unused art prompt and records `prompts.art_template: null` in
+`bundle.json`. It still includes both validated resolutions as `art.png` and
+`print/art.png`. The pet runtime prompt and any pet-only reference assets remain
+unchanged, so FE needs no special rendering branch: it composes onto the
+transparent art files declared by the normal layouts.
+
 Choose `--pet-name-max-length` for the usable name box in `layout-text` mode or
 for the tested artistic-lettering capacity in `embedded-in-pet` mode. It is
 stored in `bundle.json.personalization.pet_name`. The application must apply
@@ -1945,7 +2063,7 @@ s3://alphapaw-pod-designer-prod/Template/MVP-test/
         art.png                             # low-resolution web art
         layout.json                         # low-resolution web composition
         layout-print.json                   # print-resolution composition
-        art-template-gpt.md                 # offline art-generation provenance
+        art-template-gpt.md                 # generated-art bundles only; absent for empty-canvas art
         pet-transform-gpt.md                # production pet-transform prompt
         reference-design.png                # only in a reference-guided bundle
         reference-designs/                  # only with supporting references
@@ -2358,10 +2476,11 @@ path.
 Use the pipeline only to reproduce the whole visual flow quickly or isolate a
 stage. It overwrites explicitly selected outputs, records `run.json`, and never
 creates a production bundle.
-This wrapper requires at least one finished-design reference. Skip it for a
-no-reference design: the main section 5-9 flow is the authoritative full E2E
-path and already provides prompt-only art, pet-plus-prompt transformation,
-layout, print, bundle, release, and publication support.
+This wrapper requires at least one finished-design reference and always
+generates art through a model. Skip it for a no-reference design or a
+deterministic empty-canvas art design: the main section 5-9 flow is the
+authoritative full E2E path and already provides prompt-only or empty art,
+pet transformation, layout, print, bundle, release, and publication support.
 
 ```bash
 PAWMARVEL_SCRATCH_PRODUCT="$PAWMARVEL_PROJECT/work/scratch/$PAWMARVEL_DESIGN_ID/$PAWMARVEL_PRODUCT_PROFILE_ID"

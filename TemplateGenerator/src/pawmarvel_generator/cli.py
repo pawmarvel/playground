@@ -1,8 +1,8 @@
 # CLI purpose:
 # Generate or edit personalized design assets with OpenAI or Gemini from a
-# text prompt alone, a finished-design reference, a pet image, or both;
-# optionally derive layer size from a reusable product profile, then validate
-# and save the returned image.
+# text prompt alone, a finished-design reference, a pet image, or both. It can
+# also create a deterministic all-zero transparent canvas without an API call;
+# output size may be explicit or derived from a reusable product profile.
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .cli_errors import add_debug_argument, report_unexpected
 from .generation_contract import gemini_aspect_ratio, gemini_image_size
-from .image_size import ImageSizeError, validate_generation_size
+from .image_size import ImageSizeError, parse_image_size, validate_generation_size
 from .personalization import PersonalizationError, pet_name_policy, validate_pet_name
 from .product_profile import ProductProfileError, load_product_profile
 
@@ -193,8 +193,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pawmarvel-generate",
         description=(
-            "Generate or edit artwork with OpenAI or Gemini using a text prompt "
-            "alone, a reference design, a pet image, or both."
+            "Generate or edit artwork with OpenAI or Gemini, or create a "
+            "deterministic all-zero transparent PNG canvas locally."
         ),
     )
     add_debug_argument(parser)
@@ -219,8 +219,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--prompt-file",
         type=Path,
-        required=True,
-        help="UTF-8 Markdown/text prompt",
+        help="UTF-8 Markdown/text prompt (required unless --empty-canvas)",
+    )
+    parser.add_argument(
+        "--empty-canvas",
+        action="store_true",
+        help=(
+            "create a deterministic all-zero transparent RGBA PNG locally; "
+            "requires an explicit --size or a product-profile layer and makes "
+            "no image API call"
+        ),
     )
     parser.add_argument(
         "--api-key-file",
@@ -241,7 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-name",
         help=(
             "output filename (default: first supplied image stem, or prompt-file "
-            "stem in prompt-only mode, plus the selected suffix)"
+            "stem in prompt-only mode, or empty-canvas.png in empty-canvas mode)"
         ),
     )
     parser.add_argument(
@@ -269,7 +277,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--size",
         default="auto",
-        help="output size accepted by the selected model (default: auto)",
+        help=(
+            "output size accepted by the selected model, or WIDTHxHEIGHT for "
+            "--empty-canvas (default: auto)"
+        ),
     )
     parser.add_argument(
         "--product-profile",
@@ -301,7 +312,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="validate inputs and show request settings without calling the API",
+        help=(
+            "validate inputs and show resolved settings without calling an API "
+            "or writing an output file"
+        ),
     )
     return parser
 
@@ -813,7 +827,116 @@ def _atomic_write_bytes(output: Path, contents: bytes) -> None:
             Path(temp_name).unlink(missing_ok=True)
 
 
+def _generate_empty_canvas(args: argparse.Namespace) -> Path:
+    incompatible = {
+        "--prompt-file": getattr(args, "prompt_file", None),
+        "--reference-design": getattr(args, "reference_design", None),
+        "--pet-image": getattr(args, "pet_image", None),
+        "--pet-name": getattr(args, "pet_name", None),
+        "--api-key-file": getattr(args, "api_key_file", None),
+    }
+    supplied = [option for option, value in incompatible.items() if value]
+    if supplied:
+        raise UserInputError(
+            "--empty-canvas cannot be combined with " + ", ".join(supplied)
+        )
+    if args.output_format != "png":
+        raise UserInputError("--empty-canvas requires --output-format png")
+
+    product_profile_arg = getattr(args, "product_profile", None)
+    profile_layer = getattr(args, "profile_layer", None)
+    if (product_profile_arg is None) != (profile_layer is None):
+        raise UserInputError(
+            "--product-profile and --profile-layer must be supplied together"
+        )
+    product_profile_path: Path | None = None
+    product_profile_id: str | None = None
+    requested_size = args.size
+    if product_profile_arg is not None:
+        if args.size != "auto":
+            raise UserInputError(
+                "--size cannot be combined with --product-profile; the profile owns "
+                "the selected layer dimensions"
+            )
+        try:
+            product_profile = load_product_profile(product_profile_arg)
+        except ProductProfileError as exc:
+            raise UserInputError(str(exc)) from exc
+        product_profile_path = product_profile.path
+        product_profile_id = product_profile.profile_id
+        requested_size = (
+            product_profile.preview_art_size.api_value()
+            if profile_layer == "art"
+            else product_profile.preview_pet_size.api_value()
+        )
+    if requested_size == "auto":
+        raise UserInputError(
+            "--empty-canvas requires --size WIDTHxHEIGHT or "
+            "--product-profile with --profile-layer"
+        )
+    try:
+        canvas_size = parse_image_size(requested_size, "--size")
+    except ImageSizeError as exc:
+        raise UserInputError(str(exc)) from exc
+
+    output = _output_path(
+        args.output_dir,
+        args.output_name,
+        "empty-canvas",
+        "png",
+    )
+    summary = {
+        "operation": "empty-canvas",
+        "provider": None,
+        "api_key_source": None,
+        "size": canvas_size.api_value(),
+        "output_format": "png",
+        "pixel_value": [0, 0, 0, 0],
+        "product_profile": (
+            str(product_profile_path) if product_profile_path else None
+        ),
+        "product_profile_id": product_profile_id,
+        "profile_layer": profile_layer,
+        "output": str(output),
+    }
+    if args.dry_run:
+        print(json.dumps(summary, indent=2))
+        return output
+    if output.exists() and not args.force:
+        raise UserInputError(
+            f"output already exists: {output} (pass --force to replace it)"
+        )
+
+    print("Empty canvas parameters:", file=sys.stderr)
+    print(json.dumps(summary, indent=2), file=sys.stderr, flush=True)
+    canvas = Image.new(
+        "RGBA",
+        (canvas_size.width, canvas_size.height),
+        (0, 0, 0, 0),
+    )
+    encoded = BytesIO()
+    canvas.save(encoded, format="PNG")
+    image_bytes = encoded.getvalue()
+    with Image.open(BytesIO(image_bytes)) as validation:
+        validation.load()
+        extrema = validation.convert("RGBA").getextrema()
+        if validation.size != (canvas_size.width, canvas_size.height) or any(
+            channel != (0, 0) for channel in extrema
+        ):
+            raise RuntimeError(
+                "deterministic empty canvas validation failed; expected every "
+                "pixel to be RGBA (0, 0, 0, 0)"
+            )
+    _atomic_write_bytes(output, image_bytes)
+    print(f"Saved deterministic empty canvas: {output}", file=sys.stderr, flush=True)
+    return output
+
+
 def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
+    if getattr(args, "empty_canvas", False):
+        return _generate_empty_canvas(args)
+    if getattr(args, "prompt_file", None) is None:
+        raise UserInputError("--prompt-file is required unless --empty-canvas is used")
     provider, model = _resolve_provider_model(
         getattr(args, "provider", "auto"), getattr(args, "model", None)
     )

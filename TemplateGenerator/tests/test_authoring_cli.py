@@ -113,6 +113,24 @@ class AuthoringCliTests(unittest.TestCase):
         args = build_parser().parse_args(["init-shared-config"])
         self.assertEqual(args.project_root, DEFAULT_PROJECT_ROOT)
 
+    def test_create_art_experiment_accepts_empty_canvas_mode(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "create-experiment",
+                "--kind", "art",
+                "--experiment-id", "art-empty-v01",
+                "--design-id", "life-is-good",
+                "--product-profile", "product-profile.json",
+                "--empty-canvas",
+                "--authoring-root", "authoring",
+            ]
+        )
+
+        self.assertTrue(args.empty_canvas)
+        self.assertIsNone(args.prompt_file)
+        self.assertIsNone(args.provider)
+        self.assertIsNone(args.model)
+
     def test_prepare_benchmark_accepts_count_and_repeatable_fixture_filters(self) -> None:
         args = build_parser().parse_args(
             [
@@ -376,6 +394,10 @@ class AuthoringCliTests(unittest.TestCase):
             )
             self.assertEqual(output.getvalue().strip(), str(expected))
             self.assertTrue(expected.is_file())
+            self.assertIn(
+                "export PAWMARVEL_ART_TEMPLATE_MODE='generated'",
+                expected.read_text(encoding="utf-8"),
+            )
 
     def test_init_config_rejects_invalid_version_number(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -331,6 +331,38 @@ class BundleContractTests(unittest.TestCase):
             1,
         )
 
+    def test_validates_deterministic_empty_canvas_bundle_without_art_prompt(self) -> None:
+        (self.bundle / "reference-design.png").unlink()
+        (self.bundle / "art-template-gpt.md").unlink()
+        Image.new("RGBA", (672, 1008), (0, 0, 0, 0)).save(
+            self.bundle / "art.png"
+        )
+        Image.new("RGBA", (1344, 2016), (0, 0, 0, 0)).save(
+            self.bundle / "print" / "art.png"
+        )
+        manifest_path = self.bundle / "bundle.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["prompts"]["art_template"] = None
+        manifest["runtime"]["reference_assets"] = []
+        manifest["runtime"]["input_image_order"] = ["user_pet"]
+        manifest["provenance"]["selected"]["art"]["artifact_sha256"] = _sha256(
+            self.bundle / "art.png"
+        )
+        manifest["provenance"]["print_derivation"]["art_sha256"] = _sha256(
+            self.bundle / "print" / "art.png"
+        )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        self._refresh_assets()
+
+        validated = validate_production_bundle(self.bundle)
+
+        _validate_schema(validated, "bundle-v1.schema.json")
+        self.assertIsNone(validated["prompts"]["art_template"])
+        self.assertNotIn(
+            "art-template-gpt.md",
+            {asset["path"] for asset in validated["assets"]},
+        )
+
     def test_validates_artistic_name_bundle_without_name_or_font_assets(self) -> None:
         (self.bundle / "pet-transform-gpt.md").write_text(
             "Render {{PET_NAME}} as part of the pet cutout.", encoding="utf-8"
