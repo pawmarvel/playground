@@ -2,7 +2,7 @@
 
 Status: Deferred roadmap
 Depends on: Evidence from the immutable-bundle MVP trial
-Last updated: 2026-09-13
+Last updated: 2026-09-23
 
 ## 1. Purpose and decision rule
 
@@ -241,6 +241,49 @@ cannot meet validated designs. Evaluation must cover spelling, transparent
 isolation, reproducibility, long names, and review criteria. No AI-name
 implementation remains in the MVP repository.
 
+#### Optional raster-to-SVG vectorization (post-MVP, P2)
+
+Keep vectorization out of the MVP. The current bundle continues to treat the
+approved preview and print PNGs as the rendering contract; a raster image that
+looks like vector art is not represented as SVG. Start this work only when a
+vendor requires vector input, approved flat-color designs show unacceptable
+raster scaling, or editable vector output has measurable operational value.
+
+Use a local, deterministic VTracer pipeline as the first candidate. Evaluate a
+hosted service such as Vectorizer.AI only as a difficult-image fallback after
+cost, latency, retention, and proprietary-asset handling are approved. Reserve
+Potrace for monochrome silhouettes and line art rather than general multicolor
+pet illustrations.
+
+A future experiment should:
+
+1. normalize source PNGs to RGBA, clear hidden RGB under zero alpha, remove
+   isolated pixels, and optionally quantize flat artwork to a bounded palette;
+2. trace with a pinned VTracer version and recorded poster/cutout, palette,
+   speckle, simplification, and optimization settings;
+3. reject embedded raster images, excessive path/file size, lost transparency,
+   seams, missing thin details, and unacceptable color or silhouette drift;
+4. rasterize the SVG at both preview and product-profile print dimensions and
+   compare it visually and numerically with the approved PNG;
+5. retain the source PNG, SVG, engine/settings manifest, hashes, path count,
+   and re-rendered QA images; and
+6. introduce SVG assets only through a reviewed bundle-schema revision and a
+   matching FE/vendor rendering contract. Do not silently replace bundle-v1
+   PNG semantics.
+
+Planning estimates are approximately 1–5 seconds for local tracing and QA of a
+typical 1K flat illustration and 10–30 seconds for complex artwork. A hosted
+fallback may take roughly 3–15 seconds before retry/network allowance. Measure
+p50/p95 latency, output size, path count, visual acceptance, and operator
+cleanup time on representative PawMarvel assets before choosing either path.
+
+Prioritize reusable `art.png` vectorization first. Keep transformed pets as
+high-resolution transparent PNGs unless controlled testing proves that tracing
+consistently preserves identity, markings, fur edges, and style. Painterly
+texture, gradients, shadows, and photorealistic detail are poor automatic-trace
+candidates. Keep normal personalized names as deterministic OFL text; do not
+image-trace each name merely to obtain outlines.
+
 Exit criteria are feature-specific: show material improvement on designs that
 failed the current workflow, with deterministic bundles and matching preview and
 print behavior.
@@ -358,7 +401,7 @@ Each stage selects relevant tests from this common backlog:
 | 1 | Vendor, cross-resolution, and customer-data safety | P0 | Before automated vendor fulfillment |
 | 1b | Formal rights evidence | P1 | Before broader catalog/channel distribution |
 | 2 | Pet-runtime quality and latency | P1 | Runtime quality, latency, or cost misses target |
-| 3 | Template quality and authoring throughput | P1/P2 | Designs are rejected or authoring cost repeats |
+| 3 | Template quality, authoring throughput, and optional vector output | P1/P2 | Designs are rejected, authoring cost repeats, or vector output has a proven vendor/quality need |
 | 4 | Customer approval and order reproducibility | P1 | Before self-service approval or automated fulfillment |
 | 5 | Lifecycle and deployment hardening | P2 | Maintenance, retention, or deployment pain repeats |
 | 6 | Service and operational scale | P3 | Proven traffic, catalog, or operations demand |
