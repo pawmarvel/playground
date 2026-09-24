@@ -61,6 +61,23 @@ class CliTests(unittest.TestCase):
             ]
         )
 
+    def test_empty_optional_array_argument_has_actionable_error(self) -> None:
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            build_parser().parse_args(
+                [
+                    "--pet-image", str(self.pet),
+                    "",
+                    "--prompt-file", str(self.prompt),
+                ]
+            )
+
+        self.assertEqual(raised.exception.code, 2)
+        message = stderr.getvalue()
+        self.assertIn("empty or whitespace-only command-line argument", message)
+        self.assertIn("3=''", message)
+        self.assertIn("PAWMARVEL_REFERENCE_ARGS=()", message)
+
     def test_transforms_pet_with_one_reference_design_and_prompt(self) -> None:
         client = FakeClient()
         output_dir = self.root / "output"
@@ -113,6 +130,32 @@ class CliTests(unittest.TestCase):
             generate(self.args(), client=client)
 
         self.assertEqual(client.images.call_count, 0)
+
+    def test_no_pet_name_prepends_instruction_and_runs_with_placeholder(self) -> None:
+        self.prompt.write_text(
+            "Render {{PET_NAME}} as artistic lettering.", encoding="utf-8"
+        )
+        client = FakeClient()
+
+        generate(
+            self.args(
+                "--no-pet-name",
+                "--output-dir",
+                str(self.root / "output"),
+            ),
+            client=client,
+        )
+
+        prompt = client.images.kwargs["prompt"]
+        self.assertTrue(
+            prompt.startswith("No pet name, ignore {{PET_NAME}} placeholder\n\n")
+        )
+        self.assertIn("Render {{PET_NAME}} as artistic lettering.", prompt)
+        self.assertEqual(client.images.call_count, 1)
+
+    def test_pet_name_and_no_pet_name_are_mutually_exclusive(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.args("--pet-name", "Cooper", "--no-pet-name")
 
     def test_unused_pet_name_warns_and_does_not_block_api_call(self) -> None:
         self.prompt.write_text(

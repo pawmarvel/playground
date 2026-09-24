@@ -54,8 +54,8 @@ class AuthoringCliTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 2)
         message = stderr.getvalue()
-        self.assertIn("received an empty command-line argument", message)
-        self.assertIn("argv position(s) 10", message)
+        self.assertIn("empty or whitespace-only command-line argument", message)
+        self.assertIn("10=''", message)
         self.assertIn("PAWMARVEL_LAYOUT_REFERENCE_ARGS=()", message)
 
     def test_compare_prints_recorded_coverage_warnings(self) -> None:

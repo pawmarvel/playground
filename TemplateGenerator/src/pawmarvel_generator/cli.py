@@ -26,7 +26,7 @@ from urllib.request import Request, urlopen
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from .cli_errors import add_debug_argument, report_unexpected
+from .cli_errors import HelpfulArgumentParser, add_debug_argument, report_unexpected
 from .generation_contract import gemini_aspect_ratio, gemini_image_size
 from .image_size import ImageSizeError, parse_image_size, validate_generation_size
 from .personalization import PersonalizationError, pet_name_policy, validate_pet_name
@@ -51,6 +51,7 @@ PROMPT_CATEGORY_PATTERN = re.compile(
     r"-(gpt|gemini)(?:-[a-z0-9]+)*\.md$"
 )
 PET_NAME_PLACEHOLDER = "{{PET_NAME}}"
+NO_PET_NAME_INSTRUCTION = "No pet name, ignore {{PET_NAME}} placeholder"
 
 
 class UserInputError(ValueError):
@@ -190,7 +191,7 @@ class _ProgressReporter:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = HelpfulArgumentParser(
         prog="pawmarvel-generate",
         description=(
             "Generate or edit artwork with OpenAI or Gemini, or create a "
@@ -209,11 +210,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="optional user pet reference image",
     )
-    parser.add_argument(
+    pet_name = parser.add_mutually_exclusive_group()
+    pet_name.add_argument(
         "--pet-name",
         help=(
             "personalized pet name used to replace the exact {{PET_NAME}} "
             "placeholder in a transformed-pet prompt"
+        ),
+    )
+    pet_name.add_argument(
+        "--no-pet-name",
+        action="store_true",
+        help=(
+            "prepend a no-pet-name instruction and submit the prompt without "
+            "requiring or replacing its {{PET_NAME}} placeholder"
         ),
     )
     parser.add_argument(
@@ -381,9 +391,11 @@ def _read_prompt(path: Path) -> tuple[Path, str]:
 
 
 def _substitute_pet_name(
-    prompt: str, *, pet_name: str | None, pet: Path | None
+    prompt: str, *, pet_name: str | None, no_pet_name: bool, pet: Path | None
 ) -> tuple[str, str | None, bool]:
     """Resolve the one supported runtime prompt variable before an API call."""
+    if no_pet_name:
+        return prompt, None, False
     if PET_NAME_PLACEHOLDER not in prompt:
         if pet_name is not None:
             print(
@@ -629,6 +641,7 @@ def _request_summary(
     profile_layer: str | None,
     pet_name: str | None = None,
     pet_name_substituted: bool = False,
+    no_pet_name: bool = False,
     provider: str = "openai",
 ) -> dict[str, Any]:
     operation = "edit" if samples or pet is not None else "generation"
@@ -644,6 +657,7 @@ def _request_summary(
         "pet_image": str(pet) if pet else None,
         "pet_name": pet_name,
         "pet_name_substituted": pet_name_substituted,
+        "no_pet_name": no_pet_name,
         "prompt_file": str(prompt_file),
         "api_key_source": (
             str(api_key_file)
@@ -673,6 +687,7 @@ def _print_request_details(summary: dict[str, Any]) -> None:
         "pet_image": summary["pet_image"],
         "pet_name": summary["pet_name"],
         "pet_name_substituted": summary["pet_name_substituted"],
+        "no_pet_name": summary["no_pet_name"],
         "prompt_file": summary["prompt_file"],
         "api_key_source": summary["api_key_source"],
         "output": summary["output"],
@@ -833,6 +848,7 @@ def _generate_empty_canvas(args: argparse.Namespace) -> Path:
         "--reference-design": getattr(args, "reference_design", None),
         "--pet-image": getattr(args, "pet_image", None),
         "--pet-name": getattr(args, "pet_name", None),
+        "--no-pet-name": getattr(args, "no_pet_name", False),
         "--api-key-file": getattr(args, "api_key_file", None),
     }
     supplied = [option for option, value in incompatible.items() if value]
@@ -962,6 +978,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
     user_prompt, resolved_pet_name, pet_name_substituted = _substitute_pet_name(
         user_prompt,
         pet_name=getattr(args, "pet_name", None),
+        no_pet_name=getattr(args, "no_pet_name", False),
         pet=pet,
     )
     product_profile_arg = getattr(args, "product_profile", None)
@@ -1040,6 +1057,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
             else getattr(args, "pet_name", None)
         ),
         pet_name_substituted=pet_name_substituted,
+        no_pet_name=getattr(args, "no_pet_name", False),
         provider=provider,
     )
     if args.dry_run:
@@ -1062,6 +1080,8 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
 
     image_paths = ([pet] if pet is not None else []) + samples
     api_prompt = _api_prompt(user_prompt, samples=samples, pet=pet)
+    if getattr(args, "no_pet_name", False):
+        api_prompt = f"{NO_PET_NAME_INSTRUCTION}\n\n{api_prompt}"
     if provider == "gemini":
         input_items: list[dict[str, str]] = [
             {

@@ -5,6 +5,39 @@ from __future__ import annotations
 import argparse
 import sys
 import traceback
+from typing import Sequence
+
+
+class HelpfulArgumentParser(argparse.ArgumentParser):
+    """Turn invisible shell arguments into an actionable parser error."""
+
+    def parse_args(
+        self,
+        args: Sequence[str] | None = None,
+        namespace: argparse.Namespace | None = None,
+    ) -> argparse.Namespace:
+        values = list(sys.argv[1:] if args is None else args)
+        invisible = [
+            (index + 1, repr(value))
+            for index, value in enumerate(values)
+            if not value.strip()
+            and (index == 0 or not values[index - 1].startswith("--"))
+        ]
+        if invisible:
+            rendered = ", ".join(
+                f"{position}={value}" for position, value in invisible
+            )
+            self.error(
+                "received empty or whitespace-only command-line argument(s): "
+                f"{rendered}. This commonly happens in zsh when an unset optional "
+                "array is expanded as \"${ARRAY[@]}\" or an array contains an "
+                "empty element. Inspect it with `typeset -p ARRAY`; initialize "
+                "optional arrays with `ARRAY=()` before populating them, or omit "
+                "the expansion. PawMarvel examples use "
+                "`PAWMARVEL_REFERENCE_ARGS=()` for generation references and "
+                "`PAWMARVEL_LAYOUT_REFERENCE_ARGS=()` for layout references."
+            )
+        return super().parse_args(values, namespace)
 
 
 def add_debug_argument(parser: argparse.ArgumentParser) -> None:

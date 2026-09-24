@@ -1423,6 +1423,15 @@ value in the attempt `run.json`. A token without either an experiment default
 or an attempt override is rejected before a paid call. A supplied name with no
 token emits a warning but does not block the call.
 
+For a disposable direct-generator run that intentionally reuses a prompt
+containing `{{PET_NAME}}` but must generate no name, pass `--no-pet-name`
+instead of `--pet-name`. The generator leaves the prompt file unchanged,
+prepends `No pet name, ignore {{PET_NAME}} placeholder` as the first line of
+the submitted API prompt, records `no_pet_name: true`, and continues the image
+request. Prefer removing name-specific instructions from the prompt when
+authoring a reusable no-name experiment; this override is primarily for quick
+scratch comparison.
+
 Because the lettering is baked into the transformed-pet pixels, turn off
 **Render a separate pet-name text layer** during layout authoring. The saved
 layout then omits `name`, and preview/print composition will not add duplicate
