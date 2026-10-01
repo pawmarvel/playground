@@ -29,21 +29,22 @@ supported path is:
 4. author one layout against the selected art and a successful release fixture;
 5. review assembly, prepare print, graduate, bundle, and publish.
 
-Sections 10 through 16 are not prerequisites for that first bundle. They cover
-post-preview improvement, consumer verification, cleanup, whole-pipeline
-debugging, focused troubleshooting, and alternate providers. Create additional
-art, pet, or layout candidates only when the current evidence gives a reason;
-the first run does not require a synthetic alternative merely to exercise
-comparison tooling.
+Sections 10 through 17 are not prerequisites for that first bundle. They cover
+post-preview improvement, the planned approved-design profile-port workflow,
+consumer verification, cleanup, whole-pipeline debugging, focused
+troubleshooting, and alternate providers. Create additional art, pet, or layout
+candidates only when the current evidence gives a reason; the first run does
+not require a synthetic alternative merely to exercise comparison tooling.
 
 ## 1. Operating rules
 
 - Scope every authoring workspace by both design and product profile:
   `authoring/<design-id>/<product-profile-id>/`.
-- For the MVP, develop art and pet transformation independently inside each
-  design-product workspace. Do not bind another product profile's selected art
-  or pet experiment into this workspace; differing geometry and product QA are
-  validated through a complete product-specific authoring flow.
+- Develop and own art and pet transformation independently inside each
+  design-product workspace. The planned profile-port workflow may copy an
+  approved source profile's intent and configuration to bootstrap a target,
+  but it never binds the target to another product root. Differing geometry and
+  product QA remain target-owned and independently reviewed.
 - Treat an experiment as one prompt/model/configuration candidate.
 - Treat an attempt as one immutable execution. A stochastic rerun gets a new
   attempt ID; changing prompt, model, references, or generation settings gets a
@@ -1715,7 +1716,7 @@ printf 'layout decision: %s\nlayout attempt:  %s\n' "$PAWMARVEL_LAYOUT_DECISION"
 ```
 
 Repository-wide promotion of a newly downloaded OFL font is not required for
-this layout or bundle. Continue directly to assembly. Section 16 documents the
+this layout or bundle. Continue directly to assembly. Section 17 documents the
 optional maintenance procedure for making that family available to future
 authoring work.
 
@@ -2166,7 +2167,7 @@ reproduction input. Classify the defect before rerunning anything:
 | Pet quality, alpha, latency, or model | Section 6 scratch/benchmark pattern with successor IDs | Revalidate assembly and pet print; reuse verified template print assets when eligible |
 | Placement or typography | Section 7 pattern with a successor experiment/attempt | Rebuild assembly, print layout/render, selection, and bundle |
 | Print upscale | Section 8 | Create a new print candidate with a new ID |
-| Product geometry | Start a new product-profile workspace | Regenerate all profile-dependent artifacts |
+| Product geometry | Start a new target-owned product-profile workspace; after the profile-port implementation lands, section 11 may bootstrap it from a graduation | Generate/review target art or exact-ratio resize, pet fixtures, layout, print, selection, and bundle |
 
 An accepted improvement produces `v000002` or the next revision. Never patch
 `v000001`. A materially different visual design gets a new `design_id`; a
@@ -2338,7 +2339,298 @@ These successor paths preserve the first bundle and its evidence. They also
 avoid regenerating unaffected art or pet artifacts merely because a downstream
 layout or print issue changed.
 
-## 11. Verify bundle consumption and FE-independent debugging
+## 11. Planned: scale an approved design to another product profile
+
+This section defines the accepted profile-port operation contract. The
+`pawmarvel-author port-profile` command is **not available until the
+implementation plan in the production bundle design is completed**. Until
+then, use sections 3 through 9 to create the other product profile as a normal
+independent authoring product. Do not imitate the commands below by copying
+experiment directories or editing hashes.
+
+Use this workflow only after the source design-product has a completed,
+reviewed graduation. It accelerates creation of another product variation by
+copying approved intent and configuration, generating target-profile
+candidates, deriving an initial layout, and rendering fixture-wide previews.
+It does not approve or publish the result.
+
+The target remains independent:
+
+```text
+authoring/<design-id>/<source-profile-id>/...     # approved source
+authoring/<design-id>/<target-profile-id>/...     # new target-owned artifacts
+exchange/bundles/<design-id>--<target-profile-id>/vNNNNNN/
+```
+
+No path in the target experiment or bundle may resolve through the source
+product root. The profile-port plan records source identifiers and hashes, but
+copies every required prompt, reference, font, configuration, and reused pixel
+asset into the target workspace.
+
+```mermaid
+flowchart TD
+    A[Approved source graduation] --> B[Dry-run target profile-port plan]
+    B --> C{Target art ratio equals source?}
+    C -- no: normal path --> D[Generate target-ratio art from approved intent]
+    C -- yes: optional fast path --> E[Deterministically resize approved art]
+    D --> F[Clone pet runtime and run target fixtures]
+    E --> F
+    F --> G[Map source layout into target canvas]
+    G --> H[Render normal and debug fixture contact sheets]
+    H --> I{Operator review}
+    I -- art fails --> J[Iterate target art and recreate layout]
+    I -- pet fails --> K[Iterate target pet and recreate layout]
+    I -- layout fails --> L[Adjust target layout]
+    J --> H
+    K --> H
+    L --> H
+    I -- accepted --> M[Record normal component decisions]
+    M --> N[Prepare print, graduate, bundle, release, publish]
+```
+
+### 11.1 Prepare the source and target inputs
+
+Save the source selection before loading any target configuration. The source
+must be the exact `selection.json` under a completed graduation:
+
+```bash
+PAWMARVEL_SOURCE_PRODUCT="$PAWMARVEL_AUTHORING_ROOT/cooper/blanket-king-9375x12375"
+PAWMARVEL_SOURCE_GRADUATION_ID="cooper-blanket-king-v01"
+PAWMARVEL_SOURCE_GRADUATION="$PAWMARVEL_SOURCE_PRODUCT/graduations/$PAWMARVEL_SOURCE_GRADUATION_ID"
+PAWMARVEL_SOURCE_SELECTION="$PAWMARVEL_SOURCE_GRADUATION/selection.json"
+
+test -f "$PAWMARVEL_SOURCE_SELECTION"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" trace \
+  --graduation "$PAWMARVEL_SOURCE_GRADUATION"
+```
+
+Choose a different target profile and create its private operation config. The
+config is needed for later manual iteration and normal graduation even though
+the profile-port command derives its source prompt/runtime inputs from the
+approved selection:
+
+```bash
+PAWMARVEL_TARGET_PROFILE_ID="blanket-twin-full-7875x9375"
+PAWMARVEL_TARGET_PROFILE="$PAWMARVEL_PROJECT/profiles/$PAWMARVEL_TARGET_PROFILE_ID.json"
+
+test -f "$PAWMARVEL_TARGET_PROFILE"
+
+PAWMARVEL_TARGET_CONFIG="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" init-config \
+  --design-id cooper \
+  --product-profile-id "$PAWMARVEL_TARGET_PROFILE_ID")"
+
+"${EDITOR:-vi}" "$PAWMARVEL_TARGET_CONFIG"
+```
+
+Confirm that the config points to the target profile and the same private
+design inputs. Do not source it until source paths needed by the current shell
+have been saved as explicit variables.
+
+Use a reviewed fixture-selection file, not an implicit traversal of the fixture
+directory. A small smoke selection is useful while fixing obvious issues, but
+the final port review should use the intended release selection:
+
+```bash
+PAWMARVEL_PORT_FIXTURE_SET="$PAWMARVEL_RELEASE_FIXTURE_SET"
+PAWMARVEL_PORT_FIXTURE_SELECTION="$PAWMARVEL_RELEASE_SELECTION"
+PAWMARVEL_PORT_REPRESENTATIVE_FIXTURE="sausage-dog"
+
+test -f "$PAWMARVEL_PORT_FIXTURE_SET"
+test -f "$PAWMARVEL_PORT_FIXTURE_SELECTION"
+```
+
+### 11.2 Different-ratio target: default workflow
+
+This is the main path. With `--art-strategy auto`, unequal reduced source and
+target art ratios resolve to `regenerate`. The command copies the approved art
+prompt, source art, original references, pet runtime, font, and layout intent;
+it then materializes new target-owned experiments and attempts.
+
+First run the no-cost plan:
+
+```bash
+PAWMARVEL_PORT_ID="cooper-twin-v01"
+PAWMARVEL_TARGET_AUTHORING_PRODUCT="$PAWMARVEL_AUTHORING_ROOT/cooper/$PAWMARVEL_TARGET_PROFILE_ID"
+PAWMARVEL_PORT_ROOT="$PAWMARVEL_TARGET_AUTHORING_PRODUCT/ports/$PAWMARVEL_PORT_ID"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" port-profile \
+  --port-id "$PAWMARVEL_PORT_ID" \
+  --source-selection "$PAWMARVEL_SOURCE_SELECTION" \
+  --target-product-profile "$PAWMARVEL_TARGET_PROFILE" \
+  --fixture-set "$PAWMARVEL_PORT_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_PORT_FIXTURE_SELECTION" \
+  --representative-fixture "$PAWMARVEL_PORT_REPRESENTATIVE_FIXTURE" \
+  --art-strategy auto \
+  --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
+```
+
+The dry run must explicitly report:
+
+- different source and target ratios;
+- resolved art strategy `regenerate`;
+- target preview art, preview pet, and print dimensions;
+- effective art/pet provider, model, quality, and prompt hashes;
+- ordered reference roles and hashes;
+- selected fixture IDs and representative fixture;
+- planned experiment, attempt, review, port, and target-product paths; and
+- the number of paid art and pet calls.
+
+Stop if it reports `resize`, an unexpected provider/model, an unintended
+fixture, a source path outside the selected graduation lineage, or an existing
+planned ID. Correct the input rather than using `--execute`.
+
+After reviewing the plan, execute the exact same command with `--execute`:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" port-profile \
+  --port-id "$PAWMARVEL_PORT_ID" \
+  --source-selection "$PAWMARVEL_SOURCE_SELECTION" \
+  --target-product-profile "$PAWMARVEL_TARGET_PROFILE" \
+  --fixture-set "$PAWMARVEL_PORT_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_PORT_FIXTURE_SELECTION" \
+  --representative-fixture "$PAWMARVEL_PORT_REPRESENTATIVE_FIXTURE" \
+  --art-strategy auto \
+  --authoring-root "$PAWMARVEL_AUTHORING_ROOT" \
+  --execute
+```
+
+The target art call uses the approved source art as the primary adaptation
+reference and the bounded original finished-design references as supporting
+evidence. Its snapshotted effective prompt starts with the standard target-ratio
+adaptation directive. The pet experiment copies the approved runtime contract
+but generates fresh target-sized fixture attempts. The layout attempt maps the
+source boxes by normalized edges, copies the selected OFL font/license when
+applicable, and remains pinned to the exact target art and representative pet.
+
+If execution stops after a provider or network failure, do not delete succeeded
+attempts or rerun their IDs. Review the partial result, then resume only from
+the immutable plan:
+
+```bash
+test -f "$PAWMARVEL_PORT_ROOT/plan.json"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" port-profile \
+  --port-id "$PAWMARVEL_PORT_ID" \
+  --source-selection "$PAWMARVEL_SOURCE_SELECTION" \
+  --target-product-profile "$PAWMARVEL_TARGET_PROFILE" \
+  --fixture-set "$PAWMARVEL_PORT_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_PORT_FIXTURE_SELECTION" \
+  --representative-fixture "$PAWMARVEL_PORT_REPRESENTATIVE_FIXTURE" \
+  --art-strategy auto \
+  --authoring-root "$PAWMARVEL_AUTHORING_ROOT" \
+  --execute \
+  --resume
+```
+
+`--resume` must reject any argument or input hash that differs from
+`plan.json`. A deliberate configuration change gets a new `port-id` and normal
+successor experiment IDs.
+
+### 11.3 Review the generated target candidates
+
+Inspect the plan, report, isolated assets, full-size previews, and contact
+sheets before recording a decision:
+
+```bash
+PAWMARVEL_PORT_PLAN="$PAWMARVEL_PORT_ROOT/plan.json"
+PAWMARVEL_PORT_REPORT="$PAWMARVEL_PORT_ROOT/report.json"
+
+test -f "$PAWMARVEL_PORT_PLAN"
+test -f "$PAWMARVEL_PORT_REPORT"
+
+"$PAWMARVEL_PROJECT/.venv/bin/python" -m json.tool "$PAWMARVEL_PORT_PLAN"
+"$PAWMARVEL_PROJECT/.venv/bin/python" -m json.tool "$PAWMARVEL_PORT_REPORT"
+
+find "$PAWMARVEL_PORT_ROOT/previews" -maxdepth 1 -type f -print | sort
+```
+
+The port report points to ordinary target experiments and reviews; it is not a
+decision record. Check at least:
+
+- target art fills the new ratio without stretching, clipped fixed elements,
+  unintended blank bands, pet/name leakage, or unacceptable reflow;
+- every fixture preserves pet identity, intended pose/style/crop, transparent
+  edges, and acceptable latency;
+- pet and name regions remain balanced across narrow, wide, tall, and compact
+  silhouettes;
+- normal and debug contact sheets agree with the authoritative Pillow render;
+- separate text fits short, typical, and maximum-length names with the selected
+  OFL font; or the `embedded-in-pet`/`none` layout correctly omits the font
+  layer; and
+- coverage warnings are understood and explicitly accepted or corrected before
+  graduation.
+
+The tool must not create `decision.json`, a print candidate, graduation,
+bundle revision, release catalog, publication receipt, or S3 object.
+
+### 11.4 Iterate only the failed target component
+
+Use target-owned successor IDs and the normal commands from earlier sections:
+
+| Failure | Reuse | Repeat |
+| --- | --- | --- |
+| Target art composition | Pet experiment/runtime | Section 5 target scratch/art experiment, then a new layout experiment and assembly review |
+| Pet quality, alpha, reliability, or latency | Target art | Section 6 target pet successor and fixtures, then a new layout experiment pinned to its representative pet |
+| Layout/font with unchanged pinned inputs | Target art and pet | Another attempt in the port-created layout experiment using section 7 |
+| Layout after art or representative-pet change | Unchanged accepted component | A new layout experiment; never patch the port-created experiment metadata |
+| Print upscale only | Accepted target preview artifacts | A new section 8 print candidate/backend configuration |
+
+Disposable correction work belongs under the target product's `scratch/`.
+Promote only the corrected prompt/config into a new immutable experiment. A new
+port command is unnecessary for an isolated correction unless the operator
+wants to discard the entire bootstrap and create a fresh port plan.
+
+After the target art, pet, and layout reviews are accepted, use their IDs from
+`report.json` in the existing `record-decision` blocks in sections 5, 6, and 7.
+Then use sections 8 and 9 without profile-port special cases:
+
+```text
+record component decisions
+  -> assembly review/decision
+  -> prepare-print
+  -> graduate
+  -> pawmarvel-bundle
+  -> build and validate release catalog
+  -> publish-s3 dry run
+  -> publish-s3 --execute
+```
+
+Source the target configuration before those steps and verify that
+`PAWMARVEL_AUTHORING_PRODUCT` resolves to the target profile. The resulting
+bundle is complete and self-contained; FE consumes it exactly like a
+brand-new-product bundle.
+
+### 11.5 Same-ratio target: optional deterministic art path
+
+Use this add-on only when the dry run proves the reduced source and target art
+ratios are exactly equal. Explicit `resize` fails for every ratio mismatch; it
+does not center-crop, pad, or stretch.
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" port-profile \
+  --port-id "$PAWMARVEL_PORT_ID" \
+  --source-selection "$PAWMARVEL_SOURCE_SELECTION" \
+  --target-product-profile "$PAWMARVEL_TARGET_PROFILE" \
+  --fixture-set "$PAWMARVEL_PORT_FIXTURE_SET" \
+  --fixture-selection "$PAWMARVEL_PORT_FIXTURE_SELECTION" \
+  --representative-fixture "$PAWMARVEL_PORT_REPRESENTATIVE_FIXTURE" \
+  --art-strategy resize \
+  --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
+```
+
+After confirming `local.profile-resize`, repeat with `--execute`. The target
+gets a deterministic local art attempt with the approved source-art hash,
+interpolation settings, and target size recorded. It also gets a copied art
+prompt for bundle completeness and future target-specific iteration.
+
+Do not skip pet fixtures, layout/assembly review, print preparation, or target
+graduation merely because the art ratio matches. The target profile may still
+change preview-pet dimensions, normalization, safe composition area, print
+size, bleed, or vendor behavior. An operator may force `regenerate` instead of
+`resize` when the product needs a composition change despite an equal ratio.
+
+## 12. Verify bundle consumption and FE-independent debugging
 
 This is a consumer simulation, not template authoring. It reads only the
 immutable bundle and writes customer-specific outputs elsewhere.
@@ -2436,7 +2728,7 @@ Scale only the approved customer pet and compose it with bundled print art:
 
 The preview and print must use the same bundle revision and customer values.
 
-## 12. Clean up losing experiments
+## 13. Clean up losing experiments
 
 Mark a losing experiment before cleanup:
 
@@ -2480,7 +2772,7 @@ removes graduated lineage.
 Cleanup rejects a negative retention period and a filesystem-root authoring
 path.
 
-## 13. Scratch/debug pipeline
+## 14. Scratch/debug pipeline
 
 Use the pipeline only to reproduce the whole visual flow quickly or isolate a
 stage. It overwrites explicitly selected outputs, records `run.json`, and never
@@ -2578,7 +2870,7 @@ work/scratch/cooper/blanket-king-9375x12375/
 No file in this tree is a valid `pawmarvel-bundle` source. Recreate a promising
 scratch result as immutable experiments before selection.
 
-## 14. Focused debugging and troubleshooting
+## 15. Focused debugging and troubleshooting
 
 Use focused commands when the pipeline hides the failing boundary:
 
@@ -2627,7 +2919,7 @@ cd "$PAWMARVEL_PROJECT"
 
 The suite mocks OpenAI, Gemini, and Bria calls.
 
-## 15. Optional alternate-provider pet experiment
+## 16. Optional alternate-provider pet experiment
 
 Run this only after the GPT-based primary flow works. Offline testing has found
 Gemini faster in some cases but less reliable at returning a pet-only image
@@ -2692,7 +2984,7 @@ Enabling another production provider requires a new reviewed runtime transport
 contract, schema change, FE adapter, and end-to-end contract tests. The existing
 art experiment does not need to be regenerated for this comparison.
 
-## 16. Optional repository font-catalog maintenance
+## 17. Optional repository font-catalog maintenance
 
 This is repository maintenance for future authoring runs. It is not required
 for the current layout, bundle, or first-design flow. Run it only when the

@@ -625,12 +625,13 @@ customer text to the default pet-only generation contract.
 
 Art prompts have design-product scope because the profile defines the art
 canvas. Pet-transform development is also product-specific in the MVP. An
-operator may copy prompt text as the starting point for another profile, but
-must create and evaluate a new pet experiment in that profile's workspace;
-experiments, attempts, generated pets, and decisions are never shared across
-product roots. References may remain design-scoped; every experiment still
-records their exact hashes, roles, and order. Cross-product component reuse is
-a post-MVP optimization, not part of the bundle-authoring contract.
+operator may copy approved intent and configuration as the starting point for
+another profile, manually or through the profile-port bootstrap in section
+8.13, but must create and evaluate target-owned experiments in that profile's
+workspace. Experiments, attempts, generated pets, decisions, and stored paths
+are never shared across product roots. References may remain conceptually
+design-scoped; every experiment still snapshots their exact bytes, hashes,
+roles, and order. Cross-product runtime dependencies remain out of scope.
 
 Art-prompt development has a disposable pre-experiment loop. The operator may
 overwrite one draft prompt and one art output below the product's `scratch/`
@@ -1441,7 +1442,7 @@ Selective iteration follows this minimum dependency contract:
 | Art prompt or preview art bytes | Pet runtime experiment | Preview art, print art, layout compatibility, preview and print QA |
 | Layout or font selection | Art and representative pet bytes | Preview, `layout-print.json`, name containment, print render |
 | Art upscale backend or parameters | Preview art and layout | Print art, print-layout validation, print render |
-| Product profile or profile geometry | Design references only | All profile-dependent art, layout, print assets, and QA under a new `product_profile_id` when meaning or dimensions change |
+| Product profile or profile geometry | Approved design intent, copied prompts/runtime settings/references/font, and normalized layout intent | Target-owned art or exact-ratio resize, pet fixtures, layout, print assets, and QA under a new `product_profile_id` |
 
 A model or pet-prompt upgrade is therefore allowed to start from a published
 bundle revision, reuse its art/layout/font bytes by verified hash, and create
@@ -1480,6 +1481,211 @@ as comparing Gemini `interactions` against OpenAI `images.edits`. When causal at
 goal, the operator creates a series that changes one variable at a time. The
 operator records the intended comparison in the experiment ID and review notes;
 the MVP schema does not add a second change-tracking vocabulary.
+
+### 8.13 Approved design profile-port bootstrap
+
+After a design has a reviewed graduation for one product profile, a thin
+profile-port workflow may bootstrap the same design under another product
+profile. This is an authoring acceleration path, not cross-profile component
+sharing. The target remains a complete, independent authoring product and
+eventually produces its own immutable bundle identity:
+
+```text
+<design-id>--<target-product-profile-id>/vNNNNNN
+```
+
+The normal case is a target profile with a different aspect ratio. Mechanical
+image scaling is not a valid art approval in that case: it either stretches the
+design, crops fixed content, or adds unreviewed empty space. The port therefore
+reuses approved intent and configuration while generating and reviewing
+target-owned artifacts. An exact-ratio target has a deterministic art-resize
+optimization described below, but follows the same review and graduation
+boundary.
+
+#### Safety and ownership invariants
+
+- The source must be a completed local graduation with a valid
+  `selection.json`, not a draft experiment or arbitrary bundle directory.
+- The target uses a different `product_profile_id` and its normal
+  `authoring/<design-id>/<target-product-profile-id>/` root.
+- No target experiment, review, layout, print candidate, selection, or bundle
+  resolves an asset through a path inside the source product root.
+- Source prompts, references, font artifacts, runtime configuration, and any
+  reused pixels are copied and hash-snapshotted into target-owned inputs.
+- Source identifiers and hashes are lineage evidence only. Deleting local
+  scratch or moving the source workspace cannot break the target.
+- The profile-port command creates candidates and review evidence. It never
+  records approval, graduates, allocates a bundle revision, publishes to S3,
+  or activates an application template.
+- The production bundle and release-catalog contracts do not change. FE cannot
+  distinguish a carefully ported product from a product authored from scratch
+  and must not depend on private profile-port records.
+
+#### Tool contract
+
+Add a dry-run-by-default `pawmarvel-author port-profile` subcommand:
+
+```text
+pawmarvel-author port-profile
+  --port-id <stable-id>
+  --source-selection <.../graduations/<id>/selection.json>
+  --target-product-profile <product-profile.json>
+  --fixture-set <fixture-set.json>
+  --fixture-selection <fixture-selection.json>
+  --representative-fixture <fixture-id>
+  --authoring-root <work/authoring>
+  [--art-strategy auto|regenerate|resize]
+  [--execute]
+  [--resume]
+```
+
+Without `--execute`, the command validates every input and prints the resolved
+source/target identity, source and target ratios, art strategy, copied runtime
+configuration, fixture IDs, planned experiment/review IDs, estimated paid art
+and pet calls, and absolute output paths. `--execute` performs the plan.
+`--resume` is accepted only with the exact immutable `plan.json`; it verifies
+hashes, skips already-succeeded planned steps, and continues incomplete steps.
+It never overwrites an attempt or repeats a paid call whose succeeded output
+matches the plan.
+
+The command writes one small private orchestration packet:
+
+```text
+authoring/<design-id>/<target-product-profile-id>/
+  ports/<port-id>/
+    plan.json                 # immutable resolved plan and source lineage
+    report.json               # resolved outputs, warnings, review paths
+    previews/
+      fixture-contact-sheet.png
+      fixture-debug-contact-sheet.png
+      name-length-contact-sheet.png    # layout-text mode only
+```
+
+`plan.json` uses a private `profile-port-plan-v1` schema and pins the source
+selection hash, target profile hash, exact strategies, effective prompt hashes,
+ordered fixture IDs, representative fixture, and every planned ID. It contains
+product-relative stored paths where possible and no credentials. `report.json`
+is created atomically after candidate generation completes. Standard
+experiment, attempt, evaluation, and decision records remain the authoritative
+component evidence; `ports/` is navigation and lineage, not a second selection
+system.
+
+#### Different-ratio path (default)
+
+When the reduced source and target art ratios differ, `auto` resolves to
+`regenerate`:
+
+1. Copy the approved source art prompt, selected source art, and original
+   ordered design references into a target art experiment.
+2. Prepend a recorded profile-adaptation directive that requires full target
+   canvas coverage without stretching or cropping important content, preserves
+   palette/hierarchy/fixed decorations/transparency, permits only necessary
+   background extension or repositioning, and forbids personalized pet/name
+   content.
+3. Generate one initial target-profile art attempt. The selected source art is
+   the primary adaptation reference; original finished-design references are
+   supporting evidence in their recorded order and remain bounded by the
+   provider input limit.
+4. Copy the selected pet prompt, provider/model/transport, quality, background
+   policy, ordered runtime references, and optional name-variable behavior into
+   a target pet experiment. Generate target-sized attempts for the reviewed
+   fixture selection, one attempt per fixture.
+5. Map the source layout boxes into the target preview canvas by normalized
+   edges. Copy the selected OFL font/license when `name_mode=layout-text`, scale
+   nominal size and padding from the target name-box height, and recompute the
+   twelve-character minimum. Preserve `embedded-in-pet` or `none` without a
+   font layer.
+6. Create a target layout experiment pinned to the exact target art and target
+   representative-pet attempts. Import the mapped layout as its first attempt
+   through the existing deterministic renderer.
+7. Render every selected fixture through that target layout and write normal
+   and debug contact sheets. In `layout-text` mode, additionally render short,
+   typical, and configured maximum-length names against one representative pet.
+
+The mapped layout is an initial candidate, never an automatic approval. Art
+reflow from a ratio change can make normalized coordinates visually wrong even
+when every box is technically inside the canvas.
+
+#### Same-ratio optimization
+
+When source and target art ratios are exactly equal after integer reduction,
+`auto` may resolve to `resize`. A local deterministic art experiment copies or
+high-quality resamples the approved preview art to the target preview art size
+and records `provider=local`, `model=deterministic-profile-resize-v1`,
+`transport=local.profile-resize`, interpolation settings, source asset hash,
+and target size. `resize` must fail rather than crop, pad, or stretch when the
+ratios differ. The selected source prompt is still copied into the target so
+the bundle remains complete and later target-specific art iteration has a
+starting point.
+
+Layout geometry is scaled mechanically in the same way as the different-ratio
+seed. Pet runtime configuration is cloned, but target fixture attempts are
+still generated and reviewed: a product profile can change the transformed-pet
+canvas, normalization, safe composition area, or print behavior even when the
+art ratio matches. Print assets are always prepared from the approved target
+preview candidate; source print assets are never rebound to the target profile.
+
+An operator may force `regenerate` for an exact-ratio port. Forcing `resize` on
+a different ratio is a validation error.
+
+#### Review and selective iteration
+
+The generated packet is review-ready, not approved. Automated checks validate
+dimensions, alpha, hashes, bounds, font/license presence, renderer execution,
+fixture coverage, and name containment. Visual design fidelity, pet identity,
+style, balance, and acceptable art reflow remain manual decisions.
+
+| Failed review area | Reuse | Required target work |
+| --- | --- | --- |
+| Art composition or fixed design | Pet runtime and fixture inputs | New target art experiment; new layout experiment and assembly previews |
+| Pet identity, style, alpha, reliability, or latency | Target art | New target pet experiment/fixtures; new layout experiment pinned to its representative pet |
+| Layout/font only, with unchanged art and representative pet | Art and pet attempts | Another attempt in the target layout experiment |
+| Print upscale only | Approved target preview components | New print candidate/backend configuration |
+| All review areas accepted | All target candidates | Record decisions, prepare print, graduate, bundle, release, and publish normally |
+
+A changed official art or representative pet cannot be patched into the first
+layout experiment. The next layout experiment may start from the mapped or
+previously adjusted layout, but must pin the new exact inputs. Fixture coverage
+warnings remain manual graduation evidence, consistent with normal authoring.
+
+#### Implementation plan
+
+Keep the implementation as orchestration over current modules:
+
+1. Add `profile_port.py` for plan validation, source-lineage resolution,
+   deterministic ID/path planning, ratio selection, normalized layout mapping,
+   resumability, and report generation. It must not contain provider clients or
+   a second renderer.
+2. Add the `port-profile` parser/dispatch to `pawmarvel-author`, with dry run as
+   the default and explicit `--execute` for paid calls.
+3. Add `profile-port-plan-v1.schema.json` and validate checked-in/ephemeral plan
+   fixtures in the shared schema tests.
+4. Extend art experiment execution with the closed local
+   `local.profile-resize` mode. It accepts only exact-ratio PNG input and records
+   source/output hashes and dimensions. Existing empty-canvas and provider
+   generation modes remain unchanged.
+5. Factor normalized rectangle and text-metric scaling into a small geometry
+   helper used by the port planner and tests. Continue validating the result as
+   layout-v2 through the authoritative Pillow renderer.
+6. Extend comparison artifacts with fixture-wide assembled normal/debug contact
+   sheets and the bounded name-length sheet. It reads immutable outputs and
+   makes no provider call or approval decision.
+7. Invoke existing authoring functions for target experiments, attempts,
+   benchmarks, comparisons, and rendering. Do not shell out to PawMarvel CLIs
+   or duplicate lifecycle validation.
+8. Add unit and E2E tests for different-ratio regeneration, exact-ratio resize,
+   empty-canvas source, all three name modes, fixture partial failure, dry run,
+   resume, immutable-ID collisions, path containment, and source deletion after
+   target materialization.
+9. Extend the operations guide with the different-ratio workflow first and the
+   exact-ratio optimization second. Until this implementation lands, operators
+   must use the full new-product flow; documentation must label proposed
+   commands as unavailable rather than imply they can run.
+
+Acceptance requires that a ported target can continue from ordinary component
+decisions through `prepare-print`, `graduate`, bundle construction, release
+validation, S3 publication, and FE import without a special-case bundle field
+or downstream command.
 
 ## 9. Catalog bundle authoring and handoff workflow
 
@@ -1541,9 +1747,13 @@ before FE import; production activation happens after import:
     Never age-delete drafts or use authoring cleanup to retire an application
     template or delete a release.
 
-For another product variation, reuse design sources but create a distinct
-bundle under the other product profile. Do not reuse coordinates across
-profiles except through the validated mechanical scaling flow.
+For another product variation, create a distinct target workspace and bundle.
+After the first source graduation, section 8.13 may bootstrap that workspace by
+copying approved intent, generating target candidates, and mapping layout
+coordinates as an unapproved seed. Different-ratio art is regenerated; only an
+exact-ratio art canvas may use the validated deterministic resize path. Every
+target still completes its own fixture, layout, print, graduation, and bundle
+review.
 
 ## 10. MVP implementation boundaries
 
@@ -1644,6 +1854,29 @@ roles/order, and renderer/name semantics.
     resolves selections, rejects unsafe roots/retention values, and refuses to
     delete draft or selected paths. It never operates on exchange or S3 paths;
     production retirement remains outside this command.
+
+### Planned profile-port extension
+
+Section 8.13 is accepted design but is not part of the implemented CLI until
+its plan schema, orchestration, deterministic resize mode, assembly contact
+sheets, tests, and operations examples land together. Do not partially ship a
+command that copies artifacts without lineage or one that silently records
+approval.
+
+Implement it as one bounded increment:
+
+1. land the private plan schema, ratio/layout geometry helpers, and dry-run
+   planner first;
+2. add target experiment materialization and exact-ratio local art resize;
+3. add provider execution/resume using existing authoring functions;
+4. add fixture-wide assembly review artifacts and report generation;
+5. run the existing decision, print, graduation, bundle, release, and
+   publication suites against a ported target; and
+6. remove the “planned/unavailable” warning from the operations guide only when
+   the installed `pawmarvel-author --help` exposes the documented contract.
+
+The extension may add private authoring schema fields and files, but must not
+change bundle-v1, release-catalog-v2, S3 key layout, or FE renderer semantics.
 
 ### Keep unchanged
 
