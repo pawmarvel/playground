@@ -123,6 +123,59 @@ must not regenerate or upscale template art. Model calls, private asset access,
 customer-image handling, and print rendering run in a trusted application
 backend/job, not browser code.
 
+#### Personalization mode and FE flow routing
+
+`bundle.json.renderer.name_mode` is the sole authoritative application-flow
+discriminator. FE must branch on this field after import validation; it must not
+infer product behavior by scanning filenames, checking whether font files are
+present, inspecting whether `layout.json` happens to contain `name`, or scanning
+the runtime prompt on every customer request. Those redundant artifacts are
+cross-field validation evidence, not alternative routing authorities.
+
+| `renderer.name_mode` | Customer-name UI | Pet-transform request | Preview and print | Customer changes name |
+| --- | --- | --- | --- | --- |
+| `none` | Do not show or accept a name | Send the prompt unchanged; no name is supplied | Compose only art and transformed pet | Unsupported |
+| `embedded-in-pet` | Collect and validate the name before transformation | Replace every exact, case-sensitive `{{PET_NAME}}` token with the normalized name, then call the declared runtime | The transformed-pet pixels already contain the lettering; compose only art and transformed pet | Run a new paid pet transformation, then regenerate preview/print |
+| `layout-text` | Collect the name; it may be changed after pet transformation | Send the prompt unchanged; it must not contain `{{PET_NAME}}` | Render the name from `layout.json` or `layout-print.json` using the bundled OFL font | Deterministically rerender preview/print; do not repeat pet transformation |
+
+The application flow is therefore:
+
+```text
+switch bundle.renderer.name_mode:
+  none:
+    hide name input
+    transform pet without a name
+    render art + pet
+
+  embedded-in-pet:
+    collect and validate name
+    substitute every {{PET_NAME}} token
+    transform pet
+    render art + pet
+
+  layout-text:
+    transform pet without prompt substitution
+    collect and validate name
+    render art + pet + layout text
+```
+
+The importer must reject disagreement among the authoritative mode and its
+redundant evidence:
+
+| Mode | Runtime prompt | `layout.json` and `layout-print.json` | `personalization` | Font assets |
+| --- | --- | --- | --- | --- |
+| `none` | No `{{PET_NAME}}` token | Both omit `name` | Exactly `{}` | Absent |
+| `embedded-in-pet` | Contains at least one exact `{{PET_NAME}}` token | Both omit `name` | Contains exactly the required `pet_name` policy | Absent |
+| `layout-text` | No `{{PET_NAME}}` token | Both contain compatible `name` objects | Contains exactly the required `pet_name` policy | Selected TTF and `OFL.txt` required; optional declared provenance remains allowed |
+
+For both named modes, FE applies `personalization.pet_name` normalization and
+validation once and reuses the exact normalized value through preview and
+print. An unresolved `{{PET_NAME}}` token is a hard error. `none` must reject a
+supplied customer name rather than silently ignoring it. In `layout-text` mode,
+preview uses `layout.json` and print uses `layout-print.json`; in
+`embedded-in-pet` mode, the approved transformed-pet image containing the name
+is the image later upscaled for print.
+
 Layout V2 is a closed composition contract with an optional top-level `name`.
 Its absence means either personalized lettering is already embedded in the
 transformed-pet pixels or the product has no name input; `renderer.name_mode`
@@ -150,9 +203,11 @@ glyph width.
    count, media type, and image dimension.
 5. Validate preview/print canvas dimensions against `product-profile.json` and
    verify that `layout-print.json` is the permitted scale of `layout.json`.
-6. Reject unsupported provider/model/transport/request fields, prompt-category mismatches,
-   missing ordered references, missing required OFL font/license, or invalid renderer
-   semantics.
+6. Reject unsupported provider/model/transport/request fields, prompt-category
+   mismatches, missing ordered references, or a personalization-mode mismatch
+   among `renderer.name_mode`, the exact `{{PET_NAME}}` prompt token,
+   preview/print layout name objects, `personalization.pet_name`, QA name, and
+   conditional OFL font/license assets.
 7. Create or update only an application draft. Activation remains an explicit
    application-owner action.
 
