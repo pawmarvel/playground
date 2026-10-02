@@ -9,6 +9,10 @@ GPT_IMAGE_2_MIN_PIXELS = 655_360
 GPT_IMAGE_2_MAX_PIXELS = 8_294_400
 GPT_IMAGE_2_EDGE_MULTIPLE = 16
 GPT_IMAGE_2_MAX_ASPECT_RATIO = 3.0
+GPT_IMAGE_2_PATTERN = re.compile(r"gpt-image-2(?:-\d{4}-\d{2}-\d{2})?")
+GPT_IMAGE_25_PATTERN = re.compile(
+    r"gpt-image-2\.5-(?:sunburst|flare)(?:-\d{4}-\d{2}-\d{2})?"
+)
 
 
 class ImageSizeError(ValueError):
@@ -39,7 +43,16 @@ def parse_image_size(value: str, label: str = "size") -> ImageSize:
 
 
 def is_gpt_image_2(model: str) -> bool:
-    return model == "gpt-image-2" or model.startswith("gpt-image-2-")
+    """Return whether a model uses the GPT Image 2/2.5 size contract."""
+    return bool(
+        GPT_IMAGE_2_PATTERN.fullmatch(model)
+        or GPT_IMAGE_25_PATTERN.fullmatch(model)
+    )
+
+
+def is_gpt_image_25(model: str) -> bool:
+    """Return whether a model is an official GPT Image 2.5 variant/snapshot."""
+    return bool(GPT_IMAGE_25_PATTERN.fullmatch(model))
 
 
 def validate_gpt_image_2_size(size: ImageSize, label: str = "size") -> ImageSize:

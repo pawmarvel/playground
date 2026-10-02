@@ -862,7 +862,7 @@ not a viable fallback.
   "created_at": "2026-09-02T21:30:00Z",
   "runtime": {
     "provider": "openai",
-    "model": "gpt-image-2",
+    "model": "gpt-image-2.5-sunburst",
     "transport": "images.edits",
     "prompt": "pet-transform-gpt.md",
     "reference_assets": [],
@@ -995,29 +995,53 @@ must reject disagreement between these fields.
 
 ### 8.3 Runtime provider and model scope
 
-The offline generator supports both OpenAI and Gemini experiments. Bundle-v1
-permits only the OpenAI `gpt-image-2` customer pet runtime because offline trials
-found its pet-only transparency behavior more reliable and the MVP has no
-reviewed Gemini transport contract. `graduate` and bundle construction reject a
-selected Gemini pet experiment. Gemini remains available for private latency and
-quality comparison; enabling it in production requires a new schema/runtime
-contract and matching FE adapter tests. Art-template generation remains offline,
-so either provider may be evaluated and its selected prompt retained as
-provenance.
+The offline generator supports OpenAI GPT Image 2, GPT Image 2.5 Sunburst, GPT
+Image 2.5 Flare, and Gemini experiments. Bundle-v1 permits only the OpenAI
+`images.edits` customer-pet transport. Supported OpenAI model IDs are
+`gpt-image-2`, `gpt-image-2.5-sunburst`, and `gpt-image-2.5-flare`, including
+their official dated snapshots. There is no generic `gpt-image-2.5` API alias.
+The generator rejects that ambiguous name instead of allowing a paid request to
+fail remotely.
 
-`bundle.json.runtime` identifies OpenAI and `gpt-image-2` explicitly; the
-application importer still checks that pair against its deployment allowlist.
+`gpt-image-2.5-sunburst` is the generated-config and production default for both
+art and pet generation. Flare is the speed-oriented alternative. For a
+new comparison, keep prompt, references, size, and quality fixed and create a
+separate experiment. GPT Image 2.5 supports `xhigh` and `max`; those settings
+also require a separate experiment because they change cost, latency, and
+result quality and cannot be sent to GPT Image 2.
+
+Offline trials found Gemini's pet-only transparency behavior less reliable and
+the MVP has no reviewed Gemini production transport contract. `graduate` and
+bundle construction reject a selected Gemini pet experiment. Gemini remains
+available for private latency and quality comparison; enabling it in production
+requires a new schema/runtime contract and matching FE adapter tests.
+Art-template generation remains offline, so either provider may be evaluated
+and its selected prompt retained as provenance.
+
+`bundle.json.runtime` identifies OpenAI, the exact selected model ID, and its
+closed request parameters; the application importer must check that model
+against its deployment allowlist. Adding 2.5 to offline tooling does not by
+itself enable it in FE production. FE must accept the exact Sunburst/Flare ID
+and model-compatible quality before an application owner activates that bundle.
 Preview and print must pin the same bundle revision and transformed-pet lineage.
 OpenAI provides the native transparent-background control required by the MVP.
 Bundle-v1 specifies `alpha_failure: reject` and does not imply a background-
 removal algorithm.
 
-The OpenAI implementation uses `/v1/images/edits`. That endpoint and the
-Python SDK `Images.edit()` method do not accept `service_tier`; request-level
-Fast mode is documented for Responses and Chat Completions. The MVP therefore
-does not expose `--service-tier` or claim Fast processing for OpenAI image
-edits. Evaluating a Responses-based image transport is a separate future
-experiment and must not be implemented by passing an undocumented body field.
+GPT Image 2 and both GPT Image 2.5 variants use the same Image API endpoints,
+multipart input ordering, base64 output, custom-size rules, and transparent
+PNG/WebP contract. Prompt-only art uses `/v1/images/generations`; reference-
+guided art and pet transformation use `/v1/images/edits`. No Responses API
+migration is required. The implementation omits `input_fidelity` for the GPT
+Image 2/2.5 family and leaves fidelity model-managed. Older supported GPT Image
+models continue to receive `input_fidelity=high` for edits.
+
+The Python SDK `Images.edit()` method does not accept `service_tier`;
+request-level Fast mode is documented for Responses and Chat Completions. The
+MVP therefore does not expose `--service-tier` or claim Fast processing for
+OpenAI image edits. Evaluating a Responses-based image transport is a separate
+future experiment and must not be implemented by passing an undocumented body
+field.
 
 Prompt filenames are provider-qualified:
 `art-template-{gpt|gemini}.md` and `pet-transform-gpt.md`. Every released bundle
@@ -1027,7 +1051,9 @@ one selected art prompt; a deterministic empty-canvas bundle instead declares
 closed OpenAI field set the trusted application adapter passes
 without inventing defaults. For OpenAI this includes quality, requested size,
 background, output format, count, and input fidelity when required by the
-selected model. The manifest identifies the runtime pet prompt under
+selected model. Quality is model-aware: `low`, `medium`, `high`, and `auto` are
+common; `xhigh` and `max` are valid only for GPT Image 2.5 Sunburst/Flare. The
+manifest identifies the runtime pet prompt under
 `runtime.prompt` and identifies an offline generated-art prompt—or `null` for
 deterministic empty art—under `prompts.art_template`;
 `prompts.pet_transform` repeats the runtime prompt path for convenient role
@@ -1912,7 +1938,7 @@ Resolve these in order during kickoff:
 | 2 | Which revision is authoritative? | Generator `bundle_revision`; importer records it verbatim and uses a differently named internal ID if needed | Accept at kickoff |
 | 3 | Does FE adopt `bundle.json`? | Yes, mandatory for the dual-art contract; declining it reopens print-art architecture | Accept at kickoff |
 | 4 | Which runtime references are sent? | Customer pet first, then zero-to-four bundle-declared finished-design references in manifest order | Proposed decision |
-| 5 | Which model paths are in MVP? | GPT Image 2 is the default for art and pet transformation; Gemini is an optional measured candidate and cannot be selected until it passes identity/composition/alpha gates | Product and FE acceptance required |
+| 5 | Which model paths are in MVP? | GPT Image 2.5 Sunburst is the default for art and pet transformation; Flare is the speed-oriented alternative; Gemini is an optional measured candidate and cannot be selected until it passes identity/composition/alpha gates | Product and FE acceptance required |
 | 6 | Who creates print art? | Generator ships profile-specific high-resolution art; FE upscales only customer pet | Proposed decision |
 | 7 | How are runtime and QA references separated? | `runtime.reference_assets` names only finished-design assets; nothing under `qa/` is a runtime input | Proposed decision |
 | 8 | How is renderer conformance tested? | Machine-check geometry/semantics plus one human golden review | Proposed decision |

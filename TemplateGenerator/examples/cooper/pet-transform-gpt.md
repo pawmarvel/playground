@@ -1,4 +1,4 @@
-Use this updated prompt directly as the **gpt-image-2 API prompt**. I’d use a placeholder like `{{PET_NAME}}` in your application.
+Use this updated prompt directly as the **gpt-image-2.5-sunburst API prompt**. I’d use a placeholder like `{{PET_NAME}}` in your application.
 
 ```text
 You will receive 2 or more images.

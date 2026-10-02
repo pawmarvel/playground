@@ -27,8 +27,19 @@ from urllib.request import Request, urlopen
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .cli_errors import HelpfulArgumentParser, add_debug_argument, report_unexpected
-from .generation_contract import gemini_aspect_ratio, gemini_image_size
-from .image_size import ImageSizeError, parse_image_size, validate_generation_size
+from .generation_contract import (
+    CLI_GENERATION_QUALITIES,
+    gemini_aspect_ratio,
+    gemini_image_size,
+    validate_generation_quality,
+    validate_provider_model,
+)
+from .image_size import (
+    ImageSizeError,
+    is_gpt_image_2,
+    parse_image_size,
+    validate_generation_size,
+)
 from .personalization import PersonalizationError, pet_name_policy, validate_pet_name
 from .product_profile import ProductProfileError, load_product_profile
 
@@ -44,7 +55,7 @@ GEMINI_INTERACTIONS_ENDPOINT = (
 )
 PROVIDERS = ("auto", "openai", "gemini")
 DEFAULT_MODELS = {
-    "openai": "gpt-image-2",
+    "openai": "gpt-image-2.5-sunburst",
     "gemini": "gemini-3.1-flash-image",
 }
 PROMPT_CATEGORY_PATTERN = re.compile(
@@ -280,8 +291,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         help=(
-            "provider model ID (default: gpt-image-2 for OpenAI or "
-            "gemini-3.1-flash-image for Gemini)"
+            "provider model ID; OpenAI supports gpt-image-2 and the "
+            "gpt-image-2.5-sunburst/flare variants (default: "
+            "gpt-image-2.5-sunburst), "
+            "while Gemini defaults to gemini-3.1-flash-image"
         ),
     )
     parser.add_argument(
@@ -303,7 +316,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="profile preview layer whose dimensions should be used",
     )
     parser.add_argument(
-        "--quality", choices=("low", "medium", "high", "auto"), default="high"
+        "--quality",
+        choices=CLI_GENERATION_QUALITIES,
+        default="high",
+        help=(
+            "generation quality; xhigh/max require a GPT Image 2.5 "
+            "Sunburst or Flare model (default: high)"
+        ),
     )
     parser.add_argument(
         "--background",
@@ -440,10 +459,12 @@ def _resolve_provider_model(provider: str, model: str | None) -> tuple[str, str]
     inferred = "gemini" if model and model.startswith("gemini-") else "openai"
     resolved_provider = inferred if provider == "auto" else provider
     resolved_model = model or DEFAULT_MODELS[resolved_provider]
-    if resolved_provider == "gemini" and not resolved_model.startswith("gemini-"):
-        raise UserInputError("--provider gemini requires a gemini-* model")
     if resolved_provider == "openai" and resolved_model.startswith("gemini-"):
         raise UserInputError("a gemini-* model requires --provider gemini or auto")
+    try:
+        validate_provider_model(provider=resolved_provider, model=resolved_model)
+    except ValueError as exc:
+        raise UserInputError(str(exc)) from exc
     return resolved_provider, resolved_model
 
 
@@ -646,8 +667,8 @@ def _request_summary(
 ) -> dict[str, Any]:
     operation = "edit" if samples or pet is not None else "generation"
     input_fidelity = (
-        "model default (high fidelity)"
-        if model == "gpt-image-2" or model.startswith("gpt-image-2-")
+        "omitted (model managed)"
+        if is_gpt_image_2(model)
         else "high"
         if provider == "openai"
         else "provider managed"
@@ -956,6 +977,14 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
     provider, model = _resolve_provider_model(
         getattr(args, "provider", "auto"), getattr(args, "model", None)
     )
+    try:
+        validate_generation_quality(
+            provider=provider,
+            model=model,
+            quality=args.quality,
+        )
+    except ValueError as exc:
+        raise UserInputError(str(exc)) from exc
     raw_samples = getattr(args, "reference_design", None)
     sample_values = (
         []
@@ -1137,7 +1166,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
                 output_format=api_output_format,
                 n=1,
             )
-            if not (model == "gpt-image-2" or model.startswith("gpt-image-2-")):
+            if not is_gpt_image_2(model):
                 request["input_fidelity"] = "high"
             with _ProgressReporter(provider):
                 result = client.images.edit(**request)

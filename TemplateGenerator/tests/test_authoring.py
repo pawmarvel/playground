@@ -1164,6 +1164,55 @@ class AuthoringLifecycleTests(unittest.TestCase):
                 created_by="test",
             )
 
+    def test_gpt_image_25_experiment_accepts_extended_quality(self) -> None:
+        experiment = create_experiment(
+            kind="pet",
+            experiment_id="pet-sunburst-v01",
+            design_id="life-is-good",
+            product_profile=self.profile,
+            authoring_root=self.authoring,
+            references=[self.reference],
+            prompt_file=self.pet_prompt,
+            provider="openai",
+            model="gpt-image-2.5-sunburst",
+            quality="max",
+            art_attempt=None,
+            pet_attempt=None,
+            font_catalogs=[],
+            parent_experiment_id=None,
+            base_bundle_revision=None,
+            created_by="test",
+        )
+        metadata = json.loads((experiment / "experiment.json").read_text())
+        self.assertEqual(
+            metadata["generation"]["model"], "gpt-image-2.5-sunburst"
+        )
+        self.assertEqual(metadata["generation"]["parameters"]["quality"], "max")
+        self._validate_schema(
+            experiment / "experiment.json", "experiment-v1.schema.json"
+        )
+
+    def test_gpt_image_2_experiment_rejects_extended_quality(self) -> None:
+        with self.assertRaisesRegex(AuthoringError, "not supported"):
+            create_experiment(
+                kind="pet",
+                experiment_id="pet-invalid-quality-v01",
+                design_id="life-is-good",
+                product_profile=self.profile,
+                authoring_root=self.authoring,
+                references=[self.reference],
+                prompt_file=self.pet_prompt,
+                provider="openai",
+                model="gpt-image-2",
+                quality="max",
+                art_attempt=None,
+                pet_attempt=None,
+                font_catalogs=[],
+                parent_experiment_id=None,
+                base_bundle_revision=None,
+                created_by="test",
+            )
+
     def test_no_reference_experiments_support_art_pet_and_layout(self) -> None:
         art_exp = create_experiment(
             kind="art", experiment_id="art-prompt-only-v01",

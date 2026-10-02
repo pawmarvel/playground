@@ -1,4 +1,4 @@
-# GPT-Image-2 — Generate art.png
+# GPT Image 2.5 Sunburst — Generate art.png
 
 INPUT: one finished personalized design example.
 

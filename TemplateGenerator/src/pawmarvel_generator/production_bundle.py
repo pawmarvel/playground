@@ -25,7 +25,11 @@ from .bundle import (
 from .cli import PET_NAME_PLACEHOLDER
 from .config import ConfigError, load_layout
 from .font_license import FontLicenseError, resolve_ofl_license
-from .generation_contract import provider_request_parameters
+from .generation_contract import (
+    provider_request_parameters,
+    validate_generation_quality,
+    validate_provider_model,
+)
 from .image_size import is_gpt_image_2
 from .personalization import (
     PersonalizationError,
@@ -355,17 +359,28 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("runtime provider and transport are unsupported or inconsistent")
     if not isinstance(model, str) or not model:
         raise BundleError("runtime model must be a nonempty string")
-    if not model.startswith("gpt-image-"):
-        raise BundleError("OpenAI runtime model must be a gpt-image model")
+    try:
+        validate_provider_model(provider=str(provider), model=model)
+    except ValueError as exc:
+        raise BundleError(f"OpenAI runtime model is unsupported: {exc}") from exc
     request_parameters = runtime.get("request_parameters")
     if not isinstance(request_parameters, dict):
         raise BundleError("runtime.request_parameters must be an object")
+    try:
+        validate_generation_quality(
+            provider=str(provider),
+            model=model,
+            quality=str(request_parameters.get("quality")),
+        )
+    except ValueError as exc:
+        raise BundleError(
+            f"OpenAI runtime request parameters are unsupported: {exc}"
+        ) from exc
     required_request = {"quality", "size", "background", "output_format", "n"}
     if not is_gpt_image_2(model):
         required_request.add("input_fidelity")
     if (
         set(request_parameters) != required_request
-        or request_parameters.get("quality") not in {"low", "medium", "high", "auto"}
         or request_parameters.get("size")
         != f"{profile.preview_pet_size.width}x{profile.preview_pet_size.height}"
         or request_parameters.get("background") != "transparent"

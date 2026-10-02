@@ -55,7 +55,7 @@
         "parameters": {
           "type": "object",
           "properties": {
-            "quality": {"enum": ["low", "medium", "high", "auto"]}
+            "quality": {"enum": ["low", "medium", "high", "auto", "xhigh", "max"]}
           }
         },
         "prompt_variables": {

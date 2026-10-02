@@ -20,6 +20,7 @@ from .authoring import (
 )
 from .cli_errors import HelpfulArgumentParser, add_debug_argument, report_unexpected
 from .fixture_set import load_fixture_set, write_fixture_selection
+from .generation_contract import CLI_GENERATION_QUALITIES
 from .operation_config import write_operation_config, write_shared_config
 
 
@@ -152,9 +153,12 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--model")
     create.add_argument(
         "--quality",
-        choices=("low", "medium", "high", "auto"),
+        choices=CLI_GENERATION_QUALITIES,
         default="high",
-        help="provider generation quality for art or pet attempts (default: high)",
+        help=(
+            "provider generation quality for art or pet attempts; xhigh/max "
+            "require GPT Image 2.5 Sunburst or Flare (default: high)"
+        ),
     )
     create.add_argument("--art-attempt", type=_path_argument)
     create.add_argument("--pet-attempt", type=_path_argument)

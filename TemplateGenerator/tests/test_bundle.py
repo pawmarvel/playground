@@ -518,6 +518,30 @@ class BundleContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "openai"):
             _validate_schema(manifest, "bundle-v1.schema.json")
 
+    def test_accepts_gpt_image_25_runtime_with_extended_quality(self) -> None:
+        manifest_path = self.bundle / "bundle.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["runtime"]["model"] = "gpt-image-2.5-flare"
+        manifest["runtime"]["request_parameters"]["quality"] = "xhigh"
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
+
+        validated = validate_production_bundle(self.bundle)
+        _validate_schema(validated, "bundle-v1.schema.json")
+        self.assertEqual(validated["runtime"]["model"], "gpt-image-2.5-flare")
+
+    def test_rejects_extended_quality_for_gpt_image_2_runtime(self) -> None:
+        manifest_path = self.bundle / "bundle.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["runtime"]["request_parameters"]["quality"] = "max"
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
+
+        with self.assertRaisesRegex(BundleError, "not supported"):
+            validate_production_bundle(self.bundle)
+
     def test_rejects_uninventoried_asset(self) -> None:
         (self.bundle / "unexpected.txt").write_text("unexpected", encoding="utf-8")
         with self.assertRaisesRegex(BundleError, "inventory every file"):

@@ -398,6 +398,14 @@ class AuthoringCliTests(unittest.TestCase):
                 "export PAWMARVEL_ART_TEMPLATE_MODE='generated'",
                 expected.read_text(encoding="utf-8"),
             )
+            self.assertIn(
+                "export PAWMARVEL_ART_MODEL='gpt-image-2.5-sunburst'",
+                expected.read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "export PAWMARVEL_PET_MODEL='gpt-image-2.5-sunburst'",
+                expected.read_text(encoding="utf-8"),
+            )
 
     def test_init_config_rejects_invalid_version_number(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

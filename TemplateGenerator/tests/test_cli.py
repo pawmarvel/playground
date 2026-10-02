@@ -84,6 +84,7 @@ class CliTests(unittest.TestCase):
         output = generate(self.args("--output-dir", str(output_dir)), client=client)
         self.assertEqual(output, output_dir.resolve() / "template.png")
         request = client.images.kwargs
+        self.assertEqual(request["model"], "gpt-image-2.5-sunburst")
         self.assertEqual(
             [Path(file.name).name for file in request["image"]],
             ["pet.png", "template.png"],
@@ -99,6 +100,43 @@ class CliTests(unittest.TestCase):
         self.assertNotIn("Replace only", request["prompt"])
         self.assertNotIn("input_fidelity", request)
         self.assertNotIn("service_tier", request)
+
+    def test_gpt_image_25_edit_uses_existing_images_api_contract(self) -> None:
+        client = FakeClient()
+        output = generate(
+            self.args(
+                "--model",
+                "gpt-image-2.5-sunburst",
+                "--quality",
+                "xhigh",
+                "--output-dir",
+                str(self.root / "output-25"),
+            ),
+            client=client,
+        )
+
+        self.assertTrue(output.is_file())
+        request = client.images.kwargs
+        self.assertEqual(client.images.edit_call_count, 1)
+        self.assertEqual(request["model"], "gpt-image-2.5-sunburst")
+        self.assertEqual(request["quality"], "xhigh")
+        self.assertNotIn("input_fidelity", request)
+
+    def test_gpt_image_2_rejects_extended_gpt_image_25_quality(self) -> None:
+        client = FakeClient()
+        with self.assertRaisesRegex(UserInputError, "not supported"):
+            generate(
+                self.args("--model", "gpt-image-2", "--quality", "max"),
+                client=client,
+            )
+        self.assertEqual(client.images.call_count, 0)
+
+    def test_rejects_gpt_image_25_family_name_without_variant(self) -> None:
+        with self.assertRaisesRegex(UserInputError, "not an API model ID"):
+            generate(
+                self.args("--model", "gpt-image-2.5"),
+                client=FakeClient(),
+            )
 
     def test_substitutes_pet_name_placeholder_before_api_call(self) -> None:
         self.prompt.write_text(

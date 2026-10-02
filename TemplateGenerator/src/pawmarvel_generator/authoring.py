@@ -26,6 +26,10 @@ from .config import load_layout, parse_layout
 from .font_catalog import FontCatalogError, discover_font_catalog
 from .font_license import resolve_ofl_license
 from .font_reference import FontReferenceError, load_font_reference
+from .generation_contract import (
+    validate_generation_quality,
+    validate_provider_model,
+)
 from .fixture_set import (
     FixtureSetError,
     PetFixture,
@@ -50,7 +54,6 @@ class AuthoringError(ValueError):
 
 
 KINDS = {"art", "pet", "layout"}
-GENERATION_QUALITIES = {"low", "medium", "high", "auto"}
 ID_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789-")
 
 
@@ -383,14 +386,15 @@ def create_experiment(
                 )
             if provider not in {"openai", "gemini"}:
                 raise AuthoringError("provider must be openai or gemini")
-            if provider == "openai" and not model.startswith("gpt-image-"):
-                raise AuthoringError("OpenAI experiments require a gpt-image-* model")
-            if provider == "gemini" and not model.startswith("gemini-"):
-                raise AuthoringError("Gemini experiments require a gemini-* model")
-            if quality not in GENERATION_QUALITIES:
-                raise AuthoringError(
-                    "quality must be low, medium, high, or auto"
+            try:
+                validate_provider_model(provider=provider, model=model)
+                validate_generation_quality(
+                    provider=provider,
+                    model=model,
+                    quality=quality,
                 )
+            except ValueError as exc:
+                raise AuthoringError(str(exc)) from exc
             prompt_info = _copy(prompt_file, inputs / prompt_file.name)
             reference_info = []
             for index, reference in enumerate(references, 1):

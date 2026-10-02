@@ -114,8 +114,9 @@ Confirm the lifecycle commands:
 
 ## 3. Generate and edit private operation configurations
 
-The primary example uses GPT Image 2 for both art and pet generation. Alternate
-provider experiments, including Gemini, are optional and documented at the end.
+The primary example uses GPT Image 2.5 Sunburst for both art and pet generation.
+Alternate-provider experiments, including Gemini, are optional and documented
+at the end.
 Generate the shared private configuration once per checkout. It contains only
 design-independent provider credentials and AWS/S3 publication settings:
 
@@ -925,14 +926,54 @@ the prior decision remains traceable.
 
 ## 6. Iterate the transformed-pet prompt and model
 
-The primary MVP path uses GPT Image 2 because offline tests found Gemini's pet
-cutout and transparency behavior insufficiently reliable. After a prompt is
-promoted from scratch, every changed prompt or request configuration becomes a
-new experiment. The current one-attempt fixture tiers measure cross-pet coverage
-and comparative latency; they do not claim repeat-run reliability for any one
-pet.
+The primary MVP path uses GPT Image 2.5 Sunburst because offline tests found
+Gemini's pet cutout and transparency behavior insufficiently reliable. After a
+prompt is promoted from scratch, every changed prompt or request configuration
+becomes a new experiment. The current one-attempt fixture tiers measure
+cross-pet coverage and comparative latency; they do not claim repeat-run
+reliability for any one pet.
 At runtime, the customer pet is always the first image. Finished-design
 references follow in recorded order only when they exist.
+
+### 6.0 Default GPT Image 2.5 model and Flare alternative
+
+GPT Image 2.5 uses the same `pawmarvel-generate`, experiment, attempt, bundle,
+and OpenAI Images API path as the earlier GPT Image 2 integration. Select one
+of the two real API model IDs; `gpt-image-2.5` by itself is intentionally
+rejected:
+
+- `gpt-image-2.5-sunburst` is the production default for art generation and
+  online pet transformation;
+- `gpt-image-2.5-flare` is an explicit speed-oriented alternative that must be
+  evaluated for result quality and reliability before selection.
+
+The generated config sets both model variables to Sunburst. To evaluate Flare,
+change only the relevant model variable and give the experiment a new ID:
+
+```bash
+# Choose exactly one hypothesis for a new experiment.
+export PAWMARVEL_PET_MODEL='gpt-image-2.5-flare'
+# export PAWMARVEL_ART_MODEL='gpt-image-2.5-flare'
+```
+
+Start the comparison at the same explicit quality used by the Sunburst baseline.
+Keep prompt, ordered references, fixture selection, dimensions, and all other
+parameters fixed. A separate successor experiment may test `xhigh` or `max`;
+those settings can materially increase latency and cost. The CLI continues to
+reject them with the earlier `gpt-image-2` model before making an API call.
+
+Both 2.5 variants retain `images.generate` for prompt-only art and
+`images.edit` for reference-guided art or pet transformation. Custom dimensions,
+transparent PNG/WebP output, image ordering, and base64 response handling are
+unchanged. Do not add `service_tier`; the Images API method does not accept it.
+Some organizations may need OpenAI API Organization Verification before these
+models are available. Confirm account access with a dry run followed by one
+scratch attempt before creating an immutable benchmark experiment. See the
+[official OpenAI image-generation guide](https://developers.openai.com/api/docs/guides/image-generation).
+
+Before graduating a 2.5 pet runtime, confirm that the FE importer/runtime
+allowlist accepts the exact selected model ID and its quality. The bundle
+records both values; it does not silently downgrade them.
 
 When comparing pet prompts or models, hold the ordered reference list constant;
 otherwise the comparison changes two variables at once. If the purpose of an
@@ -2660,6 +2701,7 @@ literal values into application code.
 ```bash
 PAWMARVEL_SECOND_PET="$PAWMARVEL_PROJECT/examples/pet-inputs/white-fluffy-dog.png"
 PAWMARVEL_SECOND_RUN="$PAWMARVEL_PROJECT/work/consumer-tests/cooper--blanket-king-9375x12375/v000001/white-fluffy-dog"
+PAWMARVEL_SECOND_PET_MODEL="$("$PAWMARVEL_PROJECT/.venv/bin/python" -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["runtime"]["model"])' "$PAWMARVEL_BUNDLE/bundle.json")"
 PAWMARVEL_SECOND_PET_QUALITY="$("$PAWMARVEL_PROJECT/.venv/bin/python" -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["runtime"]["request_parameters"]["quality"])' "$PAWMARVEL_BUNDLE/bundle.json")"
 typeset -a PAWMARVEL_BUNDLE_REFERENCE_ARGS=()
 while IFS= read -r reference_asset; do
@@ -2676,7 +2718,7 @@ mkdir -p "$PAWMARVEL_SECOND_RUN/preview" "$PAWMARVEL_SECOND_RUN/print"
   "${PAWMARVEL_BUNDLE_REFERENCE_ARGS[@]}" \
   --prompt-file "$PAWMARVEL_BUNDLE/pet-transform-gpt.md" \
   --provider openai \
-  --model gpt-image-2 \
+  --model "$PAWMARVEL_SECOND_PET_MODEL" \
   --pet-name FLUFFY \
   --size 816x816 \
   --quality "$PAWMARVEL_SECOND_PET_QUALITY" \

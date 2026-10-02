@@ -19,6 +19,7 @@ from .cli import (
 )
 from .cli_errors import add_debug_argument, report_unexpected
 from .config import ConfigError, load_layout
+from .generation_contract import CLI_GENERATION_QUALITIES
 from .renderer import RenderError, render_to_files
 
 
@@ -82,7 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--size", default="1024x1024")
     parser.add_argument(
-        "--quality", choices=("low", "medium", "high", "auto"), default="high"
+        "--quality", choices=CLI_GENERATION_QUALITIES, default="high"
     )
     parser.add_argument("--force", action="store_true")
     return parser

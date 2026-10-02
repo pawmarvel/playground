@@ -112,12 +112,12 @@ def derive_art_preview_size(
     ratio_height = print_size.height // ratio_gcd
     if max(ratio_width, ratio_height) / min(ratio_width, ratio_height) > 3:
         raise ProductProfileError(
-            "print canvas aspect ratio exceeds the GPT Image 2 limit of 3:1"
+            "print canvas aspect ratio exceeds the GPT Image 2/2.5 limit of 3:1"
         )
     candidates = _valid_candidates_for_ratio(ratio_width, ratio_height)
     if not candidates:
         raise ProductProfileError(
-            "no exact-aspect GPT Image 2 preview resolution can be derived for this print canvas"
+            "no exact-aspect GPT Image 2/2.5 preview resolution can be derived for this print canvas"
         )
     return min(
         candidates,

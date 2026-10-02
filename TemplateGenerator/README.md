@@ -101,8 +101,11 @@ Install the test extra when running the repository contract suite:
 .venv/bin/pawmarvel-catalog --help
 ```
 
-Tool 1 keeps `gpt-image-2` as its default. Pass `--provider gemini` to use the
-GA `gemini-3.1-flash-image` default, or pass a concrete `gemini-*` model and let
+Tool 1 defaults to `gpt-image-2.5-sunburst`. Pass
+`--model gpt-image-2.5-flare` for its speed-oriented variant. Both use
+the same OpenAI Images API transport and accept `xhigh` and `max`; keep quality
+explicit when comparing them. Pass `--provider gemini` to use the GA
+`gemini-3.1-flash-image` default, or pass a concrete `gemini-*` model and let
 provider auto-detection select Gemini. Credentials come from `--api-key-file`,
 `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY` as appropriate. Gemini
 key files must be plain text. The layout and render tools work offline. The POC

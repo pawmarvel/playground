@@ -151,7 +151,9 @@ class PipelineCliTests(unittest.TestCase):
             self.assertTrue(outputs[key].is_file(), key)
         record = json.loads(outputs["manifest"].read_text(encoding="utf-8"))
         self.assertEqual(record["pipeline"]["pet_name"], "SAUSAGE")
-        self.assertEqual(record["pipeline"]["image_model"], "gpt-image-2")
+        self.assertEqual(
+            record["pipeline"]["image_model"], "gpt-image-2.5-sunburst"
+        )
         self.assertIsNotNone(record["artifact_sha256"]["font"])
         self.assertIsNotNone(record["artifact_sha256"]["font_license"])
         self.assertEqual(

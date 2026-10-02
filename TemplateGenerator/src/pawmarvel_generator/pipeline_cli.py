@@ -34,6 +34,7 @@ from .font_catalog import (
 )
 from .font_license import FontLicenseError, resolve_ofl_license
 from .font_reference import FontReferenceError, load_font_reference
+from .generation_contract import CLI_GENERATION_QUALITIES
 from .layout_reference import LayoutReferenceError, load_layout_reference
 from .image_size import ImageSizeError, validate_generation_size
 from .layout_server import EditorConfig, serve_layout_editor
@@ -136,7 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="tracked preview directory (default: TEMPLATE_DIR/runs/PET-NAME)",
     )
     parser.add_argument("--api-key-file", type=Path)
-    parser.add_argument("--image-model", default="gpt-image-2")
+    parser.add_argument("--image-model", default="gpt-image-2.5-sunburst")
     resolution = parser.add_mutually_exclusive_group(required=True)
     resolution.add_argument(
         "--product-profile",
@@ -158,7 +159,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="override transformed-pet generation size (profile default when omitted)",
     )
     parser.add_argument(
-        "--quality", choices=("low", "medium", "high", "auto"), default="high"
+        "--quality", choices=CLI_GENERATION_QUALITIES, default="high"
     )
     parser.add_argument(
         "--layout-mode",

@@ -202,7 +202,7 @@
       "additionalProperties": false,
       "required": ["quality", "size", "background", "output_format", "n"],
       "properties": {
-        "quality": {"enum": ["low", "medium", "high", "auto"]},
+        "quality": {"enum": ["low", "medium", "high", "auto", "xhigh", "max"]},
         "size": {"type": "string", "pattern": "^[1-9][0-9]*x[1-9][0-9]*$"},
         "background": {"const": "transparent"},
         "output_format": {"const": "png"},

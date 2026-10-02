@@ -31,7 +31,9 @@ The current baseline already provides:
 - independent low-resolution and print-resolution art/pet preparation;
 - mechanically derived preview and print geometry;
 - bundle-v1, release-catalog-v2, layout-v2, and product-profile-v1 validation;
-- an OpenAI `gpt-image-2` production pet-runtime contract;
+- an OpenAI Images API production pet-runtime contract defaulting to GPT Image
+  2.5 Sunburst and supporting explicitly selected Flare or legacy GPT Image 2
+  experiments;
 - private OpenAI/Gemini authoring experiments;
 - a local catalog of 109 print-oriented OFL fonts; and
 - immutable S3 bundle and release publication with local receipts.
