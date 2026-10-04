@@ -613,8 +613,8 @@ examples/
     mvp-pets-v1/fixture-set.json           # 6-15-pet inventory; reviewed runs may use 1-15
 ```
 
-The current manifests contain three smoke dogs and fourteen release pets
-(eleven dogs and three cats). A v2 fixture record pins image bytes and carries
+The current manifests contain three smoke dogs and fifteen release pets
+(twelve dogs and three cats). A v2 fixture record pins image bytes and carries
 species, breed, size class, morphology,
 coat, capture conditions, risk tags, and source/license status. The validator
 rejects missing/changed images, duplicate IDs or bytes, invalid metadata, tier
@@ -1370,7 +1370,7 @@ and layout-attempt product-relative paths. For example:
 A pet prompt/model comparison uses the same non-customer pet fixtures, ordered
 references, product profile, and normalization policy. Prompt iteration first
 uses a two- or three-pet smoke tier; only shortlisted candidates incur a release
-run selected from the fourteen-pet dog-and-cat inventory. Six fixtures remain the
+run selected from the fifteen-pet dog-and-cat inventory. Six fixtures remain the
 recommended release breadth, but smaller operator-reviewed runs are allowed and
 produce explicit coverage warnings for manual graduation review.
 Both use one attempt per pet. The tool checks

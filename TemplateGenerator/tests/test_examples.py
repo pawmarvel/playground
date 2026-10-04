@@ -115,7 +115,8 @@ class RepositoryExampleTests(unittest.TestCase):
                         self.assertGreater(image.height, 0)
 
         pet_names = {
-            "australian-shepherd.png", "beagle.jpg", "bernese-mountain.png",
+            "australian-shepherd.jpg", "australian-shepherd-2.png",
+            "beagle.jpg", "bernese-mountain.png",
             "doodle.png", "french-bulldog.jpg", "german-shepherd.jpg",
             "golden-retriever.png", "great-dane.jpg", "greyhound.jpg",
             "sausage-dog-puppy.png", "white-fluffy-dog.png", "siamese.jpg",
@@ -143,8 +144,18 @@ class RepositoryExampleTests(unittest.TestCase):
             examples / "authoring/fixture-sets/mvp-pets-v1/fixture-set.json"
         )
         self.assertEqual((smoke.tier, len(smoke.fixtures)), ("smoke", 3))
-        self.assertEqual((release.tier, len(release.fixtures)), ("release", 14))
+        self.assertEqual((release.tier, len(release.fixtures)), ("release", 15))
         self.assertEqual(release.summary()["species"], ["cat", "dog"])
+        release_by_id = {fixture.id: fixture for fixture in release.fixtures}
+        self.assertEqual(
+            release_by_id["australian-shepherd"].image.name,
+            "australian-shepherd.jpg",
+        )
+        self.assertIn("short-tail", release_by_id["australian-shepherd"].morphology)
+        self.assertEqual(
+            release_by_id["australian-shepherd-seated"].image.name,
+            "australian-shepherd-2.png",
+        )
         self.assertEqual(smoke.attempts_per_fixture, 1)
         self.assertEqual(release.attempts_per_fixture, 1)
 

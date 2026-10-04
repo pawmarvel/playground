@@ -52,7 +52,7 @@ differ by example.
 Reusable non-customer pet QA fixtures live in
 [`examples/pet-inputs`](examples/pet-inputs). Pet-transform QA uses a three-dog
 smoke tier during iteration and an operator-selected release run of at least six
-pets from the fourteen-pet dog-and-cat inventory; both protocols run one attempt
+pets from the fifteen-pet dog-and-cat inventory; both protocols run one attempt
 per pet.
 These reference and pet images are development inputs for exercising the
 offline workflow; the repository does not assert production-use rights for

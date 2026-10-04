@@ -295,26 +295,35 @@ directly; do not translate it to a tool-specific synonym. The optional
 supported no-reference E2E path is the focused section 5/6 commands followed
 by immutable authoring through section 9.
 
-Derive the mode-sensitive CLI arguments once. All pet scratch calls and pet
-experiment creation commands use `PAWMARVEL_PET_NAME_ARGS`; layout creation
-uses `PAWMARVEL_LAYOUT_NAME_ARGS`. This is the only mode switch required by the
-main workflow.
+Derive the mode-sensitive CLI arguments once. Pet generation uses
+`PAWMARVEL_PET_NAME_ARGS`, layout creation uses
+`PAWMARVEL_LAYOUT_NAME_ARGS`, and direct rendering uses
+`PAWMARVEL_RENDER_NAME_ARGS`. The optional scratch pipeline uses
+`PAWMARVEL_PIPELINE_NAME_ARGS`. This is the only mode switch required by the
+workflow.
 
 ```bash
 typeset -a PAWMARVEL_PET_NAME_ARGS
 typeset -a PAWMARVEL_LAYOUT_NAME_ARGS
+typeset -a PAWMARVEL_RENDER_NAME_ARGS
+typeset -a PAWMARVEL_PIPELINE_NAME_ARGS
 PAWMARVEL_PET_NAME_ARGS=()
 PAWMARVEL_LAYOUT_NAME_ARGS=()
+PAWMARVEL_RENDER_NAME_ARGS=()
+PAWMARVEL_PIPELINE_NAME_ARGS=()
 
 case "$PAWMARVEL_NAME_MODE" in
   layout-text)
     test -n "$PAWMARVEL_PET_NAME"
     PAWMARVEL_LAYOUT_NAME_ARGS=(--pet-name "$PAWMARVEL_PET_NAME")
+    PAWMARVEL_RENDER_NAME_ARGS=(--pet-name "$PAWMARVEL_PET_NAME")
+    PAWMARVEL_PIPELINE_NAME_ARGS=(--pet-name "$PAWMARVEL_PET_NAME")
     ;;
   embedded-in-pet)
     test -n "$PAWMARVEL_PET_NAME"
     PAWMARVEL_PET_NAME_ARGS=(--pet-name "$PAWMARVEL_PET_NAME")
     PAWMARVEL_LAYOUT_NAME_ARGS=(--no-pet-name)
+    PAWMARVEL_PIPELINE_NAME_ARGS=(--pet-name "$PAWMARVEL_PET_NAME")
     ;;
   none)
     PAWMARVEL_LAYOUT_NAME_ARGS=(--no-pet-name)
@@ -485,34 +494,32 @@ different aspect ratios, `pawmarvel-generate` prints a warning for every
 mismatched reference. The call continues using the profile dimensions; inspect
 the generated art for unintended cropping, stretching, or reflow.
 
-### 3.2 Choose one complete E2E variant
+### 3.2 Confirm generation inputs
 
-The CLI default for a new design is **reference-guided with a separate name
-layer** (`layout-text`). The Cooper walkthrough explicitly chooses
-`embedded-in-pet` because its checked-in prompt contains `{{PET_NAME}}` and its
-lettering is part of the transformed artwork. In either case, build the ordered
-reference array and follow sections 5 through 9 exactly; the derived arrays
-select the appropriate pet and layout arguments.
+Personalization mode, reference input, and art-template mode are independent
+choices. Section 6.2 defines the three name modes. This section only selects
+how art and pet generation obtain visual guidance:
 
-Three alternatives are also complete E2E contracts, not partial debug modes:
+| Input path | References | Art mode | Bundle result |
+| --- | --- | --- | --- |
+| Reference-guided default | One to four ordered images | `generated` | Reference assets and generated art prompt are retained |
+| Prompt-defined | Zero | `generated` | No reference assets; art and pet prompts fully define the treatment |
+| Empty transparent art | Zero to four references for pet/layout evidence | `empty-canvas` | Deterministic all-zero `art.png`; no art prompt in the bundle |
 
-| Variant | References | Pet prompt | Saved layout | Bundle contract |
-| --- | --- | --- | --- | --- |
-| Default | One to four | No `{{PET_NAME}}` | Pet + name regions | Reference assets, `name_mode: layout-text`, OFL font |
-| Artistic name in transformed pet | Zero to four | Contains `{{PET_NAME}}` | Pet region only | `name_mode: embedded-in-pet`, no separate font |
-| No personalized name | Zero to four | No `{{PET_NAME}}` | Pet region only | `name_mode: none`, no name policy/font |
-| No reference image, prompt-only art | Zero | Fully specifies target pet treatment | Pet region, plus optional name region | No reference files; generated art prompt retained; runtime input order is only `user_pet` |
-| Empty transparent art | Zero to four as pet/layout evidence; never sent to canvas generation | Normal pet prompt for the chosen reference mode | Pet region, plus optional name region | Deterministic all-zero `art.png`; `prompts.art_template: null` |
+All three personalization modes work with each input path. The Cooper
+walkthrough uses ordered references, generated art, and `embedded-in-pet`.
+Regardless of the combination, follow sections 5 through 9 once; the reference
+and name arrays supply the appropriate command arguments.
 
-The no-reference variant may use either `layout-text` or `none`. Set
+For the prompt-defined path, set
 `PAWMARVEL_SAMPLE=""`, leave `reference-designs/` empty, and keep the two
 reference arrays empty. Use the prompt-only art command in section 5 and the
 pet-plus-prompt command in section 6. The immutable art experiment records
 `input_mode: prompt-only`; the pet experiment records
 `input_mode: pet-and-prompt`. Layout, review, print, graduation, bundle,
 release, and S3 commands are unchanged. The layout editor uses generated
-`art.png` as its canvas and still lets the operator place the pet and optional
-name regions manually.
+`art.png` as its canvas and still lets the operator place the pet and, for
+`layout-text`, its name region manually.
 
 The empty-transparent-art variant is independent of pet reference mode. Set
 `PAWMARVEL_ART_TEMPLATE_MODE='empty-canvas'`; section 5 then creates the art
@@ -525,10 +532,8 @@ empty. Sections 7 through 9 are unchanged. Do not set
 `PAWMARVEL_SAMPLE=""` merely because the background is empty if the finished
 design references are still required to guide pet transformation.
 
-For a product with no personalized name anywhere, follow section 6.3 before
-layout authoring. Do not confuse it with section 6.2: `embedded-in-pet` still
-personalizes a name through the image prompt, while `none` has no name input at
-all.
+Section 6.2 summarizes the three personalization contracts. Select one mode in
+the initial config; the remaining operation commands do not fork by mode.
 
 ## 4. Artifact lifecycle
 
@@ -1105,12 +1110,10 @@ specific hypothesis is a model/configuration change. In particular, do not use
 high quality here when the intended online setting is low quality: that would
 validate a different runtime contract.
 
-The generated config defaults to `layout-text`: the image model generates only
-the transformed pet, and section 7 adds the personalized name with the selected
-deterministic font. The commands below also cover `embedded-in-pet` and `none`
-because they consume the mode-derived arrays from section 3.1. Sections 6.2
-and 6.3 explain the input requirements and resulting contracts for those less
-common modes; they do not define separate command pipelines.
+A config created without a mode override defaults to `layout-text`; this Cooper
+walkthrough explicitly selected `embedded-in-pet`. The commands below cover all
+three modes because they consume the derived arrays from section 3.1. Section
+6.2 summarizes the mode contracts; it does not define a separate pipeline.
 
 ```bash
 PAWMARVEL_PET_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/pet-prompt-tuning"
@@ -1161,8 +1164,8 @@ confirm:
 - any supporting references clarify style without overriding the primary
   reference;
 - the PNG contains only the transformed pet with usable transparency—no design
-  background, template artwork, shadow, or mockup. It also contains no text
-  unless this experiment intentionally uses the artistic-name mode below; and
+  background, template artwork, shadow, or mockup. It contains text only when
+  `PAWMARVEL_NAME_MODE=embedded-in-pet`; and
 - the profile dimensions and representative-call latency are acceptable.
 
 Once one result is credible, promote only the prompt text into a named candidate
@@ -1199,9 +1202,9 @@ Use the two fixture tiers deliberately:
 - `mvp-pets-smoke-v1` has three morphology-diverse dogs and costs three calls
   per experiment. Use it after the scratch gate to compare credible candidate
   prompts or request configurations.
-- `mvp-pets-v1` has a fourteen-pet inventory with eleven dogs and three cats,
+- `mvp-pets-v1` has a fifteen-pet inventory with twelve dogs and three cats,
   spanning varied body shapes, coats, tones, and source-background difficulty.
-  A release run selects 6-14 of them and runs once per shortlisted experiment.
+  A release run selects 6-15 of them and runs once per shortlisted experiment.
 
 Both manifests fix `attempts_per_fixture` at one. Fixture selection is a
 no-cost, two-step operation: `prepare-benchmark` applies the requested count
@@ -1225,7 +1228,8 @@ popularity ranking:
 | --- | --- | --- | --- |
 | Dachshund | dog | small | long body, short legs |
 | Pomeranian-type | dog | toy | light, dense fluffy coat |
-| Australian Shepherd | dog | medium | merle pattern, double coat |
+| Australian Shepherd (short tail) | dog | medium | merle pattern, short tail, action pose, complex background |
+| Australian Shepherd (seated alternative) | dog | medium | merle pattern, seated pose, simple opaque background |
 | Bernese Mountain Dog | dog | large | dark dense coat, heavy build |
 | Doodle mix | dog | medium | curly edges, environmental background |
 | Golden Retriever | dog | large | light feathered coat |
@@ -1237,6 +1241,10 @@ popularity ranking:
 | Siamese | cat | medium | color-point coat, large ears, fine whiskers |
 | Maine Coon | cat | large | long fur, large build, full-body side view |
 | British Shorthair | cat | medium | compact build, round face, dense short coat |
+
+The `australian-shepherd` fixture is the short-tail action image used by the
+release-selection example below. Select `australian-shepherd-seated` when the
+seated, simple-background alternative is a better test case.
 
 ```bash
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
@@ -1388,233 +1396,36 @@ printf 'pet decision: %s\npet fixture:  %s\n' "$PAWMARVEL_PET_DECISION" "$PAWMAR
 The bundle selects the pet experiment's runtime contract, not this one pet's
 pixels. The attempt is representative QA evidence.
 
-### 6.2 Optional: generate artistic pet lettering with the transformed pet
+### 6.2 Personalization modes
 
-If `PAWMARVEL_NAME_MODE=embedded-in-pet` was selected during `init-config`, do
-not run a parallel workflow here: follow section 6.1 and section 7 normally.
-Their derived arrays pass the QA name into pet generation and disable the
-separate layout name layer. This subsection is guidance for converting or
-comparing an existing `layout-text` baseline.
+Sections 6.1 through 9 are one workflow for all three modes. Select the mode in
+`init-config`, build the derived arrays in section 3.1, and do not add manual
+name flags to later commands.
 
-For that comparison, set `PAWMARVEL_NAME_MODE=embedded-in-pet`, select the
-artistic prompt as `PAWMARVEL_PET_PROMPT`, and rerun the name-mode setup block
-from section 3.1 before using the commands below. Prefer a new versioned config
-when the artistic mode wins and becomes the baseline.
+| Mode | Pet prompt | Pet generation | Saved layout | Bundle and FE behavior |
+| --- | --- | --- | --- | --- |
+| `layout-text` | Must not contain `{{PET_NAME}}` | Generates only the pet cutout | Pet and name regions; selected OFL font is bundled | FE collects a name and can rerender it without another image call |
+| `embedded-in-pet` | Must contain exact `{{PET_NAME}}` | Substitutes the configured QA name and generates pet plus lettering | Pet region only; no font assets | FE collects the name before transformation; changing it requires another paid transformation |
+| `none` | Must not contain `{{PET_NAME}}` | Generates only the pet artwork | Pet region only; no font assets | FE shows no name input and performs no name validation, substitution, or rendering |
 
-Use this alternative only when the design requires the image model to generate
-the pet name as part of `transformed-pet.png`. Put the exact, case-sensitive
-token `{{PET_NAME}}` in the artistic-name prompt. The following disposable
-scratch command is the standard section 6.1 command with one explicit
-`--pet-name` override:
+For `embedded-in-pet`, the experiment stores the QA name under
+`generation.prompt_variables.pet_name`; attempts and benchmarks inherit it.
+The generator replaces every exact token and records the resolved value in
+`run.json`. Use a different attempt-level `--pet-name` only for a deliberate
+one-off QA override. Test the supported name-length range because typography is
+model-generated and each customer name requires a new image call.
 
-```bash
-PAWMARVEL_ARTISTIC_NAME_SCRATCH="$PAWMARVEL_AUTHORING_PRODUCT/scratch/pet-artistic-name"
-PAWMARVEL_ARTISTIC_NAME_PROMPT="$PAWMARVEL_ARTISTIC_NAME_SCRATCH/pet-transform-gpt-artistic-name.md"
+For `layout-text`, use the layout editor to select the name region, font, and
+fixed sizing policy. For both fontless modes, leave **Render a separate
+pet-name text layer** disabled. The section 7 command already initializes that
+state through `PAWMARVEL_LAYOUT_NAME_ARGS`.
 
-mkdir -p "$PAWMARVEL_ARTISTIC_NAME_SCRATCH"
-cp "$PAWMARVEL_PET_PROMPT" "$PAWMARVEL_ARTISTIC_NAME_PROMPT"
-"${EDITOR:-vi}" "$PAWMARVEL_ARTISTIC_NAME_PROMPT"
-
-grep -Fq '{{PET_NAME}}' "$PAWMARVEL_ARTISTIC_NAME_PROMPT"
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-generate" \
-  --provider "$PAWMARVEL_PET_PROVIDER" \
-  --model "$PAWMARVEL_PET_MODEL" \
-  --quality "$PAWMARVEL_PET_QUALITY" \
-  --pet-image "$PAWMARVEL_PET" \
-  "${PAWMARVEL_PET_NAME_ARGS[@]}" \
-  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
-  --prompt-file "$PAWMARVEL_ARTISTIC_NAME_PROMPT" \
-  --product-profile "$PAWMARVEL_PROFILE" \
-  --profile-layer transformed-pet \
-  --background transparent \
-  --output-format png \
-  --output-dir "$PAWMARVEL_ARTISTIC_NAME_SCRATCH" \
-  --output-name transformed-pet.png \
-  --force
-```
-
-After the scratch output is satisfactory, create an alternative immutable pet
-experiment with the same name. Do not run this in addition to `pet-gpt-v01`
-unless the intent is to compare both modes; use a distinct experiment ID so
-their evidence cannot be confused:
-
-```bash
-mkdir -p "$PAWMARVEL_PROMPT_CANDIDATES"
-cp "$PAWMARVEL_ARTISTIC_NAME_PROMPT" \
-  "$PAWMARVEL_PROMPT_CANDIDATES/pet-transform-gpt-artistic-name-v01.md"
-
-PAWMARVEL_ARTISTIC_NAME_CANDIDATE_PROMPT="$PAWMARVEL_PROMPT_CANDIDATES/pet-transform-gpt-artistic-name-v01.md"
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
-  --kind pet \
-  --experiment-id pet-gpt-artistic-name-v01 \
-  --design-id "$PAWMARVEL_DESIGN_ID" \
-  --product-profile "$PAWMARVEL_PROFILE" \
-  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
-  --prompt-file "$PAWMARVEL_ARTISTIC_NAME_CANDIDATE_PROMPT" \
-  "${PAWMARVEL_PET_NAME_ARGS[@]}" \
-  --provider "$PAWMARVEL_PET_PROVIDER" \
-  --model "$PAWMARVEL_PET_MODEL" \
-  --quality "$PAWMARVEL_PET_QUALITY" \
-  --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
-
-PAWMARVEL_PET_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/pet/pet-gpt-artistic-name-v01"
-```
-
-If this is the chosen workflow, run the same smoke and release sequence from
-section 6.1 against this experiment. The experiment-level name is inherited, so
-the paid benchmark commands still do not repeat `--pet-name`. Use distinct
-attempt prefixes and review IDs so the default and artistic-name evidence
-cannot be mixed. This optional walkthrough reuses the reviewed smoke and release
-selection drafts created in section 6.1; creating or editing those JSON drafts
-makes no provider calls. Verify them before starting the paid sequence:
-
-```bash
-test -f "$PAWMARVEL_SMOKE_SELECTION"
-test -f "$PAWMARVEL_RELEASE_SELECTION"
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" benchmark \
-  --experiment "$PAWMARVEL_PET_EXPERIMENT" \
-  --fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET" \
-  --fixture-selection "$PAWMARVEL_SMOKE_SELECTION" \
-  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
-  --attempts-per-fixture 1 \
-  --attempt-id-prefix artistic-smoke
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
-  --kind pet \
-  --review-id pet-gpt-artistic-name-smoke \
-  --experiment pet-gpt-artistic-name-v01 \
-  --attempt-prefix artistic-smoke- \
-  --fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET" \
-  --fixture-selection "$PAWMARVEL_SMOKE_SELECTION" \
-  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
-  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" benchmark \
-  --experiment "$PAWMARVEL_PET_EXPERIMENT" \
-  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
-  --fixture-selection "$PAWMARVEL_RELEASE_SELECTION" \
-  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
-  --attempts-per-fixture 1 \
-  --attempt-id-prefix artistic-release
-
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" compare \
-  --kind pet \
-  --review-id pet-gpt-artistic-name-release \
-  --experiment pet-gpt-artistic-name-v01 \
-  --attempt-prefix artistic-release- \
-  --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
-  --fixture-selection "$PAWMARVEL_RELEASE_SELECTION" \
-  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
-  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT"
-```
-
-Review both contact sheets, then record this mode's winner and derive its
-representative attempt exactly once:
-
-```bash
-PAWMARVEL_PET_REVIEW_ID="pet-gpt-artistic-name-release"
-PAWMARVEL_PET_SELECTED_EXPERIMENT_ID="pet-gpt-artistic-name-v01"
-PAWMARVEL_PET_LAYOUT_ATTEMPT_ID="artistic-release-sausage-dog-0001"
-PAWMARVEL_PET_REVIEW="$PAWMARVEL_AUTHORING_PRODUCT/reviews/pet/$PAWMARVEL_PET_REVIEW_ID"
-
-PAWMARVEL_PET_DECISION="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" record-decision \
-  --review "$PAWMARVEL_PET_REVIEW" \
-  --selected-experiment "$PAWMARVEL_PET_SELECTED_EXPERIMENT_ID" \
-  --selected-by application-owner \
-  --notes "Accepted artistic pet-name pixels, identity, alpha, and latency")"
-
-PAWMARVEL_PET_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/pet/$PAWMARVEL_PET_SELECTED_EXPERIMENT_ID"
-PAWMARVEL_PET_ATTEMPT="$PAWMARVEL_PET_EXPERIMENT/attempts/$PAWMARVEL_PET_LAYOUT_ATTEMPT_ID"
-test -f "$PAWMARVEL_PET_ATTEMPT/run.json"
-```
-
-The experiment stores the default under
-`generation.prompt_variables.pet_name`. Later `run-attempt` and `benchmark`
-commands inherit it automatically and pass it to `pawmarvel-generate`; do not
-repeat `--pet-name` on those commands. Supply an attempt- or benchmark-level
-`--pet-name` only to deliberately override the experiment fixture, for example:
-
-```bash
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
-  --experiment "$PAWMARVEL_PET_EXPERIMENT" \
-  --attempt-id artistic-name-override-0001 \
-  --pet-image "$PAWMARVEL_PET" \
-  --pet-name "MILO"
-```
-
-The generator replaces every `{{PET_NAME}}` occurrence and records the resolved
-value in the attempt `run.json`. A token without either an experiment default
-or an attempt override is rejected before a paid call. A supplied name with no
-token emits a warning but does not block the call.
-
-For a disposable direct-generator run that intentionally reuses a prompt
-containing `{{PET_NAME}}` but must generate no name, pass `--no-pet-name`
-instead of `--pet-name`. The generator leaves the prompt file unchanged,
-prepends `No pet name, ignore {{PET_NAME}} placeholder` as the first line of
-the submitted API prompt, records `no_pet_name: true`, and continues the image
-request. Prefer removing name-specific instructions from the prompt when
-authoring a reusable no-name experiment; this override is primarily for quick
-scratch comparison.
-
-Because the lettering is baked into the transformed-pet pixels, turn off
-**Render a separate pet-name text layer** during layout authoring. The saved
-layout then omits `name`, and preview/print composition will not add duplicate
-font-rendered text. For this E2E variant, use the section 7 layout creation
-command with the derived `PAWMARVEL_PET_ATTEMPT`, but explicitly select the
-no-name layout mode:
-
-```bash
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
-  --experiment "$PAWMARVEL_LAYOUT_EXPERIMENT" \
-  --attempt-id attempt-0001 \
-  --no-pet-name
-```
-
-Save only the pet region, then use the normal layout comparison, layout
-decision, assembly review, print preparation, graduation, bundle build, and
-bundle validation commands in sections 7-9. None of those commands needs a
-pet-name override. Print preparation infers the embedded name from the selected
-pet attempt, and bundle generation receives only the normal name-length policy.
-The resulting layout attempt, print candidate, graduation, and bundle contain
-no `fonts/` assets. The bundle declares `renderer.name_mode` as
-`embedded-in-pet`, and its selected layout provenance records
-`font_sha256: null`. This completes the alternative E2E path without changing
-the default path.
-
-### 6.3 Optional: product with no personalized pet name
-
-Use this variant only when neither the transformed-pet pixels nor the
-deterministic layout should contain a pet name. Prefer selecting
-`--name-mode none` during `init-config`, keeping the pet prompt free of the exact
-`{{PET_NAME}}` token, and then following sections 6.1 and 7 unchanged. Their
-derived arrays omit a pet-generation name and disable the layout name layer.
-The manual command below is only needed when converting an already-loaded
-configuration without rebuilding the arrays.
-
-After creating `PAWMARVEL_LAYOUT_EXPERIMENT` with the first command in section
-7, replace that section's normal layout `run-attempt` command with this one to
-start the selected layout attempt with the name layer disabled:
-
-```bash
-"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
-  --experiment "$PAWMARVEL_LAYOUT_EXPERIMENT" \
-  --attempt-id attempt-0001 \
-  --no-pet-name
-```
-
-In the editor, place and save the pet region and leave **Render a separate
-pet-name text layer** disabled. Continue with the normal layout/assembly
-reviews, print finalist, graduation, bundle, release, and publication commands
-in sections 7 through 9. Do not add `--pet-name` to print or consumer replay
-commands.
-
-This path records `name_mode: none` in the layout attempt, print candidate, and
-bundle. `layout.json` and `layout-print.json` omit `name`; the bundle omits
-`fonts/`, sets `personalization` to `{}`, and records a null QA pet name. The FE
-must not request, validate, substitute, or render a pet name for this bundle.
+To compare modes, create a new versioned operation config and distinct pet and
+layout experiment IDs. Do not mutate an existing experiment or mix attempts
+from different modes. Once a mode is selected, the normal review, print,
+graduation, bundle, release, and publication commands are unchanged. Bundle
+validation derives `renderer.name_mode` from the immutable prompt variables,
+layout, and font artifacts rather than trusting the mutable operation config.
 
 ## 7. Iterate layout and font
 
@@ -1657,29 +1468,27 @@ lettering in the finished reference.
 The Cooper example intentionally starts without checked-in layout or font
 reference JSON. In its first layout experiment, omit both
 `--layout-reference` and `--font-reference`. For a reference-guided design, use
-the reference canvas to select the pet and name regions, enter the exact
-visible reference text, apply the geometry, analyze fonts, and review the
-authoritative Pillow preview. Saving writes `qa/layout-reference.json` and
-`qa/font-reference.json`; pass both files to later layout experiments using the
-same reference bytes. Use `--reference-text "CHARLIE"` only as an initial UI
-convenience when no saved region artifact exists.
+the reference canvas to select the pet region and review the authoritative
+Pillow preview. In `layout-text`, also select the name region, enter the visible
+reference text, and analyze fonts. Saving writes `qa/layout-reference.json`
+and, only for a separate text layer, `qa/font-reference.json`; pass the files
+that exist to later layout experiments using the same reference bytes. Use
+`--reference-text "CHARLIE"` only as an initial UI convenience when no saved
+region artifact exists.
 
 For a no-reference design, the editor uses the generated `art.png` as its
 comparison canvas so the UI remains usable, but there is no screenshot geometry
 or lettering to infer. Do not pass `--layout-reference`, `--font-reference`, or
-`--reference-text`. Adjust the pet/name boxes directly against the exact
-assembled preview and choose the font manually. The saved layout, preview, and
-print scaling are otherwise identical to the reference-guided path.
+`--reference-text`. Adjust the pet box—and the name box/font for
+`layout-text`—directly against the exact assembled preview. The saved layout,
+preview, and print scaling are otherwise identical to the reference-guided
+path.
 
-For an experiment whose selected transformed-pet output already contains its
-artistic name, turn off **Render a separate pet-name text layer** before drawing
-geometry. Select and apply only the pet region, which must contain both the pet
-and its generated lettering. Do not select a name region or font. The editor
-saves a layout with only `art` and `pet`, records `name_mode` as
-`embedded-in-pet`, and does not create `fonts/`, `qa/font-reference.json`, or
-`qa/font-recommendation.json`. If the selected pet prompt has no applied
-`{{PET_NAME}}`, the same fontless save records `none` instead. The same preview
-renderer remains authoritative.
+For both fontless modes, select only the pet region and leave **Render a
+separate pet-name text layer** disabled. In `embedded-in-pet`, that region must
+contain the generated lettering too. The editor records `embedded-in-pet` when
+the selected pet attempt applied `{{PET_NAME}}`, otherwise `none`; neither mode
+creates fonts or font-reference/recommendation artifacts.
 
 The mapped boxes are initial recommendations. A screenshot can have a different
 aspect ratio, and generated art can reflow fixed decorations, so adjust the
@@ -1765,8 +1574,8 @@ The last successfully
 previewed name and active pet are saved in `qa/calibration-fixture.json`, along
 with the hashes of every transformed pet previewed during the session. These
 records are copied into the immutable attempt for traceability. In
-artistic-name mode, that fixture stores `pet_name: null` because the lettering
-is already part of the transformed-pet pixels.
+`embedded-in-pet` and `none` modes, that fixture stores `pet_name: null`
+because the layout has no separate text layer.
 
 The displayed image is always produced by the same Pillow renderer used by
 assembly. A changed control marks the old image stale, cancels the earlier
@@ -1890,12 +1699,13 @@ fixed artwork, return to section 5. If it is pet style/alpha/latency, return to
 section 6. If it is placement or typography, create another layout experiment
 or attempt and repeat this section.
 
-The assembly command intentionally has no separate pet-name option. In the
-default `layout-text` mode it renders the exact name saved by the layout UI and
+The assembly command intentionally has no separate pet-name option. In
+`layout-text` mode it renders the exact name saved by the layout UI and
 recorded by `PAWMARVEL_LAYOUT_ATTEMPT`, ensuring the layout and assembly
 previews use identical text. In `embedded-in-pet` mode the layout records no
 name or font, and assembly composes the already-lettered transformed-pet image
-without adding text. To preserve a second separate-text comparison, save
+without adding text. In `none` mode it likewise adds no text. To preserve a
+second separate-text comparison, save
 another layout attempt after changing **Preview pet name**.
 
 The walkthrough selects `layout-v01/attempt-0001`. If another candidate wins,
@@ -2340,12 +2150,15 @@ PAWMARVEL_ART_FEEDBACK_PREVIEWS="$PAWMARVEL_ART_SCRATCH/previews"
 PAWMARVEL_ART_FEEDBACK_PET_1="$PAWMARVEL_PET_ATTEMPT/outputs/transformed-pet.png"
 PAWMARVEL_ART_FEEDBACK_PET_2="$PAWMARVEL_PET_EXPERIMENT/attempts/release-white-fluffy-dog-0001/outputs/transformed-pet.png"
 
-mkdir -p "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/fonts" \
+mkdir -p "$PAWMARVEL_ART_FEEDBACK_TEMPLATE" \
   "$PAWMARVEL_ART_FEEDBACK_PREVIEWS"
 cp "$PAWMARVEL_LAYOUT_ATTEMPT/outputs/layout.json" \
   "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/layout.json"
-cp -R "$PAWMARVEL_LAYOUT_ATTEMPT/outputs/fonts/." \
-  "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/fonts/"
+if test -d "$PAWMARVEL_LAYOUT_ATTEMPT/outputs/fonts"; then
+  mkdir -p "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/fonts"
+  cp -R "$PAWMARVEL_LAYOUT_ATTEMPT/outputs/fonts/." \
+    "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/fonts/"
+fi
 
 test -f "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/art.png"
 test -f "$PAWMARVEL_ART_FEEDBACK_PET_1"
@@ -2354,7 +2167,7 @@ test -f "$PAWMARVEL_ART_FEEDBACK_PET_1"
   --template-dir "$PAWMARVEL_ART_FEEDBACK_TEMPLATE" \
   --layout "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/layout.json" \
   --pet "$PAWMARVEL_ART_FEEDBACK_PET_1" \
-  --pet-name "$PAWMARVEL_PET_NAME" \
+  "${PAWMARVEL_RENDER_NAME_ARGS[@]}" \
   --output "$PAWMARVEL_ART_FEEDBACK_PREVIEWS/pet-01.png" \
   --debug-output "$PAWMARVEL_ART_FEEDBACK_PREVIEWS/pet-01-debug.png" \
   --force
@@ -2370,7 +2183,7 @@ if test -f "$PAWMARVEL_ART_FEEDBACK_PET_2"; then
     --template-dir "$PAWMARVEL_ART_FEEDBACK_TEMPLATE" \
     --layout "$PAWMARVEL_ART_FEEDBACK_TEMPLATE/layout.json" \
     --pet "$PAWMARVEL_ART_FEEDBACK_PET_2" \
-    --pet-name "$PAWMARVEL_PET_NAME" \
+    "${PAWMARVEL_RENDER_NAME_ARGS[@]}" \
     --output "$PAWMARVEL_ART_FEEDBACK_PREVIEWS/pet-02.png" \
     --debug-output "$PAWMARVEL_ART_FEEDBACK_PREVIEWS/pet-02-debug.png" \
     --force
@@ -2799,6 +2612,13 @@ PAWMARVEL_SECOND_PET="$PAWMARVEL_PROJECT/examples/pet-inputs/white-fluffy-dog.pn
 PAWMARVEL_SECOND_RUN="$PAWMARVEL_PROJECT/work/consumer-tests/cooper--blanket-king-9375x12375/v000001/white-fluffy-dog"
 PAWMARVEL_SECOND_PET_MODEL="$("$PAWMARVEL_PROJECT/.venv/bin/python" -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["runtime"]["model"])' "$PAWMARVEL_BUNDLE/bundle.json")"
 PAWMARVEL_SECOND_PET_QUALITY="$("$PAWMARVEL_PROJECT/.venv/bin/python" -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["runtime"]["request_parameters"]["quality"])' "$PAWMARVEL_BUNDLE/bundle.json")"
+PAWMARVEL_SECOND_NAME_MODE="$("$PAWMARVEL_PROJECT/.venv/bin/python" -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["renderer"]["name_mode"])' "$PAWMARVEL_BUNDLE/bundle.json")"
+typeset -a PAWMARVEL_SECOND_NAME_ARGS=()
+case "$PAWMARVEL_SECOND_NAME_MODE" in
+  layout-text|embedded-in-pet) PAWMARVEL_SECOND_NAME_ARGS=(--pet-name FLUFFY) ;;
+  none) : ;;
+  *) printf 'error: unsupported bundle name mode: %s\n' "$PAWMARVEL_SECOND_NAME_MODE" >&2; return 2 2>/dev/null || exit 2 ;;
+esac
 typeset -a PAWMARVEL_BUNDLE_REFERENCE_ARGS=()
 while IFS= read -r reference_asset; do
   PAWMARVEL_BUNDLE_REFERENCE_ARGS+=(
@@ -2815,7 +2635,7 @@ mkdir -p "$PAWMARVEL_SECOND_RUN/preview" "$PAWMARVEL_SECOND_RUN/print"
   --prompt-file "$PAWMARVEL_BUNDLE/pet-transform-gpt.md" \
   --provider openai \
   --model "$PAWMARVEL_SECOND_PET_MODEL" \
-  --pet-name FLUFFY \
+  "${PAWMARVEL_SECOND_NAME_ARGS[@]}" \
   --size 816x816 \
   --quality "$PAWMARVEL_SECOND_PET_QUALITY" \
   --output-dir "$PAWMARVEL_SECOND_RUN/preview"
@@ -2828,14 +2648,10 @@ selected pet quality explicitly in a consumer/debug run; do not rely on the
 `pawmarvel-poc-run` default, because a different value changes both latency and
 generation behavior.
 
-In the normal `layout-text` bundle, `--pet-name FLUFFY` above is consumed only
-by the deterministic renderer. `pawmarvel-poc-run` does not forward it to image
-generation because the bundled pet prompt has no `{{PET_NAME}}` token. In an
-`embedded-in-pet` bundle, the same command is the explicit E2E override: the
-prompt contains the token, so the wrapper forwards `FLUFFY` to pet generation,
-and the fontless layout does not render a second name. Omitting `--pet-name` is
-valid only when the layout has no name layer and the prompt has no token.
-For that `none` bundle, omit the `--pet-name FLUFFY` line from the example.
+The bundle-derived name array supplies `FLUFFY` for both personalized modes and
+supplies no argument for `none`. In `layout-text`, the value is consumed only by
+the deterministic renderer. In `embedded-in-pet`, the wrapper substitutes it
+into the pet prompt and the fontless layout does not render a second name.
 
 The manifest-driven array covers every valid bundle: it expands to no arguments
 for a no-reference design, one argument for the primary reference, or ordered
@@ -2859,7 +2675,7 @@ Scale only the approved customer pet and compose it with bundled print art:
   --template-dir "$PAWMARVEL_BUNDLE" \
   --layout "$PAWMARVEL_BUNDLE/layout-print.json" \
   --pet "$PAWMARVEL_SECOND_RUN/print/transformed-pet-print.png" \
-  --pet-name FLUFFY \
+  "${PAWMARVEL_SECOND_NAME_ARGS[@]}" \
   --output "$PAWMARVEL_SECOND_RUN/final-print.png" \
   --debug-output "$PAWMARVEL_SECOND_RUN/final-print-debug.png"
 ```
@@ -2934,7 +2750,7 @@ pawmarvel_pipeline_debug() {
     --art-prompt "$PAWMARVEL_ART_PROMPT" \
     --pet-prompt "$PAWMARVEL_PET_PROMPT" \
     --pet-image "$PAWMARVEL_PET" \
-    --pet-name "$PAWMARVEL_PET_NAME" \
+    "${PAWMARVEL_PIPELINE_NAME_ARGS[@]}" \
     --product-profile "$PAWMARVEL_PROFILE" \
     --font-catalog "$PAWMARVEL_FONT_CATALOG" \
     "${PAWMARVEL_LAYOUT_REFERENCE_ARGS[@]}" \
@@ -2955,12 +2771,12 @@ For a multi-reference scratch run, the pipeline stages and copies every
 `--reference-design` in array order. The first remains the primary layout
 reference, matching the manual art and pet experiments.
 
-The debug pipeline's `--pet-name` initializes layout text. It is not forwarded
-to the pet image call for the default prompt. If `--pet-prompt` contains
-`{{PET_NAME}}`, the pipeline also substitutes the same value into image
-generation. When pet generation is selected, a token with no option fails
-validation before either paid image call; a layout-only rerun can reuse the
-already-lettered pet without repeating the name.
+The derived array supplies a name for both personalized modes and no argument
+for `none`. In `layout-text`, the pipeline uses it only for layout rendering. In
+`embedded-in-pet`, it is also substituted into the pet prompt; disable
+**Render a separate pet-name text layer** in the scratch layout editor to avoid
+duplicate lettering. For `none`, leave that layer disabled. The immutable main
+workflow initializes these states automatically and remains authoritative.
 
 `"$@"` forwards any arguments supplied to the shell function. It allows the
 same base command to run selective diagnostics:

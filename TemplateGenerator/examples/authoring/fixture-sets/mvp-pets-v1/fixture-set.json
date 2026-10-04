@@ -19,11 +19,18 @@
       "risk_tags": ["light-edge-detail", "dense-fur"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
     },
     {
-      "id": "australian-shepherd", "pet_image": "../../../pet-inputs/australian-shepherd.png", "sha256": "ab534b3575919d73b9d7d27360720a4ebc12a94f873794784a417c081efc5fc8",
+      "id": "australian-shepherd", "pet_image": "../../../pet-inputs/australian-shepherd.jpg", "sha256": "d0c9e0efa531eab9ad7cae046de7790709c3d2959edbc15820c6ca546693027a",
       "species": "dog", "breed": {"id": "australian-shepherd", "label": "Australian Shepherd", "mixed": false}, "size_class": "medium",
-      "morphology": ["athletic", "pointed-ears", "dense-coat"], "coat": {"length": "medium", "texture": "double", "tone": "mixed"},
-      "capture": {"framing": "full-body", "view": "three-quarter", "subject_coverage": "isolated", "background_complexity": "transparent"},
-      "risk_tags": ["merle-pattern", "fine-fur-edge"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
+      "morphology": ["athletic", "semi-upright-ears", "dense-coat", "short-tail"], "coat": {"length": "medium", "texture": "double", "tone": "mixed"},
+      "capture": {"framing": "full-body", "view": "side", "subject_coverage": "environmental", "background_complexity": "complex"},
+      "risk_tags": ["merle-pattern", "fine-fur-edge", "short-tail", "action-pose", "environmental-background", "object-occlusion"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
+    },
+    {
+      "id": "australian-shepherd-seated", "pet_image": "../../../pet-inputs/australian-shepherd-2.png", "sha256": "ab534b3575919d73b9d7d27360720a4ebc12a94f873794784a417c081efc5fc8",
+      "species": "dog", "breed": {"id": "australian-shepherd", "label": "Australian Shepherd", "mixed": false}, "size_class": "medium",
+      "morphology": ["athletic", "semi-upright-ears", "dense-coat", "seated-pose"], "coat": {"length": "medium", "texture": "double", "tone": "mixed"},
+      "capture": {"framing": "full-body", "view": "front", "subject_coverage": "mostly-isolated", "background_complexity": "simple"},
+      "risk_tags": ["merle-pattern", "fine-fur-edge", "seated-pose", "opaque-background"], "rights": {"source_kind": "operator-provided", "license": "unverified-development-fixture", "reviewed": false, "intended_use": "offline-template-qa"}
     },
     {
       "id": "bernese-mountain-dog", "pet_image": "../../../pet-inputs/bernese-mountain.png", "sha256": "9ccb922d09414e7cd67476393ae488e7dcf47e6cb6645d1a99f15912142ef508",

@@ -1,7 +1,7 @@
 # Repository examples
 
 The repository intentionally carries three small source-design examples
-and a fourteen-pet reusable QA inventory. They demonstrate the operations guide
+and a fifteen-pet reusable QA inventory. They demonstrate the operations guide
 and exercise development tests; they are not production catalog entries. For
 the MVP trial, an operator performs a lightweight source/rights review and uses
 only non-customer QA pets; formal license evidence is not a publication gate.
@@ -14,7 +14,7 @@ design-specific artifacts:
   attributed in `ONLINE_FIXTURE_ATTRIBUTIONS.md`; the fixture manifests pin all
   image hashes and carry machine-readable trait and rights metadata.
 - `authoring/fixture-sets/mvp-pets-smoke-v1/` selects three diverse dogs for
-  fast prompt iteration. `mvp-pets-v1/` provides a fourteen-pet inventory from
+  fast prompt iteration. `mvp-pets-v1/` provides a fifteen-pet inventory from
   which an operator selects at least six for release QA. Both run exactly one
   attempt per selected pet.
 - `life-is-good/` and `charlie-well-trained/` each contain that design's
