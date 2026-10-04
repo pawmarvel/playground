@@ -395,17 +395,149 @@ class AuthoringCliTests(unittest.TestCase):
             self.assertEqual(output.getvalue().strip(), str(expected))
             self.assertTrue(expected.is_file())
             self.assertIn(
-                "export PAWMARVEL_ART_TEMPLATE_MODE='generated'",
+                "export PAWMARVEL_ART_TEMPLATE_MODE=generated",
                 expected.read_text(encoding="utf-8"),
             )
             self.assertIn(
-                "export PAWMARVEL_ART_MODEL='gpt-image-2.5-sunburst'",
+                "export PAWMARVEL_ART_MODEL=gpt-image-2.5-sunburst",
                 expected.read_text(encoding="utf-8"),
             )
             self.assertIn(
-                "export PAWMARVEL_PET_MODEL='gpt-image-2.5-sunburst'",
+                "export PAWMARVEL_PET_MODEL=gpt-image-2.5-sunburst",
                 expected.read_text(encoding="utf-8"),
             )
+            self.assertIn(
+                "export PAWMARVEL_NAME_MODE=layout-text",
+                expected.read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                "export PAWMARVEL_PET_NAME=SAUSAGE",
+                expected.read_text(encoding="utf-8"),
+            )
+
+    def test_init_config_captures_generation_and_name_mode_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    main(
+                        [
+                            "init-config",
+                            "--project-root",
+                            str(root),
+                            "--design-id",
+                            "life-is-good",
+                            "--product-profile-id",
+                            "blanket-king-9375x12375",
+                            "--art-template-mode",
+                            "empty-canvas",
+                            "--art-provider",
+                            "gemini",
+                            "--art-model",
+                            "gemini-3.1-flash-image",
+                            "--art-quality",
+                            "medium",
+                            "--pet-provider",
+                            "openai",
+                            "--pet-model",
+                            "gpt-image-2.5-flare",
+                            "--pet-quality",
+                            "high",
+                            "--name-mode",
+                            "embedded-in-pet",
+                            "--pet-name",
+                            "COOPER",
+                            "--pet-name-max-length",
+                            "16",
+                            "--upscale-backend",
+                            "bria",
+                        ]
+                    ),
+                    0,
+                )
+            contents = Path(output.getvalue().strip()).read_text(encoding="utf-8")
+            for expected in (
+                "export PAWMARVEL_ART_TEMPLATE_MODE=empty-canvas",
+                "export PAWMARVEL_ART_PROVIDER=gemini",
+                "export PAWMARVEL_ART_MODEL=gemini-3.1-flash-image",
+                "export PAWMARVEL_ART_QUALITY=medium",
+                'gemini) export PAWMARVEL_ART_PROMPT="$PAWMARVEL_ART_PROMPT_GEMINI"',
+                'openai) export PAWMARVEL_PET_PROMPT="$PAWMARVEL_PET_PROMPT_GPT"',
+                "export PAWMARVEL_PET_MODEL=gpt-image-2.5-flare",
+                "export PAWMARVEL_PET_QUALITY=high",
+                "export PAWMARVEL_NAME_MODE=embedded-in-pet",
+                "export PAWMARVEL_PET_NAME=COOPER",
+                "export PAWMARVEL_PET_NAME_MAX_LENGTH=16",
+                "export PAWMARVEL_UPSCALE_BACKEND=bria",
+            ):
+                self.assertIn(expected, contents)
+            config = Path(output.getvalue().strip())
+            loaded = subprocess.run(
+                [
+                    "/bin/sh",
+                    "-c",
+                    (
+                        f". {shlex.quote(str(config))}; "
+                        "printf '%s\\n%s\\n' \"$PAWMARVEL_ART_PROMPT\" "
+                        "\"$PAWMARVEL_PET_PROMPT\""
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(loaded.returncode, 0, loaded.stderr)
+            selected_prompts = loaded.stdout.splitlines()
+            self.assertTrue(selected_prompts[0].endswith("/art-template-gemini.md"))
+            self.assertTrue(selected_prompts[1].endswith("/pet-transform-gpt.md"))
+
+    def test_init_config_none_name_mode_clears_qa_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    main(
+                        [
+                            "init-config",
+                            "--project-root",
+                            str(root),
+                            "--design-id",
+                            "life-is-good",
+                            "--product-profile-id",
+                            "blanket-king-9375x12375",
+                            "--name-mode",
+                            "none",
+                        ]
+                    ),
+                    0,
+                )
+            contents = Path(output.getvalue().strip()).read_text(encoding="utf-8")
+            self.assertIn("export PAWMARVEL_NAME_MODE=none", contents)
+            self.assertIn("export PAWMARVEL_PET_NAME=''", contents)
+
+    def test_init_config_rejects_provider_model_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            stderr = io.StringIO()
+            with redirect_stderr(stderr), self.assertRaises(SystemExit):
+                main(
+                    [
+                        "init-config",
+                        "--project-root",
+                        str(root),
+                        "--design-id",
+                        "life-is-good",
+                        "--product-profile-id",
+                        "blanket-king-9375x12375",
+                        "--pet-provider",
+                        "gemini",
+                        "--pet-model",
+                        "gpt-image-2.5-sunburst",
+                    ]
+                )
+            self.assertIn("Gemini image generation requires", stderr.getvalue())
 
     def test_init_config_rejects_invalid_version_number(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -21,7 +21,14 @@ from .authoring import (
 from .cli_errors import HelpfulArgumentParser, add_debug_argument, report_unexpected
 from .fixture_set import load_fixture_set, write_fixture_selection
 from .generation_contract import CLI_GENERATION_QUALITIES
-from .operation_config import write_operation_config, write_shared_config
+from .operation_config import (
+    ART_TEMPLATE_MODES,
+    IMAGE_PROVIDERS,
+    NAME_MODES,
+    UPSCALE_BACKENDS,
+    write_operation_config,
+    write_shared_config,
+)
 
 
 DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -83,6 +90,39 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="positive config iteration number used in the derived filename (default: 1)",
+    )
+    init_config.add_argument(
+        "--art-template-mode", choices=ART_TEMPLATE_MODES, default="generated"
+    )
+    init_config.add_argument(
+        "--art-provider", choices=IMAGE_PROVIDERS, default="openai"
+    )
+    init_config.add_argument(
+        "--art-model",
+        help="art model (default: provider-specific recommended model)",
+    )
+    init_config.add_argument(
+        "--art-quality", choices=CLI_GENERATION_QUALITIES, default="high"
+    )
+    init_config.add_argument(
+        "--pet-provider", choices=IMAGE_PROVIDERS, default="openai"
+    )
+    init_config.add_argument(
+        "--pet-model",
+        help="pet model (default: provider-specific recommended model)",
+    )
+    init_config.add_argument(
+        "--pet-quality", choices=CLI_GENERATION_QUALITIES, default="low"
+    )
+    init_config.add_argument(
+        "--name-mode", choices=NAME_MODES, default="layout-text"
+    )
+    init_config.add_argument("--pet-name", default="SAUSAGE")
+    init_config.add_argument(
+        "--pet-name-max-length", type=int, default=12
+    )
+    init_config.add_argument(
+        "--upscale-backend", choices=UPSCALE_BACKENDS, default="deterministic"
     )
     init_config.add_argument(
         "--force",
@@ -360,6 +400,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 design_id=args.design_id,
                 product_profile_id=args.product_profile_id,
                 version_number=args.version_number,
+                art_template_mode=args.art_template_mode,
+                art_provider=args.art_provider,
+                art_model=args.art_model,
+                art_quality=args.art_quality,
+                pet_provider=args.pet_provider,
+                pet_model=args.pet_model,
+                pet_quality=args.pet_quality,
+                name_mode=args.name_mode,
+                pet_name=args.pet_name,
+                pet_name_max_length=args.pet_name_max_length,
+                upscale_backend=args.upscale_backend,
                 force=args.force,
             )
         elif args.command == "validate-fixture-set":

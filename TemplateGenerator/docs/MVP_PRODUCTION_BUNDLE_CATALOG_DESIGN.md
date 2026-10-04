@@ -508,8 +508,9 @@ files below `work/configs/`:
 - `pawmarvel-shared.env` contains reusable provider credentials and AWS/S3
   publication settings. `init-shared-config` creates it once per checkout.
 - `<design-id>--<product-profile-id>--vNN.env` contains only design/product
-  inputs, provider/model/quality selections, local roots, and release identity.
-  `init-config` derives its identity-bearing filename.
+  inputs, art-template mode, art and pet provider/model/quality selections,
+  personalization name mode and QA name policy, upscale backend, local roots,
+  and release identity. `init-config` derives its identity-bearing filename.
 
 Operators source the shared file first and the selected design file second.
 Both are mutable private operator state: they are ignored by Git, never copied
@@ -519,6 +520,23 @@ iterations. Experiments continue snapshotting their resolved non-secret inputs,
 so changing or switching configuration files cannot rewrite provenance.
 Existing CLIs keep their explicit arguments; sourcing the files only removes
 repetitive shell setup.
+
+`PAWMARVEL_NAME_MODE` is authoring intent with exactly three values:
+`layout-text`, `embedded-in-pet`, or `none`. The operation setup derives pet
+generation and layout CLI argument arrays from it once, preventing independent
+steps from choosing incompatible modes. It is not copied blindly into the
+bundle. Graduation still derives and validates `renderer.name_mode` from the
+selected immutable prompt, resolved prompt variables, and layout/font
+artifacts, so the production contract cannot be changed by mutable shell state.
+Likewise, the selected provider chooses its provider-qualified prompt path in
+the generated config, while every experiment snapshots the resolved prompt and
+request contract.
+
+Experiment IDs, attempt IDs, review IDs, decisions, fixture selections, and
+graduation IDs are intentionally excluded from initial configuration. They are
+iteration outputs and immutable evidence; treating them as baseline config
+would create stale cross-step pointers. The operation guide derives those paths
+from each recorded decision instead.
 
 The conventional repository-local path is
 `work/configs/<design-id>--<product-profile-id>--vNN.env`. `init-config`

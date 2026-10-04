@@ -9,12 +9,22 @@ import tempfile
 from datetime import date
 from pathlib import Path
 
+from .generation_contract import validate_generation_quality
+
 
 class OperationConfigError(ValueError):
     """Raised when an operation configuration cannot be created safely."""
 
 
 _ID_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
+ART_TEMPLATE_MODES = ("generated", "empty-canvas")
+NAME_MODES = ("layout-text", "embedded-in-pet", "none")
+IMAGE_PROVIDERS = ("openai", "gemini")
+UPSCALE_BACKENDS = ("deterministic", "bria")
+DEFAULT_MODELS = {
+    "openai": "gpt-image-2.5-sunburst",
+    "gemini": "gemini-3.1-flash-image",
+}
 
 
 def _identifier(value: str, label: str) -> str:
@@ -41,6 +51,17 @@ def _design_template(
     project_root: Path,
     design_id: str,
     product_profile_id: str,
+    art_template_mode: str,
+    art_provider: str,
+    art_model: str,
+    art_quality: str,
+    pet_provider: str,
+    pet_model: str,
+    pet_quality: str,
+    name_mode: str,
+    pet_name: str,
+    pet_name_max_length: int,
+    upscale_backend: str,
 ) -> str:
     release_id = f"{date.today().isoformat()}.001"
     literal_values = [
@@ -61,8 +82,8 @@ def _design_template(
         "# Design/product inputs",
         'export PAWMARVEL_DESIGN_INPUT="$PAWMARVEL_PROJECT/work/design-inputs/$PAWMARVEL_DESIGN_ID"',
         'export PAWMARVEL_SAMPLE="$PAWMARVEL_DESIGN_INPUT/reference-design.png"',
-        'export PAWMARVEL_ART_PROMPT="$PAWMARVEL_DESIGN_INPUT/art-template-gpt.md"',
-        'export PAWMARVEL_PET_PROMPT="$PAWMARVEL_DESIGN_INPUT/pet-transform-gpt.md"',
+        'export PAWMARVEL_ART_PROMPT_GPT="$PAWMARVEL_DESIGN_INPUT/art-template-gpt.md"',
+        'export PAWMARVEL_PET_PROMPT_GPT="$PAWMARVEL_DESIGN_INPUT/pet-transform-gpt.md"',
         'export PAWMARVEL_ART_PROMPT_GEMINI="$PAWMARVEL_DESIGN_INPUT/art-template-gemini.md"',
         'export PAWMARVEL_PET_PROMPT_GEMINI="$PAWMARVEL_DESIGN_INPUT/pet-transform-gemini.md"',
         'export PAWMARVEL_PET="$PAWMARVEL_PROJECT/examples/pet-inputs/sausage-dog-puppy.png"',
@@ -73,20 +94,33 @@ def _design_template(
         'export PAWMARVEL_EVALUATION_PROTOCOL="$PAWMARVEL_PROJECT/examples/authoring/evaluation-protocols/mvp-image-v1.json"',
         'export PAWMARVEL_SMOKE_FIXTURE_SET="$PAWMARVEL_PROJECT/examples/authoring/fixture-sets/mvp-pets-smoke-v1/fixture-set.json"',
         'export PAWMARVEL_RELEASE_FIXTURE_SET="$PAWMARVEL_PROJECT/examples/authoring/fixture-sets/mvp-pets-v1/fixture-set.json"',
-        "export PAWMARVEL_PET_NAME='SAUSAGE'",
-        "export PAWMARVEL_PET_NAME_MAX_LENGTH='12'",
+        _export("PAWMARVEL_PET_NAME", pet_name),
+        _export("PAWMARVEL_PET_NAME_MAX_LENGTH", str(pet_name_max_length)),
         "",
         "# Default experiment configuration",
         "# Production default: gpt-image-2.5-sunburst. Use gpt-image-2.5-flare for a speed experiment.",
         "# GPT Image 2.5 also permits xhigh/max; keep explicit quality fixed during comparisons.",
-        "export PAWMARVEL_ART_TEMPLATE_MODE='generated'  # generated | empty-canvas",
-        "export PAWMARVEL_ART_PROVIDER='openai'",
-        "export PAWMARVEL_ART_MODEL='gpt-image-2.5-sunburst'",
-        "export PAWMARVEL_ART_QUALITY='high'",
-        "export PAWMARVEL_PET_PROVIDER='openai'",
-        "export PAWMARVEL_PET_MODEL='gpt-image-2.5-sunburst'",
-        "export PAWMARVEL_PET_QUALITY='low'",
-        "export PAWMARVEL_UPSCALE_BACKEND='deterministic'",
+        "# Name mode: layout-text | embedded-in-pet | none",
+        _export("PAWMARVEL_NAME_MODE", name_mode),
+        "# Art template mode: generated | empty-canvas",
+        _export("PAWMARVEL_ART_TEMPLATE_MODE", art_template_mode),
+        _export("PAWMARVEL_ART_PROVIDER", art_provider),
+        _export("PAWMARVEL_ART_MODEL", art_model),
+        _export("PAWMARVEL_ART_QUALITY", art_quality),
+        _export("PAWMARVEL_PET_PROVIDER", pet_provider),
+        _export("PAWMARVEL_PET_MODEL", pet_model),
+        _export("PAWMARVEL_PET_QUALITY", pet_quality),
+        _export("PAWMARVEL_UPSCALE_BACKEND", upscale_backend),
+        "case \"$PAWMARVEL_ART_PROVIDER\" in",
+        '  openai) export PAWMARVEL_ART_PROMPT="$PAWMARVEL_ART_PROMPT_GPT" ;;',
+        '  gemini) export PAWMARVEL_ART_PROMPT="$PAWMARVEL_ART_PROMPT_GEMINI" ;;',
+        "  *) printf 'unsupported PAWMARVEL_ART_PROVIDER: %s\\n' \"$PAWMARVEL_ART_PROVIDER\" >&2; return 2 2>/dev/null || exit 2 ;;",
+        "esac",
+        "case \"$PAWMARVEL_PET_PROVIDER\" in",
+        '  openai) export PAWMARVEL_PET_PROMPT="$PAWMARVEL_PET_PROMPT_GPT" ;;',
+        '  gemini) export PAWMARVEL_PET_PROMPT="$PAWMARVEL_PET_PROMPT_GEMINI" ;;',
+        "  *) printf 'unsupported PAWMARVEL_PET_PROVIDER: %s\\n' \"$PAWMARVEL_PET_PROVIDER\" >&2; return 2 2>/dev/null || exit 2 ;;",
+        "esac",
         "",
         "# Local ignored workspaces",
         'export PAWMARVEL_AUTHORING_ROOT="$PAWMARVEL_PROJECT/work/authoring"',
@@ -175,6 +209,17 @@ def write_operation_config(
     design_id: str,
     product_profile_id: str,
     version_number: int = 1,
+    art_template_mode: str = "generated",
+    art_provider: str = "openai",
+    art_model: str | None = None,
+    art_quality: str = "high",
+    pet_provider: str = "openai",
+    pet_model: str | None = None,
+    pet_quality: str = "low",
+    name_mode: str = "layout-text",
+    pet_name: str = "SAUSAGE",
+    pet_name_max_length: int = 12,
+    upscale_backend: str = "deterministic",
     force: bool = False,
 ) -> Path:
     """Create a mode-0600 design/product operation configuration."""
@@ -182,6 +227,34 @@ def write_operation_config(
     design_id = _identifier(design_id, "design ID")
     product_profile_id = _identifier(product_profile_id, "product profile ID")
     version = _version_label(version_number)
+    if art_template_mode not in ART_TEMPLATE_MODES:
+        raise OperationConfigError(
+            f"art template mode must be one of {', '.join(ART_TEMPLATE_MODES)}"
+        )
+    if name_mode not in NAME_MODES:
+        raise OperationConfigError(f"name mode must be one of {', '.join(NAME_MODES)}")
+    if upscale_backend not in UPSCALE_BACKENDS:
+        raise OperationConfigError(
+            f"upscale backend must be one of {', '.join(UPSCALE_BACKENDS)}"
+        )
+    if isinstance(pet_name_max_length, bool) or not 1 <= pet_name_max_length <= 64:
+        raise OperationConfigError("pet name max length must be between 1 and 64")
+    pet_name = pet_name.strip()
+    if name_mode != "none" and not pet_name:
+        raise OperationConfigError(f"pet name is required for name mode {name_mode!r}")
+    if name_mode == "none":
+        pet_name = ""
+    art_model = art_model or DEFAULT_MODELS.get(art_provider, "")
+    pet_model = pet_model or DEFAULT_MODELS.get(pet_provider, "")
+    try:
+        validate_generation_quality(
+            provider=art_provider, model=art_model, quality=art_quality
+        )
+        validate_generation_quality(
+            provider=pet_provider, model=pet_model, quality=pet_quality
+        )
+    except ValueError as exc:
+        raise OperationConfigError(str(exc)) from exc
     if not project.is_dir():
         raise OperationConfigError(f"project root is not a directory: {project}")
     target = (
@@ -200,6 +273,17 @@ def write_operation_config(
             project_root=project,
             design_id=design_id,
             product_profile_id=product_profile_id,
+            art_template_mode=art_template_mode,
+            art_provider=art_provider,
+            art_model=art_model,
+            art_quality=art_quality,
+            pet_provider=pet_provider,
+            pet_model=pet_model,
+            pet_quality=pet_quality,
+            name_mode=name_mode,
+            pet_name=pet_name,
+            pet_name_max_length=pet_name_max_length,
+            upscale_backend=upscale_backend,
         ),
         force=force,
     )

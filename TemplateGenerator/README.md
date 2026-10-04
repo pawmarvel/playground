@@ -66,7 +66,10 @@ operators copy the selected reference, provider prompts, and any valid optional
 layout/font references into ignored `work/design-inputs/<design-id>/`.
 `pawmarvel-author init-config` points generated design configuration at that
 private folder and leaves optional reference variables empty when their files
-are not present. Provider credentials and AWS/S3 publication settings live in
+are not present. It also captures the art/pet generation baseline,
+personalization name mode, QA name policy, and upscale backend so downstream
+commands derive consistent arguments. Provider credentials and AWS/S3
+publication settings live in
 the separate reusable `pawmarvel-shared.env`. Experiments then snapshot the
 exact non-secret source files they consume.
 
@@ -152,7 +155,9 @@ mode-0600 `work/configs/pawmarvel-shared.env` once for provider credentials and
 AWS/S3 publication settings. `pawmarvel-author init-config` separately creates
 a mode-0600, sourceable
 `work/configs/<design-id>--<product-profile-id>--vNN.env` for design/product
-inputs, model choices, local roots, and release identity. Source the shared
+inputs, art/pet provider-model-quality choices, art-template mode,
+personalization name mode (`layout-text`, `embedded-in-pet`, or `none`), local
+roots, and release identity. Source the shared
 file first and the selected design file second. The design filename is derived
 from `--design-id`, `--product-profile-id`, and an optional `--version-number`.
 
@@ -162,7 +167,9 @@ design's pet prompt plus one or more ordered finished references, waits for the
 local layout editor to be saved and closed, then renders a preview/debug pair and
 can continue through print upscaling, print rendering, and `run.json`
 provenance. It makes image API calls only; it does not derive prompts through a
-text model. Pet names are always rendered with the bundled font. It has no
+text model. The immutable authoring workflow supports separate font-rendered
+names, names embedded in the transformed-pet pixels, or no personalized name.
+It has no
 publication option. Production publication uses `pawmarvel-author graduate`,
 selection-only `pawmarvel-bundle`, then
 `pawmarvel-catalog build-release`. `pawmarvel-catalog publish-s3` is a separate,
