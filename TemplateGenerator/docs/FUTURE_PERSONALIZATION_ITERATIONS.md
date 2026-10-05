@@ -2,7 +2,7 @@
 
 Status: Deferred roadmap
 Depends on: Evidence from the immutable-bundle MVP trial
-Last updated: 2026-09-23
+Last updated: 2026-10-04
 
 ## 1. Purpose and decision rule
 
@@ -199,6 +199,23 @@ Prioritize only features required by rejected or slow-to-author designs:
 
 Automatic detection remains advisory; operators retain final control.
 
+#### Config-driven design scaling proposal
+
+[Authoring automation](AUTHORING_AUTOMATION_DESIGN.md) defines the next staged
+implementation for post-scratch benchmarks, bounded layout proposals, approved
+design profile expansion and category alternatives. It reuses the current
+bundle/FE contract and manual quality decisions. The separate
+[review record](AUTHORING_AUTOMATION_REVIEW.md) captures three design-review
+passes. These are planned capabilities, not available commands.
+
+Its M0–M5 milestones pull forward the necessary reports, renderer metrics and
+service extractions from stages 3 and 5. Keep stage 1 vendor/customer-data work
+on its existing priority; faster authoring does not qualify a vendor output.
+Broader discovery, rotation, shadows, SVG, new providers and automatic aesthetic
+approval remain outside this automation increment. Active workflow inputs need
+minimal cleanup protection for resume; general retention of all non-graduated
+review history remains stage 5 work.
+
 #### Pet-relative shadows
 
 The `charlie-well-trained` design exposes a missing abstraction. Its shadow
@@ -236,12 +253,17 @@ them would require a reviewed Apache-2.0 font contract, generic bundled-license
 paths, validator and FE import changes, and redistribution QA. Keep them out of
 the OFL-only MVP until that cross-team contract is approved.
 
-#### Generated pet-name artwork
+#### Separate generated pet-name artwork
 
-Reconsider AI-generated name PNGs only if deterministic font/effect support
+The current `embedded-in-pet` mode already supports artistic names generated
+inside the pet cutout, without a separate font or name layer. Automation must
+test different baked names with separate image calls. This is distinct from
+the deferred separate `name.png` layer described here.
+
+Reconsider separate AI-generated name PNGs only if deterministic font/effect support
 cannot meet validated designs. Evaluation must cover spelling, transparent
-isolation, reproducibility, long names, and review criteria. No AI-name
-implementation remains in the MVP repository.
+isolation, reproducibility, long names, and review criteria. A separate generated
+name-image layer is not part of the current bundle contract.
 
 #### Optional raster-to-SVG vectorization (post-MVP, P2)
 
@@ -344,6 +366,11 @@ Goal: reduce maintenance cost only after trial use demonstrates recurring pain.
   storage or copy time becomes material.
 
 These changes must not add compatibility branches for pre-MVP formats.
+
+The authoring automation proposal preserves compatibility for current published
+bundles and supported authoring records; it does not restore removed pre-MVP
+formats. Its local workflow protection and incremental extraction are the first
+bounded implementation of the relevant items above.
 
 ### Stage 6 — Service and operational scale (P3)
 
