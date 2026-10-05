@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PawMarvel design-review operator</title>
+  <link rel="stylesheet" href="/static/operator.css">
+</head>
+<body>
+  <header>
+    <div><p class="eyebrow">PawMarvel private operation</p><h1>Design review decisions</h1><p>Review rankings and move designs through their lifecycle.</p></div>
+    <nav><a href="/api/results.json" target="_blank">Results JSON</a><a href="/api/results.csv">CSV</a><a href="/operator/logout">Log out</a></nav>
+  </header>
+  <section class="controls">
+    <label>Operator identity<input id="operator-id" maxlength="200" placeholder="application-owner"></label>
+    <button id="refresh" type="button">Refresh</button>
+    <span id="status">Loading…</span>
+  </section>
+  <section class="filters" aria-label="Design filters">
+    <label>Collection<select id="collection-filter"><option value="">All collections</option></select></label>
+    <label>Title<input id="title-filter" type="search" placeholder="Search title or design ID"></label>
+    <label>Bottom line<input id="bottom-line-filter" type="search" placeholder="Search bottom line"></label>
+    <label>Vote<select id="vote-filter">
+      <option value="">All vote results</option>
+      <option value="graduate">Has Graduate vote</option>
+      <option value="consider">Has Improve vote</option>
+      <option value="pass">Has Abandon vote</option>
+      <option value="unvoted">No votes</option>
+    </select></label>
+    <label>Current selection<select id="selection-filter">
+      <option value="">All designs</option>
+      <option value="selected">Selected only</option>
+      <option value="unselected">Not selected</option>
+    </select></label>
+    <button id="clear-filters" type="button" class="secondary">Clear filters</button>
+    <strong id="filter-count" aria-live="polite"></strong>
+  </section>
+  <nav class="tabs" aria-label="Lifecycle pools">
+    <button type="button" data-tab="active" class="selected">Active review <span></span></button>
+    <button type="button" data-tab="abandoned">Abandoned <span></span></button>
+    <button type="button" data-tab="graduated">Graduated <span></span></button>
+  </nav>
+  <section id="batch-toolbar" class="batch-toolbar" aria-label="Batch decisions">
+    <strong id="selected-count">0 selected</strong>
+    <button id="select-all" type="button" class="secondary">Select all visible</button>
+    <button id="clear-selection" type="button" class="secondary">Clear</button>
+    <button id="graduate-selected" type="button">Graduate selected</button>
+    <button id="abandon-selected" type="button" class="danger">Abandon selected</button>
+  </section>
+  <main id="designs"></main>
+  <template id="design-template">
+    <article class="design">
+      <img alt="" loading="lazy">
+      <div class="content">
+        <div class="heading"><div><label class="batch-choice"><input class="batch-select" type="checkbox"> Select</label><p class="meta"></p><h2></h2><code></code></div><strong class="rank"></strong></div>
+        <p class="slogan"></p>
+        <div class="counts"></div>
+        <p class="round"></p>
+        <details><summary>Reviewer feedback</summary><div class="feedback"></div></details>
+        <div class="actions"></div>
+      </div>
+    </article>
+  </template>
+  <script src="/static/operator.js"></script>
+</body>
+</html>

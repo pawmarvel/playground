@@ -1,0 +1,30 @@
+:root { color-scheme: light; --ink:#20231f; --muted:#62685f; --paper:#f5f2ea; --card:#fff; --line:#d8d5cd; --green:#1f684b; --red:#9b3030; --amber:#8b5b00; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.45 system-ui,-apple-system,sans-serif; }
+header { display:flex; justify-content:space-between; gap:24px; align-items:end; padding:24px max(24px,calc((100vw - 1300px)/2)); background:#fff; border-bottom:1px solid var(--line); }
+h1 { margin:0; font-size:clamp(28px,4vw,46px); } header p { margin:.3rem 0 0; color:var(--muted); }
+.eyebrow { text-transform:uppercase; letter-spacing:.12em; font-size:12px; font-weight:800; color:var(--green); }
+nav { display:flex; gap:14px; flex-wrap:wrap; } a { color:#164e80; }
+.controls,.filters,.tabs,.batch-toolbar,main { max-width:1300px; margin:18px auto; }
+.controls { display:flex; align-items:end; gap:14px; padding:16px; background:#fff; border:1px solid var(--line); border-radius:12px; }
+.controls label { flex:1; font-weight:700; }.controls input { display:block; width:100%; margin-top:5px; padding:9px; font:inherit; }
+.filters { display:grid; grid-template-columns:repeat(5,minmax(150px,1fr)) auto; gap:12px; align-items:end; padding:16px; background:#fff; border:1px solid var(--line); border-radius:12px; }
+.filters label { font-weight:700; }.filters input,.filters select { display:block; width:100%; margin-top:5px; padding:9px; font:inherit; min-height:42px; }.filters #filter-count { grid-column:1/-1; color:var(--muted); }
+button { border:0; border-radius:8px; padding:10px 14px; background:#1f5b45; color:#fff; font:inherit; font-weight:750; cursor:pointer; }
+button.secondary { background:#edf1ee; color:#174a38; border:1px solid #acb8b0; } button.danger { background:var(--red); }
+button:disabled { opacity:.5; cursor:not-allowed; }
+.tabs { gap:8px; padding:0 4px; }.tabs button { background:#ddd8ce; color:#333; }.tabs button.selected { background:#1f5b45; color:#fff; }
+.batch-toolbar { position:sticky; top:8px; z-index:2; display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:12px 16px; background:#fff; border:1px solid var(--line); border-radius:12px; box-shadow:0 4px 18px #0001; }
+.batch-toolbar[hidden] { display:none; }.batch-toolbar strong { margin-right:auto; }
+main { display:grid; gap:16px; padding:0 4px 70px; }
+.design { display:grid; grid-template-columns:190px 1fr; background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+.design.selected { border-color:var(--green); box-shadow:0 0 0 2px #1f684b33; }
+.design > img { width:100%; height:100%; min-height:230px; object-fit:contain; background:#fff; }.content { padding:16px; min-width:0; }
+.heading { display:flex; justify-content:space-between; gap:16px; }.heading h2 { margin:.15rem 0; }.meta,.round { color:var(--muted); margin:.3rem 0; }.slogan { font-weight:750; }.rank { font-size:24px; color:var(--green); }
+.batch-choice { display:inline-flex; align-items:center; gap:6px; margin-bottom:5px; color:var(--green); font-weight:750; cursor:pointer; }.batch-choice input { width:18px; height:18px; margin:0; }
+code { overflow-wrap:anywhere; }.counts { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }.count { border:1px solid var(--line); border-radius:999px; padding:5px 9px; }.count.graduate { color:var(--green); }.count.improve { color:var(--amber); }.count.abandon { color:var(--red); }
+details { border-top:1px solid var(--line); padding-top:10px; }.feedback { display:grid; gap:8px; margin-top:8px; }.feedback article { background:#f5f5f2; padding:9px; border-radius:7px; }.feedback p { margin:.2rem 0; }
+.actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }.empty { text-align:center; color:var(--muted); padding:50px; background:#fff; border-radius:12px; }
+.error { color:var(--red); }
+@media(max-width:1000px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){header{align-items:start;flex-direction:column}.controls,.filters,.tabs,.batch-toolbar,main{margin:12px}.filters{grid-template-columns:1fr}.design{grid-template-columns:1fr}.design>img{height:280px}.controls{align-items:stretch;flex-direction:column}.batch-toolbar strong{width:100%;margin:0}}

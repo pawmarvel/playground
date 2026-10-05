@@ -35,11 +35,22 @@ The MVP provides:
 - `pawmarvel-catalog`: validate bundles and build a canonical exchange-root
   release catalog whose entries bind to exact bundle-manifest hashes, then
   explicitly publish a reviewed release to S3.
+- `pawmarvel-gallery`: privately share active reference-design candidates,
+  collect one updatable recommendation and comment per reviewer/design, and
+  provide a separately authorized operator console for ranked results, clean
+  review rounds, individual or batch graduation and abandonment, and
+  restoration. Raw feedback for inactive designs is retained for at most 30
+  days. When complete art and
+  release-pet comparisons exist under `work/authoring`, reviewers can inspect
+  that evidence before voting.
 
 ## Documentation
 
 - [MVP operations guide](docs/MVP_OPERATIONS_GUIDE.md)
 - [MVP architecture and bundle contract](docs/MVP_PRODUCTION_BUNDLE_CATALOG_DESIGN.md)
+- [Authoring automation proposal and milestones](docs/AUTHORING_AUTOMATION_DESIGN.md) (planned)
+- Patrol Franchise expansion: [current-tool operations](docs/PATROL_FRANCHISE_CURRENT_OPERATIONS.md) and [optimized-workflow proposal](docs/PATROL_FRANCHISE_OPTIMIZED_OPERATIONS.md)
+- Design review: [overview](docs/GALLERY_VOTING_GUIDE.md), [workflow and data design](docs/DESIGN_REVIEW_WORKFLOW_DESIGN.md), [reviewer guide](docs/DESIGN_REVIEW_REVIEWER_GUIDE.md), and [operator guide](docs/DESIGN_REVIEW_OPERATOR_GUIDE.md)
 - [Future iterations](docs/FUTURE_PERSONALIZATION_ITERATIONS.md)
 
 The three development design folders are
@@ -102,6 +113,7 @@ Install the test extra when running the repository contract suite:
 .venv/bin/pawmarvel-bundle --help
 .venv/bin/pawmarvel-author --help
 .venv/bin/pawmarvel-catalog --help
+.venv/bin/pawmarvel-gallery --help
 ```
 
 Tool 1 defaults to `gpt-image-2.5-sunburst`. Pass

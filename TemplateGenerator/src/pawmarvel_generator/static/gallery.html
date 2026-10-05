@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PawMarvel design review</title>
+  <link rel="stylesheet" href="/static/gallery.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">PawMarvel private review</p>
+      <h1>Reference design gallery</h1>
+      <p>Review any number of designs, then save all changes together.</p>
+    </div>
+    <nav><a href="/logout">Log out</a></nav>
+  </header>
+  <section class="identity" aria-labelledby="identity-title">
+    <div><h2 id="identity-title">Your review identity</h2><p>Used to update your existing vote instead of creating duplicates.</p></div>
+    <label>Name<input id="reviewer-name" maxlength="200" autocomplete="name" placeholder="Alex Chen"></label>
+    <label>Email or team ID<input id="reviewer-id" maxlength="200" autocomplete="email" placeholder="alex@example.com"></label>
+    <button id="load-votes" type="button">Load my votes</button>
+  </section>
+  <section class="toolbar">
+    <label>Collection<select id="collection-filter"><option value="">All collections</option></select></label>
+    <label>Title<input id="title-filter" type="search" placeholder="Search title or design ID"></label>
+    <label>Bottom line<input id="bottom-line-filter" type="search" placeholder="Search bottom line"></label>
+    <label>My vote<select id="vote-filter">
+      <option value="">All vote choices</option>
+      <option value="graduate">Graduate</option>
+      <option value="consider">Improve</option>
+      <option value="pass">Abandon</option>
+    </select></label>
+    <label>Current selection<select id="selection-filter">
+      <option value="">All designs</option>
+      <option value="selected">Has a selection</option>
+      <option value="unselected">Not selected</option>
+    </select></label>
+    <button id="clear-filters" type="button" class="secondary">Clear filters</button>
+    <span id="progress">Loading…</span>
+  </section>
+  <section class="save-bar" aria-live="polite">
+    <div><strong>Review changes</strong><span id="save-status">No changes yet</span></div>
+    <button id="save-all" type="button" disabled>All changes saved</button>
+  </section>
+  <main id="gallery" aria-live="polite"></main>
+  <template id="card-template">
+    <article class="card">
+      <img loading="lazy" alt="">
+      <div class="card-body">
+        <p class="meta"></p><h2></h2><p class="slogan"></p><code></code>
+        <button class="review-context secondary" type="button">Generated review unavailable</button>
+        <fieldset><legend>Recommendation</legend>
+          <label class="graduate"><input type="radio" value="graduate">Graduate</label>
+          <label class="consider"><input type="radio" value="consider">Improve</label>
+          <label class="pass"><input type="radio" value="pass">Abandon</label>
+        </fieldset>
+        <label class="comment">Review note<textarea maxlength="1000" rows="3" placeholder="Why? What should change?"></textarea></label>
+        <div class="actions"><span class="status"></span></div>
+      </div>
+    </article>
+  </template>
+  <dialog id="review-dialog">
+    <div class="dialog-header"><div><p class="eyebrow">Generated artifact evidence</p><h2 id="review-title"></h2></div><button id="close-review" class="secondary" type="button">Close</button></div>
+    <p>Compare the reusable art-template attempts and release-fixture pet transformations before voting. These are review artifacts, not final bundle approval.</p>
+    <div id="review-content"></div>
+  </dialog>
+  <script src="/static/gallery.js"></script>
+</body>
+</html>
