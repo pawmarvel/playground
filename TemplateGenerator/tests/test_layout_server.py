@@ -203,6 +203,9 @@ class LayoutServerTests(unittest.TestCase):
             self.assertIn(b"layout_reference", script)
             self.assertIn(b"font_reference", script)
             self.assertIn(b"/heartbeat", script)
+        with urllib.request.urlopen(self.base + "/assets/layout.css") as response:
+            stylesheet = response.read()
+            self.assertIn(b"#preview { background: #fff; }", stylesheet)
             self.assertIn(b"pagehide", script)
 
         with self.post("/heartbeat", {}) as response:

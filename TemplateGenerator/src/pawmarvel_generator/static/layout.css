@@ -12,6 +12,7 @@ h2 { font-size: 1rem; }
 .visuals { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
 article, fieldset { background: #23262c; border: 1px solid #414650; border-radius: 8px; padding: 1rem; }
 img, canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; background: #101216; }
+#preview { background: #fff; }
 canvas { touch-action: none; cursor: crosshair; }
 canvas.stale { opacity: .35; }
 #reference { margin-bottom: .75rem; }
