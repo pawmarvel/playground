@@ -56,6 +56,10 @@ class RepositoryExampleTests(unittest.TestCase):
                 "product-profile-v1.schema.json",
                 "profiles/blanket-twin-full-7875x9375.json",
             ),
+            (
+                "product-profile-v1.schema.json",
+                "profiles/t-shirt-3423x4533.json",
+            ),
         ]
         for schema_name, instance_name in checks:
             with self.subTest(instance=instance_name):

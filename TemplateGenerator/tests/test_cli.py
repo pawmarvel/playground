@@ -466,6 +466,32 @@ class CliTests(unittest.TestCase):
         )
         self.assertIn("review the result", diagnostics.getvalue())
 
+    def test_product_profile_normalizes_non_native_art_canvas(self) -> None:
+        profile = write_product_profile(
+            self.root / "t-shirt-profile.json",
+            create_product_profile(
+                profile_id="t-shirt-3423x4533",
+                print_size=ImageSize(3423, 4533),
+                dpi=300,
+            ),
+        )
+        client = FakeClient()
+        diagnostics = io.StringIO()
+        with redirect_stderr(diagnostics):
+            output = generate(
+                self.args(
+                    "--output-dir", str(self.root / "output"),
+                    "--product-profile", str(profile),
+                    "--profile-layer", "art",
+                ),
+                client=client,
+            )
+
+        self.assertEqual(client.images.kwargs["size"], "1136x1504")
+        with Image.open(output) as image:
+            self.assertEqual(image.size, (1141, 1511))
+        self.assertIn("normalizing the result", diagnostics.getvalue())
+
     def test_matching_art_reference_aspect_ratio_does_not_warn(self) -> None:
         self.sample = make_image(self.sample, size=(800, 1056))
         profile = write_product_profile(

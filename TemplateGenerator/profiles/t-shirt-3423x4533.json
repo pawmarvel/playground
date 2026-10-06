@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "profile_id": "t-shirt-3423x4533",
+  "print": {
+    "canvas": {
+      "width": 3423,
+      "height": 4533
+    },
+    "dpi": 300,
+    "physical_size": {
+      "width": 11.41,
+      "height": 15.11,
+      "unit": "in"
+    },
+    "bleed_px": 0,
+    "safe_margin_px": 0,
+    "color_space": "sRGB",
+    "icc_profile": null,
+    "background": "transparent",
+    "output_format": "png",
+    "max_file_bytes": null,
+    "vendor_requirements_confirmed": false,
+    "delivery_status": "print-candidate"
+  },
+  "preview": {
+    "target_long_edge_px": 1024,
+    "art": {
+      "width": 1141,
+      "height": 1511
+    },
+    "transformed_pet": {
+      "width": 1136,
+      "height": 1136
+    }
+  },
+  "geometry": {
+    "aspect_ratio": {
+      "width": 1141,
+      "height": 1511
+    },
+    "preview_to_print_scale": 3.0,
+    "nominal_print_layer_dimensions": {
+      "art": {
+        "width": 3423,
+        "height": 4533
+      },
+      "transformed_pet": {
+        "width": 3408,
+        "height": 3408
+      }
+    }
+  }
+}

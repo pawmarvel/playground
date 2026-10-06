@@ -82,6 +82,39 @@ def validate_gpt_image_2_size(size: ImageSize, label: str = "size") -> ImageSize
     return size
 
 
+def closest_gpt_image_2_size(size: ImageSize) -> ImageSize:
+    """Return the API-valid canvas with the smallest relative edge change."""
+    candidates: list[ImageSize] = []
+    for width in range(
+        GPT_IMAGE_2_EDGE_MULTIPLE,
+        GPT_IMAGE_2_MAX_EDGE + 1,
+        GPT_IMAGE_2_EDGE_MULTIPLE,
+    ):
+        for height in range(
+            GPT_IMAGE_2_EDGE_MULTIPLE,
+            GPT_IMAGE_2_MAX_EDGE + 1,
+            GPT_IMAGE_2_EDGE_MULTIPLE,
+        ):
+            candidate = ImageSize(width, height)
+            try:
+                validate_gpt_image_2_size(candidate, "candidate size")
+            except ImageSizeError:
+                continue
+            candidates.append(candidate)
+    if not candidates:
+        raise ImageSizeError("no API-valid GPT Image 2/2.5 canvas is available")
+    return min(
+        candidates,
+        key=lambda candidate: (
+            ((candidate.width - size.width) / size.width) ** 2
+            + ((candidate.height - size.height) / size.height) ** 2,
+            abs(candidate.pixels - size.pixels),
+            candidate.width,
+            candidate.height,
+        ),
+    )
+
+
 def validate_generation_size(
     value: str,
     *,

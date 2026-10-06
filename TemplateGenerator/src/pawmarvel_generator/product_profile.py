@@ -115,17 +115,37 @@ def derive_art_preview_size(
             "print canvas aspect ratio exceeds the GPT Image 2/2.5 limit of 3:1"
         )
     candidates = _valid_candidates_for_ratio(ratio_width, ratio_height)
-    if not candidates:
-        raise ProductProfileError(
-            "no exact-aspect GPT Image 2/2.5 preview resolution can be derived for this print canvas"
+    if candidates:
+        return min(
+            candidates,
+            key=lambda value: (
+                abs(max(value.width, value.height) - target_long_edge),
+                abs(value.pixels - target_long_edge * target_long_edge),
+            ),
         )
-    return min(
-        candidates,
-        key=lambda value: (
-            abs(max(value.width, value.height) - target_long_edge),
-            abs(value.pixels - target_long_edge * target_long_edge),
-        ),
+
+    # Some exact print ratios cannot produce a model-valid canvas because both
+    # API edges must be multiples of 16. Preserve print geometry in the profile;
+    # the generator uses the nearest API-valid canvas and normalizes its output
+    # to this exact-aspect preview before downstream layout work.
+    maximum_multiplier = min(
+        (print_size.width - 1) // ratio_width,
+        (print_size.height - 1) // ratio_height,
     )
+    if maximum_multiplier < 1:
+        raise ProductProfileError(
+            "print canvas has no smaller integer canvas with the exact aspect ratio"
+        )
+    multiplier = min(
+        maximum_multiplier,
+        max(1, round(target_long_edge / max(ratio_width, ratio_height))),
+    )
+    preview = ImageSize(ratio_width * multiplier, ratio_height * multiplier)
+    if max(preview.width, preview.height) > GPT_IMAGE_2_MAX_EDGE:
+        raise ProductProfileError(
+            "smallest exact-aspect preview exceeds the supported preview edge limit"
+        )
+    return preview
 
 
 def _closest_square(target_edge: int) -> ImageSize:
@@ -308,14 +328,10 @@ def _load_product_profile(path: Path) -> ProductProfile:
     print_size = _size_from_mapping(print_data.get("canvas"), "print.canvas")
     art = _size_from_mapping(preview.get("art"), "preview.art")
     pet = _size_from_mapping(preview.get("transformed_pet"), "preview.transformed_pet")
-    for label, size in (
-        ("preview.art", art),
-        ("preview.transformed_pet", pet),
-    ):
-        try:
-            validate_gpt_image_2_size(size, label)
-        except ImageSizeError as exc:
-            raise ProductProfileError(str(exc)) from exc
+    try:
+        validate_gpt_image_2_size(pet, "preview.transformed_pet")
+    except ImageSizeError as exc:
+        raise ProductProfileError(str(exc)) from exc
     if print_size.width * art.height != print_size.height * art.width:
         raise ProductProfileError(
             "preview.art aspect ratio must exactly match print.canvas"

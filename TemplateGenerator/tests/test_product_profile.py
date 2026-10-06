@@ -33,6 +33,18 @@ class ProductProfileTests(unittest.TestCase):
         self.assertEqual(profile.scale, 11.71875)
         self.assertEqual(profile.print_spec["physical_size"]["width"], 31.25)
 
+    def test_derives_exact_ratio_preview_when_ratio_is_not_api_native(self) -> None:
+        profile = create_product_profile(
+            profile_id="t-shirt-3423x4533",
+            print_size=ImageSize(3423, 4533),
+            dpi=300,
+        )
+        self.assertEqual(profile.preview_art_size, ImageSize(1141, 1511))
+        self.assertEqual(profile.preview_pet_size, ImageSize(1136, 1136))
+        self.assertEqual(profile.scale, 3)
+        self.assertEqual(profile.print_spec["physical_size"]["width"], 11.41)
+        self.assertEqual(profile.print_spec["physical_size"]["height"], 15.11)
+
     def test_round_trips_multiple_independent_profiles(self) -> None:
         portrait = create_product_profile(
             profile_id="portrait-product",

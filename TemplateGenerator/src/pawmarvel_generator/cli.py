@@ -36,6 +36,7 @@ from .generation_contract import (
 )
 from .image_size import (
     ImageSizeError,
+    closest_gpt_image_2_size,
     is_gpt_image_2,
     parse_image_size,
     validate_generation_size,
@@ -654,6 +655,7 @@ def _request_summary(
     output: Path,
     model: str,
     size: str,
+    postprocess_size: str,
     quality: str,
     background: str,
     output_format: str,
@@ -695,6 +697,7 @@ def _request_summary(
         "provider": provider,
         "model": model,
         "size": size,
+        "postprocess_size": postprocess_size,
         "quality": quality,
         "background": background,
         "input_fidelity": input_fidelity,
@@ -732,7 +735,7 @@ def _print_request_details(summary: dict[str, Any]) -> None:
                     summary["size"], summary["model"]
                 ),
             },
-            "postprocess_size": summary["size"],
+            "postprocess_size": summary["postprocess_size"],
             "postprocess_format": summary["output_format"],
             "background": f"prompt-driven ({summary['background']})",
         }
@@ -751,6 +754,9 @@ def _print_request_details(summary: dict[str, Any]) -> None:
             "output_format": summary["output_format"],
             "n": 1,
         }
+        if summary["postprocess_size"] != summary["size"]:
+            api_parameters["postprocess_size"] = summary["postprocess_size"]
+            api_parameters["postprocess_policy"] = "center-crop-and-resample"
         if summary["operation"] == "edit":
             api_parameters["image"] = images
         if summary["operation"] == "edit" and summary["input_fidelity"] == "high":
@@ -767,6 +773,7 @@ def _decode_and_validate_image(
     output_format: str,
     background: str,
     size: str,
+    postprocess_size: str | None = None,
     provider: str = "openai",
 ) -> bytes:
     try:
@@ -834,6 +841,29 @@ def _decode_and_validate_image(
                         raise RuntimeError(
                             f"{provider.title()} returned an image without an alpha channel"
                         )
+        final_size = postprocess_size or size
+        if (
+            final_size != size
+            and re.fullmatch(r"\d+x\d+", final_size)
+        ):
+            width, height = (int(value) for value in final_size.split("x", 1))
+            with Image.open(BytesIO(image_bytes)) as source:
+                source.load()
+                normalized = source.convert(
+                    "RGB" if _api_output_format(output_format) == "jpeg" else "RGBA"
+                )
+                normalized = ImageOps.fit(
+                    normalized,
+                    (width, height),
+                    method=Image.Resampling.LANCZOS,
+                    centering=(0.5, 0.5),
+                )
+                buffer = BytesIO()
+                normalized.save(
+                    buffer,
+                    format=_api_output_format(output_format).upper(),
+                )
+                image_bytes = buffer.getvalue()
     except UnidentifiedImageError as exc:
         raise RuntimeError(
             f"{provider.title()} returned data that is not a supported image"
@@ -1036,6 +1066,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
             if profile_layer == "art"
             else product_profile.preview_pet_size.api_value()
         )
+    postprocess_size = requested_size
     try:
         request_size = validate_generation_size(
             requested_size,
@@ -1047,9 +1078,23 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
             ),
         )
     except ImageSizeError as exc:
-        raise UserInputError(str(exc)) from exc
+        if (
+            product_profile_path is None
+            or profile_layer != "art"
+            or not is_gpt_image_2(model)
+        ):
+            raise UserInputError(str(exc)) from exc
+        target_size = parse_image_size(requested_size, "product profile preview.art")
+        request_size = closest_gpt_image_2_size(target_size).api_value()
+        print(
+            "Warning: product profile preview.art is not a native GPT Image "
+            f"2/2.5 request size; requesting {request_size} and normalizing the "
+            f"result to the exact profile canvas {postprocess_size}.",
+            file=sys.stderr,
+            flush=True,
+        )
     if profile_layer == "art":
-        _warn_art_reference_aspect_mismatch(samples, request_size)
+        _warn_art_reference_aspect_mismatch(samples, postprocess_size)
     api_key_file, api_key = _resolve_api_key(args.api_key_file, provider=provider)
     api_output_format = _api_output_format(args.output_format)
     primary_input = samples[0] if samples else pet
@@ -1074,6 +1119,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         output=output,
         model=model,
         size=request_size,
+        postprocess_size=postprocess_size,
         quality=args.quality,
         background=background,
         output_format=api_output_format,
@@ -1195,6 +1241,7 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
         output_format=args.output_format,
         background=background,
         size=request_size,
+        postprocess_size=postprocess_size,
         provider=provider,
     )
     _atomic_write_bytes(output, image_bytes)
