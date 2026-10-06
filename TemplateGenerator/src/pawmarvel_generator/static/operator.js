@@ -9,6 +9,7 @@ const batchToolbar=document.querySelector("#batch-toolbar");
 const selectedCount=document.querySelector("#selected-count");
 const graduateSelected=document.querySelector("#graduate-selected");
 const abandonSelected=document.querySelector("#abandon-selected");
+const restoreSelected=document.querySelector("#restore-selected");
 const collectionFilter=document.querySelector("#collection-filter");
 const titleFilter=document.querySelector("#title-filter");
 const bottomLineFilter=document.querySelector("#bottom-line-filter");
@@ -46,7 +47,7 @@ function filteredDesigns(){
   const title=titleFilter.value.trim().toLocaleLowerCase();
   const bottomLine=bottomLineFilter.value.trim().toLocaleLowerCase();
   const vote=voteFilter.value;
-  const selection=state.tab==="active"?selectionFilter.value:"";
+  const selection=selectionFilter.value;
   return designs.filter(design=>{
     if(collection&&design.collection!==collection)return false;
     if(title&&!matchesText(`${design.headline||""} ${design.design_id}`,title))return false;
@@ -69,13 +70,18 @@ function populateCollections(){
 }
 
 function updateBatchToolbar(){
-  const activeIds=new Set((state.dashboard?.active||[]).map(design=>design.design_id));
-  for(const designId of state.selected)if(!activeIds.has(designId))state.selected.delete(designId);
-  batchToolbar.hidden=state.tab!=="active";
+  const poolIds=new Set((state.dashboard?.[state.tab]||[]).map(design=>design.design_id));
+  for(const designId of state.selected)if(!poolIds.has(designId))state.selected.delete(designId);
+  batchToolbar.hidden=false;
   selectedCount.textContent=`${state.selected.size} selected`;
-  graduateSelected.disabled=state.pending||state.selected.size===0;
-  abandonSelected.disabled=state.pending||state.selected.size===0;
-  selectionFilter.disabled=state.tab!=="active";
+  const unavailable=state.pending||state.selected.size===0;
+  graduateSelected.hidden=state.tab!=="active";
+  abandonSelected.hidden=state.tab!=="active";
+  restoreSelected.hidden=state.tab==="active";
+  graduateSelected.disabled=unavailable;
+  abandonSelected.disabled=unavailable;
+  restoreSelected.disabled=unavailable;
+  selectionFilter.disabled=false;
 }
 
 function render(){
@@ -92,17 +98,15 @@ function render(){
   for(const design of designs){
     const card=template.content.firstElementChild.cloneNode(true);
     const selector=card.querySelector(".batch-choice");
-    if(state.tab==="active"){
-      const checkbox=selector.querySelector("input");
-      checkbox.checked=state.selected.has(design.design_id);
-      card.classList.toggle("selected",checkbox.checked);
-      checkbox.addEventListener("change",()=>{
-        if(checkbox.checked)state.selected.add(design.design_id);
-        else state.selected.delete(design.design_id);
-        if(selectionFilter.value)render();
-        else{card.classList.toggle("selected",checkbox.checked);updateBatchToolbar()}
-      });
-    }else selector.remove();
+    const checkbox=selector.querySelector("input");
+    checkbox.checked=state.selected.has(design.design_id);
+    card.classList.toggle("selected",checkbox.checked);
+    checkbox.addEventListener("change",()=>{
+      if(checkbox.checked)state.selected.add(design.design_id);
+      else state.selected.delete(design.design_id);
+      if(selectionFilter.value)render();
+      else{card.classList.toggle("selected",checkbox.checked);updateBatchToolbar()}
+    });
     card.querySelector("img").src=design.operator_image_url;
     card.querySelector("img").alt=design.headline||design.design_id;
     card.querySelector(".meta").textContent=`${design.collection} · ${design.concept}`;
@@ -168,7 +172,8 @@ async function runBatchAction(action){
   try{
     state.pending=true;updateBatchToolbar();status.className="";status.textContent=`Applying ${action} batch…`;
     const result=await request("/api/operator/actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,design_ids,operator_id,reason})});
-    state.selected.clear();state.dashboard=result.dashboard;render();status.textContent=`${result.processed_count} designs ${action==="graduate"?"graduated":"abandoned"}`;
+    const completed={graduate:"graduated",abandon:"abandoned",restore:"restored to active review"}[action];
+    state.selected.clear();state.dashboard=result.dashboard;render();status.textContent=`${result.processed_count} designs ${completed}`;
   }catch(error){status.textContent=error.message;status.className="error"}
   finally{state.pending=false;updateBatchToolbar()}
 }
@@ -181,4 +186,5 @@ for(const filter of [collectionFilter,titleFilter,bottomLineFilter,voteFilter,se
 document.querySelector("#clear-filters").addEventListener("click",()=>{collectionFilter.value="";titleFilter.value="";bottomLineFilter.value="";voteFilter.value="";selectionFilter.value="";render()});
 graduateSelected.addEventListener("click",()=>runBatchAction("graduate"));
 abandonSelected.addEventListener("click",()=>runBatchAction("abandon"));
+restoreSelected.addEventListener("click",()=>runBatchAction("restore"));
 load();

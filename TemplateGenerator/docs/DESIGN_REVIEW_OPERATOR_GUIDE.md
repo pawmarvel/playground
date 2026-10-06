@@ -50,6 +50,75 @@ http://<team-host>:8765/operator
 Do not expose the raw HTTP listener to the public internet. For remote review,
 bind to loopback and use an organization-approved authenticated HTTPS tunnel.
 
+### Start an external HTTPS review
+
+Use this flow when reviewers are outside the operator's local network. A
+`192.168.x.x` or `10.x.x.x` address is private and cannot be reached through the
+public internet.
+
+First confirm that Cloudflare Tunnel is installed:
+
+```bash
+cloudflared --version
+```
+
+Install it with `brew install cloudflared` if the command is unavailable. Set
+different reviewer and operator access codes as shown above. Use strong random
+values; share only the reviewer code with reviewers.
+
+In terminal 1, start the authenticated gallery on loopback. Do not use
+`--bind 0.0.0.0` for this external flow. Run this from the TemplateGenerator
+repository root:
+
+```bash
+.venv/bin/pawmarvel-gallery \
+  --gallery-root "$PWD/work/design-inputs/Test Design Pool" \
+  --abandoned-root "$PWD/work/design-inputs/Abandoned Design Pool" \
+  --graduation-root "$PWD/work/design-inputs/Graduation Pool" \
+  --authoring-root "$PWD/work/authoring" \
+  --bind 127.0.0.1 \
+  --port 8765 \
+  --show-results
+```
+
+In terminal 2, create a temporary HTTPS tunnel to that loopback listener:
+
+```bash
+cloudflared tunnel \
+  --url http://127.0.0.1:8765 \
+  --no-autoupdate
+```
+
+Wait for the `https://<random-name>.trycloudflare.com` address. Share only:
+
+```text
+https://<random-name>.trycloudflare.com/
+```
+
+Keep the following URL and the operator access code restricted to application
+owners:
+
+```text
+https://<random-name>.trycloudflare.com/operator
+```
+
+Verify the external route from a third terminal:
+
+```bash
+PAWMARVEL_GALLERY_PUBLIC_URL="https://<random-name>.trycloudflare.com"
+
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
+  "$PAWMARVEL_GALLERY_PUBLIC_URL/"
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  "$PAWMARVEL_GALLERY_PUBLIC_URL/api/gallery"
+```
+
+The first command should return `303` and redirect to `/login`; the unauthenticated
+API check should return `401`. Keep both terminals running during review. Press
+Control-C in terminal 2 to remove external access, then stop terminal 1. A Quick
+Tunnel has no uptime guarantee and receives a new URL after restart; use a named,
+organization-managed tunnel before relying on this flow beyond temporary review.
+
 ## Monitor the active review
 
 1. Open `/operator` and enter the operator access code.
@@ -60,14 +129,14 @@ bind to loopback and use an organization-approved authenticated HTTPS tunnel.
 5. Review Graduate, Improve, Abandon, total-vote, and net-score values.
 6. Expand **Reviewer feedback** before deciding.
 7. Use **Refresh** to load votes saved since the last view. Filters and valid
-   active selections remain in place.
+   selections in the current lifecycle pool remain in place.
 
 Rankings are decision support only. Confirm participation and written feedback;
 the tool never graduates automatically.
 
 ## Process decisions in a batch
 
-Use batch processing when several active designs share the same disposition and
+Use batch processing when several designs in one lifecycle tab share the same
 decision reason:
 
 1. In **Active review**, optionally filter the list, then select designs
@@ -81,11 +150,25 @@ decision reason:
 7. Verify the success count and the destination lifecycle tab.
 
 The batch is all-or-nothing. Before moving anything, the server verifies that
-every design is active, every source folder exists, and no destination exists.
-It then moves all folders and records an immutable decision event for each
-design in one transaction. A failure rolls back all completed moves and records;
-the error identifies the conflicting path or failed operation. Use the
-single-card actions when designs need different reasons or dispositions.
+every design is in the lifecycle state required by the action, every source
+folder exists, and no destination exists. It then moves all folders and records
+an immutable decision event for each design in one transaction. A failure rolls
+back all completed moves and records; the error identifies the conflicting path
+or failed operation. Use the single-card actions when designs need different
+reasons or dispositions.
+
+To restore several abandoned or graduated designs:
+
+1. Open **Abandoned** or **Graduated** and optionally filter the pool.
+2. Select designs individually or choose **Select all visible**.
+3. Use **Current selection → Selected only** to verify the exact batch.
+4. Select **Restore selected to active review**, confirm the design IDs, and
+   record one shared reason.
+5. Verify every design moved to **Active review**.
+
+Batch restore has the same all-or-nothing preflight, folder rollback, and
+decision-event guarantees. A batch is limited to one visible lifecycle pool;
+switching tabs clears selections that do not belong to the newly opened pool.
 
 ## Start a new round after improvement
 

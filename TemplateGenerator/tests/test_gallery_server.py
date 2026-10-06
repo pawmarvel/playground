@@ -273,9 +273,11 @@ class GalleryServerTests(unittest.TestCase):
         self.assertIn('id="bottom-line-filter"', html)
         self.assertIn('id="vote-filter"', html)
         self.assertIn('id="selection-filter"', html)
+        self.assertIn('id="restore-selected"', html)
         self.assertIn('request("/api/operator/actions"', javascript)
         self.assertIn("function filteredDesigns()", javascript)
         self.assertIn("for(const design of filteredDesigns())", javascript)
+        self.assertIn('runBatchAction("restore")', javascript)
 
     def test_batch_save_atomically_upserts_changed_votes(self) -> None:
         result = self.post_votes(
@@ -528,6 +530,28 @@ class GalleryServerTests(unittest.TestCase):
         self.assertEqual(registry["christmas-one"]["lifecycle_state"], "graduated")
         self.assertEqual(registry["christmas-two"]["lifecycle_state"], "graduated")
 
+    def test_operator_can_restore_multiple_inactive_designs_as_one_batch(self) -> None:
+        self.post_operator_action("abandon", "christmas-one")
+        self.post_operator_action("graduate", "christmas-two")
+
+        result = self.post_operator_actions(
+            "restore", ["christmas-one", "christmas-two"]
+        )
+
+        self.assertEqual(result["processed_count"], 2)
+        self.assertEqual(
+            {event["from_state"] for event in result["events"]},
+            {"abandoned", "graduated"},
+        )
+        self.assertEqual(
+            {event["to_state"] for event in result["events"]}, {"active"}
+        )
+        self.assertTrue((self.root / "christmas-one").is_dir())
+        self.assertTrue((self.root / "christmas-two").is_dir())
+        registry = {row["design_id"]: row for row in self.server.store.registry()}
+        self.assertEqual(registry["christmas-one"]["lifecycle_state"], "active")
+        self.assertEqual(registry["christmas-two"]["lifecycle_state"], "active")
+
     def test_batch_preflight_failure_moves_no_designs(self) -> None:
         blocked = self.root.parent / "Abandoned Design Pool/christmas-two"
         blocked.mkdir(parents=True)
@@ -607,6 +631,55 @@ class GalleryServerTests(unittest.TestCase):
             list((self.server.store.decisions_dir / "christmas-one").glob("*.json")),
             [],
         )
+
+    def test_batch_restore_persistence_failure_rolls_back_every_design(self) -> None:
+        self.post_operator_action("abandon", "christmas-one")
+        self.post_operator_action("graduate", "christmas-two")
+        original_write = self.server.store._write_event
+        calls = 0
+
+        def fail_second_event(event: dict) -> Path:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("disk unavailable")
+            return original_write(event)
+
+        with patch.object(
+            self.server.store, "_write_event", side_effect=fail_second_event
+        ):
+            request = urllib.request.Request(
+                self.base + "/api/operator/actions",
+                method="POST",
+                headers={"Content-Type": "application/json"},
+                data=json.dumps(
+                    {
+                        "action": "restore",
+                        "design_ids": ["christmas-one", "christmas-two"],
+                        "operator_id": "application-owner",
+                        "reason": "Test restore rollback",
+                    }
+                ).encode("utf-8"),
+            )
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request)
+            try:
+                self.assertEqual(caught.exception.code, 500)
+                self.assertIn(
+                    "operator action failed", caught.exception.read().decode()
+                )
+            finally:
+                caught.exception.close()
+
+        abandoned_root = self.root.parent / "Abandoned Design Pool"
+        graduation_root = self.root.parent / "Graduation Pool"
+        self.assertTrue((abandoned_root / "christmas-one").is_dir())
+        self.assertTrue((graduation_root / "christmas-two").is_dir())
+        self.assertFalse((self.root / "christmas-one").exists())
+        self.assertFalse((self.root / "christmas-two").exists())
+        registry = {row["design_id"]: row for row in self.server.store.registry()}
+        self.assertEqual(registry["christmas-one"]["lifecycle_state"], "abandoned")
+        self.assertEqual(registry["christmas-two"]["lifecycle_state"], "graduated")
 
     def test_transition_rolls_back_when_event_file_cannot_be_written(self) -> None:
         source = self.root / "christmas-one"

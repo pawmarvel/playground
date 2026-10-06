@@ -565,51 +565,86 @@ class GalleryStore:
         operator_id: str,
         reason: str,
     ) -> dict[str, Any]:
+        return self.restore_designs(
+            design_ids_and_paths=((design_id, pool_path),),
+            operator_id=operator_id,
+            reason=reason,
+        )[0]
+
+    def restore_designs(
+        self,
+        *,
+        design_ids_and_paths: tuple[tuple[str, Path], ...],
+        operator_id: str,
+        reason: str,
+    ) -> list[dict[str, Any]]:
+        if not design_ids_and_paths:
+            raise GalleryError("at least one design is required for a restore")
+        design_ids = [design_id for design_id, _ in design_ids_and_paths]
+        if len(set(design_ids)) != len(design_ids):
+            raise GalleryError("restore contains duplicate design IDs")
         timestamp = _timestamp(datetime.now(timezone.utc))
+        event_paths: list[Path] = []
+        events: list[dict[str, Any]] = []
         with closing(self.connect()) as connection:
-            row = connection.execute(
-                "SELECT * FROM design_registry WHERE design_id=?", (design_id,)
-            ).fetchone()
-            if row is None or row["lifecycle_state"] not in {"abandoned", "graduated"}:
-                raise GalleryError(
-                    f"design is not restorable from an inactive pool: {design_id}"
-                )
-            from_state = str(row["lifecycle_state"])
-            review_round = int(row["review_round"] or 1)
-            if row["raw_purged_at"]:
-                review_round += 1
-            summary = self._vote_summary(connection, design_id)
-            event_path: Path | None = None
+            rows = {
+                design_id: connection.execute(
+                    "SELECT * FROM design_registry WHERE design_id=?", (design_id,)
+                ).fetchone()
+                for design_id in design_ids
+            }
+            for design_id, row in rows.items():
+                if row is None or row["lifecycle_state"] not in {
+                    "abandoned",
+                    "graduated",
+                }:
+                    actual = None if row is None else row["lifecycle_state"]
+                    raise GalleryError(
+                        "design is not restorable from an inactive pool; "
+                        f"design_id={design_id}; actual={actual!r}"
+                    )
+            summaries = {
+                design_id: self._vote_summary(connection, design_id)
+                for design_id in design_ids
+            }
             try:
                 with connection:
-                    connection.execute(
-                        """
-                        UPDATE design_registry
-                        SET lifecycle_state='active', current_pool_path=?,
-                            removed_at=NULL, purge_after=NULL, disposition=NULL,
-                            review_round=?, raw_purged_at=NULL
-                        WHERE design_id=?
-                        """,
-                        (str(pool_path.resolve()), review_round, design_id),
-                    )
-                    event = self._insert_event(
-                        connection,
-                        design_id=design_id,
-                        event_type="restored",
-                        from_state=from_state,
-                        to_state="active",
-                        review_round=review_round,
-                        operator_id=operator_id,
-                        reason=reason,
-                        summary=summary,
-                        timestamp=timestamp,
-                    )
-                    event_path = self._write_event(event)
+                    for design_id, pool_path in design_ids_and_paths:
+                        row = rows[design_id]
+                        assert row is not None
+                        from_state = str(row["lifecycle_state"])
+                        review_round = int(row["review_round"] or 1)
+                        if row["raw_purged_at"]:
+                            review_round += 1
+                        connection.execute(
+                            """
+                            UPDATE design_registry
+                            SET lifecycle_state='active', current_pool_path=?,
+                                removed_at=NULL, purge_after=NULL, disposition=NULL,
+                                review_round=?, raw_purged_at=NULL
+                            WHERE design_id=?
+                            """,
+                            (str(pool_path.resolve()), review_round, design_id),
+                        )
+                        event = self._insert_event(
+                            connection,
+                            design_id=design_id,
+                            event_type="restored",
+                            from_state=from_state,
+                            to_state="active",
+                            review_round=review_round,
+                            operator_id=operator_id,
+                            reason=reason,
+                            summary=summaries[design_id],
+                            timestamp=timestamp,
+                        )
+                        events.append(event)
+                        event_paths.append(self._write_event(event))
             except Exception:
-                if event_path is not None:
+                for event_path in event_paths:
                     event_path.unlink(missing_ok=True)
                 raise
-        return event
+        return events
 
     def operator_designs(
         self, designs: dict[str, dict[str, Any]]
@@ -1303,9 +1338,9 @@ def _operator_batch_action(
     server: GalleryHTTPServer, payload: dict[str, Any]
 ) -> dict[str, Any]:
     action = _identity(payload.get("action"), "action")
-    if action not in {"abandon", "graduate"}:
+    if action not in {"abandon", "graduate", "restore"}:
         raise GalleryError(
-            "batch action must be abandon or graduate; "
+            "batch action must be abandon, graduate, or restore; "
             f"actual={action!r}"
         )
     raw_design_ids = payload.get("design_ids")
@@ -1327,12 +1362,16 @@ def _operator_batch_action(
     if len(reason) > MAX_COMMENT_LENGTH:
         raise GalleryError(f"reason exceeds {MAX_COMMENT_LENGTH} characters")
 
-    target_state = "abandoned" if action == "abandon" else "graduated"
-    target_root = (
-        server.gallery_config.abandoned_root
-        if target_state == "abandoned"
-        else server.gallery_config.graduation_root
-    )
+    target_state = {
+        "abandon": "abandoned",
+        "graduate": "graduated",
+        "restore": "active",
+    }[action]
+    target_root = {
+        "active": server.gallery_config.root,
+        "abandoned": server.gallery_config.abandoned_root,
+        "graduated": server.gallery_config.graduation_root,
+    }[target_state]
     if target_root is None:
         raise GalleryError(f"lifecycle pool is not configured: {target_state}")
 
@@ -1342,9 +1381,13 @@ def _operator_batch_action(
         if design is None:
             raise GalleryError(f"unknown design_id in batch: {design_id}")
         current_state = str(design["lifecycle_state"])
-        if current_state != "active":
+        allowed_states = (
+            {"abandoned", "graduated"} if action == "restore" else {"active"}
+        )
+        if current_state not in allowed_states:
             raise GalleryError(
-                f"{action} requires every design to be active; "
+                f"{action} requires every design to be in "
+                f"{sorted(allowed_states)}; "
                 f"design_id={design_id}; actual={current_state}"
             )
         source = Path(str(design["pool_path"])).resolve()
@@ -1371,15 +1414,23 @@ def _operator_batch_action(
         raise GalleryError(f"batch folder move failed: {exc}{detail}") from exc
 
     try:
-        events = server.store.transition_designs(
-            design_ids_and_paths=tuple(
-                (design_id, target) for design_id, _, target in planned_moves
-            ),
-            target_state=target_state,
-            operator_id=operator_id,
-            reason=reason or f"Batch moved to {target_state} pool",
-            retention_days=server.gallery_config.retention_days,
+        design_ids_and_paths = tuple(
+            (design_id, target) for design_id, _, target in planned_moves
         )
+        if action == "restore":
+            events = server.store.restore_designs(
+                design_ids_and_paths=design_ids_and_paths,
+                operator_id=operator_id,
+                reason=reason or "Batch restored for another review",
+            )
+        else:
+            events = server.store.transition_designs(
+                design_ids_and_paths=design_ids_and_paths,
+                target_state=target_state,
+                operator_id=operator_id,
+                reason=reason or f"Batch moved to {target_state} pool",
+                retention_days=server.gallery_config.retention_days,
+            )
     except Exception as exc:
         rollback_errors = _rollback_design_moves(completed_moves)
         if rollback_errors:
