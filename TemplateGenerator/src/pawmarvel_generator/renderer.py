@@ -42,6 +42,48 @@ class RenderedComposition:
     text: TextRenderMetrics | None
 
 
+@dataclass(frozen=True)
+class PetPlacement:
+    """Renderer-exact visible pet placement used by layout analysis."""
+
+    image: Image.Image
+    x: int
+    y: int
+    source_width_px: int
+    source_height_px: int
+
+    @property
+    def bounds(self) -> tuple[int, int, int, int]:
+        return self.x, self.y, self.x + self.image.width, self.y + self.image.height
+
+    @property
+    def scale(self) -> float:
+        return min(
+            self.image.width / self.source_width_px,
+            self.image.height / self.source_height_px,
+        )
+
+
+@dataclass(frozen=True)
+class TextPlacement:
+    """Renderer-exact text placement used by deterministic layout analysis."""
+
+    font: ImageFont.FreeTypeFont
+    glyph_bounds: tuple[int, int, int, int]
+    origin: tuple[int, int]
+    metrics: TextRenderMetrics
+
+    @property
+    def bounds(self) -> tuple[int, int, int, int]:
+        left, top, right, bottom = self.glyph_bounds
+        return (
+            self.origin[0] + left,
+            self.origin[1] + top,
+            self.origin[0] + right,
+            self.origin[1] + bottom,
+        )
+
+
 def _open_rgba(source: Path | BinaryIO, label: str) -> Image.Image:
     try:
         with Image.open(source) as image:
@@ -70,12 +112,26 @@ def _fit_contain(image: Image.Image, box: Rect) -> Image.Image:
     return image.resize((width, height), Image.Resampling.LANCZOS)
 
 
+def prepare_pet_placement(pet: Image.Image, box: Rect) -> PetPlacement:
+    """Return the exact trimmed/contained/bottom-centered pet placement."""
+    visible = _trim_visible(pet.convert("RGBA"), "pet image")
+    source_width, source_height = visible.size
+    fitted = _fit_contain(visible, box)
+    x = box.x + (box.width - fitted.width) // 2
+    y = box.y + box.height - fitted.height
+    return PetPlacement(
+        image=fitted,
+        x=x,
+        y=y,
+        source_width_px=source_width,
+        source_height_px=source_height,
+    )
+
+
 def _place_pet(canvas: Image.Image, pet: Image.Image, layout: Layout) -> tuple[int, int, int, int]:
-    pet = _fit_contain(_trim_visible(pet, "pet image"), layout.pet_box)
-    x = layout.pet_box.x + (layout.pet_box.width - pet.width) // 2
-    y = layout.pet_box.y + layout.pet_box.height - pet.height
-    canvas.alpha_composite(pet, (x, y))
-    return x, y, x + pet.width, y + pet.height
+    placement = prepare_pet_placement(pet, layout.pet_box)
+    canvas.alpha_composite(placement.image, (placement.x, placement.y))
+    return placement.bounds
 
 
 def _text_bbox(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont) -> tuple[int, int, int, int]:
@@ -174,6 +230,21 @@ def _aligned_text_origin(layout: Layout, bounds: tuple[int, int, int, int]) -> t
     return x, y
 
 
+def prepare_text_placement(layout: Layout, text: str) -> TextPlacement:
+    """Return the exact shrink-only font choice and glyph placement."""
+    normalized = text.strip()
+    if not normalized:
+        raise RenderError("pet name must not be empty when layout.name is configured")
+    draw = ImageDraw.Draw(Image.new("L", (1, 1), 0))
+    font, bounds, metrics = _select_font(draw, normalized, layout)
+    return TextPlacement(
+        font=font,
+        glyph_bounds=bounds,
+        origin=_aligned_text_origin(layout, bounds),
+        metrics=metrics,
+    )
+
+
 def _parse_rgba(value: str) -> tuple[int, int, int, int]:
     return tuple(int(value[index : index + 2], 16) for index in range(1, 9, 2))  # type: ignore[return-value]
 
@@ -194,22 +265,16 @@ def render_composition(
     text_metrics: TextRenderMetrics | None = None
     if layout.has_name:
         normalized_name = pet_name.strip() if pet_name is not None else ""
-        if not normalized_name:
-            raise RenderError(
-                "pet name must not be empty when layout.name is configured"
-            )
         assert layout.color is not None
+        text_placement = prepare_text_placement(layout, normalized_name)
         draw = ImageDraw.Draw(canvas)
-        font, text_bounds, text_metrics = _select_font(
-            draw, normalized_name, layout
-        )
-        text_origin = _aligned_text_origin(layout, text_bounds)
         draw.text(
-            text_origin,
+            text_placement.origin,
             normalized_name,
-            font=font,
+            font=text_placement.font,
             fill=_parse_rgba(layout.color),
         )
+        text_metrics = text_placement.metrics
 
     if debug:
         draw = ImageDraw.Draw(canvas)

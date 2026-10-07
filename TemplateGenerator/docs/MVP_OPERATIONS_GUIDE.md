@@ -1450,9 +1450,75 @@ typeset -a PAWMARVEL_LAYOUT_REFERENCE_ARGS
 
 PAWMARVEL_LAYOUT_EXPERIMENT="$PAWMARVEL_AUTHORING_PRODUCT/experiments/layout/layout-v01"
 
+typeset -a PAWMARVEL_LAYOUT_PROPOSAL_NAME_ARGS
+PAWMARVEL_LAYOUT_PROPOSAL_NAME_ARGS=()
+if test "$PAWMARVEL_NAME_MODE" = layout-text; then
+  PAWMARVEL_LAYOUT_PROPOSAL_NAME_ARGS=(
+    --pet-name BO
+    --pet-name CHARLIE
+    --pet-name MARSHMALLOW
+  )
+fi
+
+PAWMARVEL_LAYOUT_PROPOSAL="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" propose-layout \
+  --experiment "$PAWMARVEL_LAYOUT_EXPERIMENT" \
+  --proposal-id proposal-v01 \
+  --name-mode "$PAWMARVEL_NAME_MODE" \
+  --attempt-prefix release- \
+  --max-candidates 60 \
+  --finalists 3 \
+  "${PAWMARVEL_LAYOUT_PROPOSAL_NAME_ARGS[@]}")"
+
+printf 'layout proposal: %s\n' "$PAWMARVEL_LAYOUT_PROPOSAL"
+open "$PAWMARVEL_LAYOUT_PROPOSAL/ranked-layout-proposals.png"
+open "$PAWMARVEL_LAYOUT_PROPOSAL/candidates/rank-01/qa/fixture-name-matrix.png"
+```
+
+This proposal stage is local and deterministic. It makes no OpenAI, Gemini or
+other paid API call. It uses Pillow, the exact production compositor's
+alpha-trim/contain/bottom-center placement, a maximum of 60 bounded geometry
+candidates, every distinct successful `release-*` transformed-pet output, and the
+snapshotted OFL font catalog when a separate text layer is enabled. It keeps at
+most three finalists and normally completes in seconds to a few minutes.
+
+Inspect `proposal.json`, `ranked-layout-proposals.png`, and each finalist's
+`qa/fixture-name-matrix.png`. Scores are deterministic prioritization evidence,
+not aesthetic approval. Confirm pet prominence, intended art overlap, embedded
+lettering, and—for `layout-text`—short/typical/long name behavior. Art overlap
+is a ranking penalty rather than a hard failure because some designs intend
+layer interaction.
+
+If a proposal is acceptable, choose its rank and import it into the ordinary
+immutable layout attempt:
+
+```bash
+PAWMARVEL_LAYOUT_PROPOSAL_CANDIDATE_ID="rank-01"
+PAWMARVEL_LAYOUT_PROPOSAL_LAYOUT="$PAWMARVEL_LAYOUT_PROPOSAL/candidates/$PAWMARVEL_LAYOUT_PROPOSAL_CANDIDATE_ID/layout.json"
+test -f "$PAWMARVEL_LAYOUT_PROPOSAL_LAYOUT"
+
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
   --experiment "$PAWMARVEL_LAYOUT_EXPERIMENT" \
   --attempt-id attempt-0001 \
+  --layout-file "$PAWMARVEL_LAYOUT_PROPOSAL_LAYOUT" \
+  "${PAWMARVEL_LAYOUT_NAME_ARGS[@]}"
+```
+
+The imported attempt is identical in structure to a manually saved layout and
+continues through comparison, print, graduation and bundle creation without a
+contract branch. Proposal files remain private authoring evidence and are never
+included in the FE bundle.
+
+If none of the ranked candidates is visually acceptable, retain the proposal
+as diagnostic evidence and run the existing editor instead. Use a new attempt
+ID only if `attempt-0001` was already imported; otherwise keep the normal first
+attempt:
+
+```bash
+PAWMARVEL_MANUAL_LAYOUT_ATTEMPT_ID="attempt-0001"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" run-attempt \
+  --experiment "$PAWMARVEL_LAYOUT_EXPERIMENT" \
+  --attempt-id "$PAWMARVEL_MANUAL_LAYOUT_ATTEMPT_ID" \
   "${PAWMARVEL_LAYOUT_NAME_ARGS[@]}"
 ```
 
@@ -1559,8 +1625,11 @@ around a word. Additional margin depends on the selected font, fixed nominal
 size, and characters in the QA name. A `padding_px` value of zero therefore does
 not mean that every name stretches to the box edges.
 
-Adjust the pet box, name box, font, nominal font size, minimum font size,
-padding, and color; then save and close the window.
+When using the manual fallback, adjust the pet box, name box, font, nominal
+font size, minimum font size, padding, and color; then save and close the
+window. When importing a ranked proposal, those values are already fixed in
+the candidate `layout.json`; inspect the resulting immutable attempt just as
+carefully.
 Change **Preview pet name** between a short, typical, and long value while
 tuning. Use **Add transformed pet for QA** to load transformed-pet outputs from
 other successful pet fixtures, then switch them through **Preview transformed

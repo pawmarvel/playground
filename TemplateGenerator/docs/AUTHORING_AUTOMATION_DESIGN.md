@@ -1,6 +1,8 @@
 # Config-driven authoring automation proposal
 
-Status: implementation proposal; commands below are not implemented.
+Status: staged implementation proposal. The local deterministic layout proposal
+stage in section 8 is implemented as `pawmarvel-author propose-layout`; the
+broader workflow coordinator commands remain planned.
 Date: 2026-10-04.
 Scope: local template authoring through the existing immutable bundle and release.
 
@@ -508,6 +510,16 @@ sufficient provenance and must be regenerated. Pet scratch is never evidence
 that a reusable runtime passed fixture QA; benchmark the frozen pet runtime.
 
 ## 8. Layout proposal and name-mode coverage
+
+MVP implementation: `pawmarvel-author propose-layout` consumes an existing
+layout experiment, discovers its successful release-prefixed transformed-pet
+attempts, evaluates at most 60 deterministic candidates, and retains at most
+three. It writes private `proposal.json`, importable layout-v2 candidates,
+representative/debug previews, a ranked contact sheet, and per-finalist
+fixture/name matrices under `<layout-experiment>/proposals/<proposal-id>/`.
+The command makes no provider call. The operator may import an accepted
+candidate through the unchanged `run-attempt --layout-file` path or use the
+existing GUI fallback. Proposals never enter bundles or FE contracts.
 
 Use the same Pillow compositor as the GUI and assembly. Add renderer-owned
 metrics for pet visible bounds, text ink bounds, applied font size and clipping;

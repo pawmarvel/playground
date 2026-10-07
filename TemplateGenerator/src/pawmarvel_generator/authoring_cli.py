@@ -21,6 +21,7 @@ from .authoring import (
 from .cli_errors import HelpfulArgumentParser, add_debug_argument, report_unexpected
 from .fixture_set import load_fixture_set, write_fixture_selection
 from .generation_contract import CLI_GENERATION_QUALITIES
+from .layout_proposal import propose_layout
 from .operation_config import (
     ART_TEMPLATE_MODES,
     IMAGE_PROVIDERS,
@@ -250,6 +251,48 @@ def build_parser() -> argparse.ArgumentParser:
         help="Import an existing layout without opening the editor",
     )
 
+    proposal = commands.add_parser(
+        "propose-layout",
+        help="rank deterministic local layout candidates without provider calls",
+    )
+    proposal.add_argument("--experiment", type=_path_argument, required=True)
+    proposal.add_argument("--proposal-id", required=True)
+    proposal.add_argument(
+        "--name-mode",
+        choices=("auto", "layout-text", "embedded-in-pet", "none"),
+        default="auto",
+        help=(
+            "personalization mode; auto infers embedded-in-pet from the pinned "
+            "pet attempt and otherwise uses layout-text"
+        ),
+    )
+    proposal.add_argument(
+        "--pet-name",
+        action="append",
+        default=[],
+        help=(
+            "layout-text probe name; repeat for short/typical/long coverage "
+            "(defaults to PET, CHARLIE, MARSHMALLOW)"
+        ),
+    )
+    proposal.add_argument(
+        "--attempt-prefix",
+        default="release-",
+        help="successful pet-attempt prefix used as placement evidence",
+    )
+    proposal.add_argument(
+        "--max-candidates",
+        type=int,
+        default=60,
+        help="bounded search budget, 1-60 (default: 60)",
+    )
+    proposal.add_argument(
+        "--finalists",
+        type=int,
+        default=3,
+        help="ranked candidates retained for review, 1-3 (default: 3)",
+    )
+
     bench = commands.add_parser("benchmark")
     bench.add_argument("--experiment", type=_path_argument, required=True)
     bench.add_argument("--fixture-set", type=_path_argument, required=True)
@@ -455,6 +498,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                                  pet_name=args.pet_name, layout_file=args.layout_file,
                                  reference_text=args.reference_text,
                                  no_pet_name=args.no_pet_name)
+        elif args.command == "propose-layout":
+            result = propose_layout(
+                experiment=args.experiment,
+                proposal_id=args.proposal_id,
+                name_mode=args.name_mode,
+                pet_names=args.pet_name,
+                attempt_prefix=args.attempt_prefix,
+                max_candidates=args.max_candidates,
+                finalists=args.finalists,
+            )
         elif args.command == "benchmark":
             if args.attempts_per_fixture is not None and args.attempts_per_fixture < 1:
                 raise AuthoringError("attempts per fixture must be positive")

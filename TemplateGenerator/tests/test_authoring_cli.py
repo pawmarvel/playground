@@ -37,6 +37,26 @@ class AuthoringCliTests(unittest.TestCase):
         self.assertIsNone(no_name.pet_name)
         self.assertTrue(no_name.no_pet_name)
 
+    def test_layout_proposal_accepts_bounded_local_search_options(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "propose-layout",
+                "--experiment", "layout-v01",
+                "--proposal-id", "proposal-v01",
+                "--name-mode", "layout-text",
+                "--pet-name", "BO",
+                "--pet-name", "MARSHMALLOW",
+                "--attempt-prefix", "release-",
+                "--max-candidates", "40",
+                "--finalists", "2",
+            ]
+        )
+
+        self.assertEqual(args.command, "propose-layout")
+        self.assertEqual(args.pet_name, ["BO", "MARSHMALLOW"])
+        self.assertEqual(args.max_candidates, 40)
+        self.assertEqual(args.finalists, 2)
+
     def test_empty_optional_array_argument_has_actionable_error(self) -> None:
         stderr = io.StringIO()
         with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:

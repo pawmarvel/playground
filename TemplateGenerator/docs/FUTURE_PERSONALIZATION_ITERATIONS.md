@@ -201,12 +201,14 @@ Automatic detection remains advisory; operators retain final control.
 
 #### Config-driven design scaling proposal
 
-[Authoring automation](AUTHORING_AUTOMATION_DESIGN.md) defines the next staged
+[Authoring automation](AUTHORING_AUTOMATION_DESIGN.md) defines the staged
 implementation for post-scratch benchmarks, bounded layout proposals, approved
-design profile expansion and category alternatives. It reuses the current
-bundle/FE contract and manual quality decisions. The separate
+design profile expansion and category alternatives. The deterministic bounded
+layout proposer is now available; the broader workflow coordinator remains
+future work. All stages reuse the current bundle/FE contract and manual quality
+decisions. The separate
 [review record](AUTHORING_AUTOMATION_REVIEW.md) captures three design-review
-passes. These are planned capabilities, not available commands.
+passes.
 
 Its M0–M5 milestones pull forward the necessary reports, renderer metrics and
 service extractions from stages 3 and 5. Keep stage 1 vendor/customer-data work
