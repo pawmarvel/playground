@@ -514,9 +514,10 @@ that a reusable runtime passed fixture QA; benchmark the frozen pet runtime.
 MVP implementation: `pawmarvel-author propose-layout` consumes an existing
 layout experiment, discovers its successful release-prefixed transformed-pet
 attempts, evaluates at most 60 deterministic candidates, and retains at most
-three. It writes private `proposal.json`, importable layout-v2 candidates,
-representative/debug previews, a ranked contact sheet, and per-finalist
-fixture/name matrices under `<layout-experiment>/proposals/<proposal-id>/`.
+three size-diverse finalists. It writes private `proposal.json`, importable
+layout-v2 candidates, representative/debug previews, a ranked contact sheet,
+and per-finalist fixture/name matrices under
+`<layout-experiment>/proposals/<proposal-id>/`.
 The command makes no provider call. The operator may import an accepted
 candidate through the unchanged `run-attempt --layout-file` path or use the
 existing GUI fallback. Proposals never enter bundles or FE contracts.
@@ -525,12 +526,31 @@ Use the same Pillow compositor as the GUI and assembly. Add renderer-owned
 metrics for pet visible bounds, text ink bounds, applied font size and clipping;
 do not implement a second geometry engine in the optimizer or browser.
 
-Seed from a reviewed source layout, operator-confirmed reference regions, or
-an operator-adjusted initial region for no-reference designs. Search a small
-bounded neighborhood of pet/name rectangles and nominal font size. Reuse the
-accepted font for descendants; test at most a few ranked OFL alternatives when
-typography changes. Keep the configured visual minimum size/padding; the
-optimizer cannot make everything fit simply by making text unreadably small.
+An existing layout is not a prerequisite. Prefer an operator-confirmed layout
+reference when one exists. Otherwise, derive a candidate region from transparent
+art free space and use finished-reference foreground subtraction only as a
+confidence-gated advisory estimate. Search compact, balanced, and prominent
+absolute size tiers plus bounded position variants; do not penalize candidates
+for moving away from an arbitrary generic seed. Preserve at least one finalist
+from each viable size tier so a single heuristic cannot hide materially larger
+compositions. Record the seed source, free region, reference estimate,
+confidence, warnings, and scoring metrics in `proposal.json`.
+
+The finished-design image used for this analysis is an immutable layout-
+experiment input. By default, layout creation selects the first content-identical
+reference shared by the chosen art and pet experiments. It records the copied
+asset hash, selection method, and whether art, pet, or both upstream experiments
+used it. If both upstream experiments have references but share none, creation
+fails instead of silently deriving geometry from the wrong design. An explicit
+layout `--reference-design` is accepted only when its content hash occurs in both
+selected upstream experiments. No external mutable path is read during proposal
+generation.
+
+Search a small bounded neighborhood of pet/name rectangles and nominal font
+size. Reuse the accepted font for descendants; test at most a few ranked OFL
+alternatives when typography changes. Keep the configured visual minimum
+size/padding; the optimizer cannot make everything fit simply by making text
+unreadably small.
 
 Reject structurally invalid layouts and render/name-fit failures. Rank valid
 candidates by displacement from the intended composition, minimum pet visual

@@ -988,8 +988,104 @@ class AuthoringLifecycleTests(unittest.TestCase):
         self.assertEqual(
             layout_metadata["inputs"]["reference_mode"], "finished-design"
         )
+        layout_reference = layout_metadata["inputs"]["reference"]
+        self.assertEqual(layout_reference["used_by"], ["art", "pet"])
+        self.assertEqual(
+            layout_reference["selection"], "inferred-shared-upstream"
+        )
         self.assertTrue(
-            (layout_experiment / "inputs" / "reference-design.png").is_file()
+            (layout_experiment / layout_reference["path"]).is_file()
+        )
+
+    def test_layout_reference_must_match_art_and_pet_upstream_inputs(self) -> None:
+        other_reference = make_image(
+            self.root / "other-reference.png", color=(200, 80, 40, 255)
+        )
+        art_experiment = self._experiment(
+            "art", "art-reference-v01", self.art_prompt
+        )
+        pet_experiment = self._experiment(
+            "pet",
+            "pet-reference-v01",
+            self.pet_prompt,
+            references=[other_reference],
+        )
+        art_attempt = self._fake_attempt(
+            art_experiment, "attempt-0001", "art.png", (672, 1008)
+        )
+        pet_attempt = self._fake_attempt(
+            pet_experiment,
+            "attempt-0001",
+            "transformed-pet.png",
+            (816, 816),
+            pet_source=self.pet,
+        )
+        with self.assertRaisesRegex(
+            AuthoringError, "do not share a finished-design reference"
+        ):
+            create_experiment(
+                kind="layout",
+                experiment_id="layout-reference-mismatch-v01",
+                design_id="life-is-good",
+                product_profile=self.profile,
+                authoring_root=self.authoring,
+                references=[],
+                prompt_file=None,
+                provider=None,
+                model=None,
+                quality="high",
+                art_attempt=art_attempt,
+                pet_attempt=pet_attempt,
+                font_catalogs=[],
+                parent_experiment_id=None,
+                base_bundle_revision=None,
+                created_by="test",
+            )
+
+    def test_layout_accepts_explicit_shared_upstream_reference(self) -> None:
+        art_experiment = self._experiment(
+            "art", "art-reference-v02", self.art_prompt
+        )
+        pet_experiment = self._experiment(
+            "pet", "pet-reference-v02", self.pet_prompt
+        )
+        art_attempt = self._fake_attempt(
+            art_experiment, "attempt-0001", "art.png", (672, 1008)
+        )
+        pet_attempt = self._fake_attempt(
+            pet_experiment,
+            "attempt-0001",
+            "transformed-pet.png",
+            (816, 816),
+            pet_source=self.pet,
+        )
+        layout_experiment = create_experiment(
+            kind="layout",
+            experiment_id="layout-explicit-reference-v01",
+            design_id="life-is-good",
+            product_profile=self.profile,
+            authoring_root=self.authoring,
+            references=[self.reference],
+            prompt_file=None,
+            provider=None,
+            model=None,
+            quality="high",
+            art_attempt=art_attempt,
+            pet_attempt=pet_attempt,
+            font_catalogs=[],
+            parent_experiment_id=None,
+            base_bundle_revision=None,
+            created_by="test",
+        )
+        metadata = json.loads(
+            (layout_experiment / "experiment.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            metadata["inputs"]["reference"]["selection"],
+            "explicit-shared-upstream",
+        )
+        self.assertEqual(
+            metadata["inputs"]["reference"]["used_by"], ["art", "pet"]
         )
 
     def test_empty_canvas_art_experiment_rejects_ai_inputs(self) -> None:

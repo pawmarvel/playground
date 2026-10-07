@@ -72,7 +72,13 @@ class LayoutProposalTest(unittest.TestCase):
         draw.rectangle((15, 350, 285, 405), fill=(0, 0, 0, 255))
         image.save(path, format="PNG")
 
-    def _layout_record(self, *, embedded_name: str | None = None, fonts: bool = False) -> None:
+    def _layout_record(
+        self,
+        *,
+        embedded_name: str | None = None,
+        fonts: bool = False,
+        reference: bool = False,
+    ) -> None:
         pinned = self.pet_experiment / "attempts" / "release-small-0001"
         record = json.loads((pinned / "run.json").read_text(encoding="utf-8"))
         if embedded_name is not None:
@@ -91,6 +97,21 @@ class LayoutProposalTest(unittest.TestCase):
             family.mkdir(parents=True)
             copy_font(family)
             inputs["font_catalogs"] = [{"path": "inputs/font-catalog-01"}]
+        if reference:
+            reference_path = self.inputs / "reference-design.png"
+            image = Image.new("RGB", (300, 420), (250, 250, 250))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((15, 15, 285, 75), fill=(0, 0, 0))
+            draw.rectangle((15, 350, 285, 405), fill=(0, 0, 0))
+            draw.rounded_rectangle(
+                (38, 105, 262, 335), radius=30, fill=(180, 70, 45)
+            )
+            image.save(reference_path, format="PNG")
+            inputs["reference"] = {
+                "path": "inputs/reference-design.png",
+                "selection": "inferred-shared-upstream",
+                "used_by": ["art", "pet"],
+            }
         self._write_json(
             self.layout_experiment / "experiment.json",
             {
@@ -117,6 +138,13 @@ class LayoutProposalTest(unittest.TestCase):
         self.assertEqual(proposal["name_mode"], "embedded-in-pet")
         self.assertEqual(len(proposal["pet_evidence"]["successful_attempts"]), 2)
         self.assertEqual(len(proposal["candidates"]), 3)
+        self.assertEqual(proposal["search"]["method"], "bounded-alpha-grid-v2")
+        self.assertEqual(
+            {candidate["size_tier"] for candidate in proposal["candidates"]},
+            {"compact", "balanced", "prominent"},
+        )
+        self.assertFalse(proposal["seed"]["authoritative"])
+        self.assertTrue(proposal["warnings"])
         self.assertTrue((result / "ranked-layout-proposals.png").is_file())
         scores = [candidate["metrics"]["score"] for candidate in proposal["candidates"]]
         self.assertEqual(scores, sorted(scores, reverse=True))
@@ -124,6 +152,32 @@ class LayoutProposalTest(unittest.TestCase):
             layout_path = result / candidate["layout"]
             self.assertFalse(load_layout(layout_path.parent).has_name)
             self.assertTrue((result / candidate["matrix"]).is_file())
+
+    def test_finished_reference_estimates_prominence_without_prior_layout(self) -> None:
+        self._layout_record(embedded_name="MILO", reference=True)
+        result = propose_layout(
+            experiment=self.layout_experiment,
+            proposal_id="proposal-reference-v01",
+            name_mode="embedded-in-pet",
+            max_candidates=20,
+            finalists=3,
+        )
+        proposal = json.loads((result / "proposal.json").read_text(encoding="utf-8"))
+        self.assertEqual(proposal["seed"]["source"], "reference-estimate")
+        self.assertTrue(proposal["seed"]["reference_estimate_used"])
+        self.assertGreaterEqual(
+            proposal["reference_prominence"]["confidence"], 0.65
+        )
+        self.assertEqual(
+            proposal["reference_evidence"]["used_by"], ["art", "pet"]
+        )
+        self.assertEqual(
+            proposal["reference_evidence"]["selection"],
+            "inferred-shared-upstream",
+        )
+        best = proposal["candidates"][0]["metrics"]
+        self.assertGreater(best["representative_pet_canvas_width_ratio"], 0.65)
+        self.assertLess(best["representative_prominence_distance"], 0.2)
 
     def test_layout_text_proposal_tests_names_and_copies_ofl_font(self) -> None:
         self._layout_record(fonts=True)

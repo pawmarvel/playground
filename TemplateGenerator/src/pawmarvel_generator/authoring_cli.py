@@ -508,6 +508,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 max_candidates=args.max_candidates,
                 finalists=args.finalists,
             )
+            proposal_record = json.loads(
+                (result / "proposal.json").read_text(encoding="utf-8")
+            )
+            for warning in proposal_record.get("warnings", []):
+                print(f"WARNING: {warning}", file=sys.stderr, flush=True)
         elif args.command == "benchmark":
             if args.attempts_per_fixture is not None and args.attempts_per_fixture < 1:
                 raise AuthoringError("attempts per fixture must be positive")

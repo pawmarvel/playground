@@ -436,13 +436,15 @@ def create_experiment(
             art_run = _attempt_record(art_attempt.expanduser().resolve())
             pet_run = _attempt_record(pet_attempt.expanduser().resolve())
             expected_identity = (design_id, profile.profile_id)
+            upstream_experiments: dict[str, tuple[Path, dict[str, Any]]] = {}
             for label, run, attempt in (
                 ("art", art_run, art_attempt),
                 ("pet", pet_run, pet_attempt),
             ):
-                _, metadata = _attempt_experiment(
+                upstream_experiment, metadata = _attempt_experiment(
                     attempt, run, expected_kind=label
                 )
+                upstream_experiments[label] = (upstream_experiment, metadata)
                 actual_identity = (
                     metadata.get("design_id"),
                     metadata.get("product_profile_id"),
@@ -466,24 +468,90 @@ def create_experiment(
                     "sha256": sha256(pet_attempt / "run.json"),
                 },
             )
-            art_experiment, art_metadata = _attempt_experiment(
-                art_attempt, art_run, expected_kind="art"
-            )
-            reference_descriptors = art_metadata.get("inputs", {}).get(
-                "references", []
-            )
-            if not reference_descriptors:
-                reference_descriptors = art_metadata.get("inputs", {}).get(
-                    "layout_references", []
+            upstream_references: dict[str, list[Path]] = {}
+            for label, (upstream_experiment, metadata) in upstream_experiments.items():
+                descriptors = metadata.get("inputs", {}).get("references", [])
+                if not descriptors:
+                    descriptors = metadata.get("inputs", {}).get(
+                        "layout_references", []
+                    )
+                upstream_references[label] = [
+                    _relative_input(upstream_experiment, descriptor)
+                    for descriptor in descriptors
+                ]
+
+            art_references = upstream_references["art"]
+            pet_references = upstream_references["pet"]
+            art_hashes = {sha256(path) for path in art_references}
+            pet_hashes = {sha256(path) for path in pet_references}
+            if len(references) > 1:
+                raise AuthoringError(
+                    "layout experiments accept at most one explicit derivation "
+                    "reference; supporting references remain pinned by the art "
+                    "and pet experiments"
                 )
-            refs = [
-                _relative_input(art_experiment, descriptor)
-                for descriptor in reference_descriptors
-            ]
-            if refs:
-                record_inputs["reference"] = _copy(
-                    refs[0], inputs / "reference-design.png"
+
+            selected_reference: Path | None = None
+            reference_selection: str | None = None
+            reference_used_by: list[str] = []
+            if references:
+                selected_reference = references[0].expanduser().resolve()
+                selected_hash = sha256(selected_reference)
+                missing_from = [
+                    label
+                    for label, hashes in (("art", art_hashes), ("pet", pet_hashes))
+                    if selected_hash not in hashes
+                ]
+                if missing_from:
+                    raise AuthoringError(
+                        "explicit layout derivation reference was not used by "
+                        f"the selected {', '.join(missing_from)} experiment(s); "
+                        f"reference={selected_reference}; sha256={selected_hash}"
+                    )
+                reference_selection = "explicit-shared-upstream"
+                reference_used_by = ["art", "pet"]
+            else:
+                shared_hashes = art_hashes & pet_hashes
+                selected_reference = next(
+                    (
+                        path
+                        for path in art_references
+                        if sha256(path) in shared_hashes
+                    ),
+                    None,
                 )
+                if selected_reference is not None:
+                    reference_selection = "inferred-shared-upstream"
+                    reference_used_by = ["art", "pet"]
+                elif art_references and pet_references:
+                    raise AuthoringError(
+                        "selected art and pet attempts do not share a finished-design "
+                        "reference; create compatible upstream experiments or pass "
+                        "--reference-design to identify a reference used by both; "
+                        f"art_reference_sha256={sorted(art_hashes)}; "
+                        f"pet_reference_sha256={sorted(pet_hashes)}"
+                    )
+                elif art_references:
+                    selected_reference = art_references[0]
+                    reference_selection = "inferred-art-upstream"
+                    reference_used_by = ["art"]
+                elif pet_references:
+                    selected_reference = pet_references[0]
+                    reference_selection = "inferred-pet-upstream"
+                    reference_used_by = ["pet"]
+
+            refs = [selected_reference] if selected_reference is not None else []
+            if selected_reference is not None:
+                suffix = selected_reference.suffix.lower() or ".png"
+                reference_info = _copy(
+                    selected_reference, inputs / f"reference-design{suffix}"
+                )
+                reference_info.update(
+                    role="layout_derivation_reference",
+                    selection=reference_selection,
+                    used_by=reference_used_by,
+                )
+                record_inputs["reference"] = reference_info
                 record_inputs["reference_mode"] = "finished-design"
             else:
                 record_inputs["reference_mode"] = "art-template"

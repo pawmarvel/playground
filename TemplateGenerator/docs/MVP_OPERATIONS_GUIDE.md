@@ -1436,6 +1436,13 @@ cannot alter the experiment.
 ```bash
 # Safe when the optional-reference setup block was skipped in a new shell.
 typeset -a PAWMARVEL_LAYOUT_REFERENCE_ARGS
+typeset -a PAWMARVEL_LAYOUT_DERIVATION_REFERENCE_ARGS
+PAWMARVEL_LAYOUT_DERIVATION_REFERENCE_ARGS=()
+if test -n "${PAWMARVEL_SAMPLE:-}"; then
+  PAWMARVEL_LAYOUT_DERIVATION_REFERENCE_ARGS=(
+    --reference-design "$PAWMARVEL_SAMPLE"
+  )
+fi
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" create-experiment \
   --kind layout \
@@ -1445,6 +1452,7 @@ typeset -a PAWMARVEL_LAYOUT_REFERENCE_ARGS
   --art-attempt "$PAWMARVEL_ART_ATTEMPT" \
   --pet-attempt "$PAWMARVEL_PET_ATTEMPT" \
   --font-catalog "$PAWMARVEL_FONT_CATALOG" \
+  "${PAWMARVEL_LAYOUT_DERIVATION_REFERENCE_ARGS[@]}" \
   "${PAWMARVEL_LAYOUT_REFERENCE_ARGS[@]}" \
   --authoring-root "$PAWMARVEL_AUTHORING_ROOT"
 
@@ -1474,19 +1482,38 @@ open "$PAWMARVEL_LAYOUT_PROPOSAL/ranked-layout-proposals.png"
 open "$PAWMARVEL_LAYOUT_PROPOSAL/candidates/rank-01/qa/fixture-name-matrix.png"
 ```
 
+Only the primary finished design is passed as the layout-derivation reference.
+Supporting images remain pinned in the upstream art and pet experiments but do
+not independently define layout geometry. The command verifies that the primary
+image content was used by both selected experiments. For prompt-only designs,
+`PAWMARVEL_SAMPLE` is empty and the initialized optional array contributes no
+argument.
+
 This proposal stage is local and deterministic. It makes no OpenAI, Gemini or
 other paid API call. It uses Pillow, the exact production compositor's
 alpha-trim/contain/bottom-center placement, a maximum of 60 bounded geometry
 candidates, every distinct successful `release-*` transformed-pet output, and the
-snapshotted OFL font catalog when a separate text layer is enabled. It keeps at
-most three finalists and normally completes in seconds to a few minutes.
+snapshotted OFL font catalog when a separate text layer is enabled. A prior
+layout is not required. The layout experiment automatically snapshots the first
+finished-design reference shared by its selected art and pet experiments. The
+proposal reads that immutable copy rather than the mutable design-input folder;
+its path, hash, selection method, and upstream usage are recorded as
+`reference_evidence` in `proposal.json`. Conflicting art and pet references stop
+layout creation with their hashes. Without an operator-authored layout reference,
+the tool derives usable space from `art.png`, optionally estimates
+personalized-foreground prominence from the finished reference after subtracting
+fixed art, and searches compact, balanced, and prominent size tiers. Reference
+estimates are used only above a recorded confidence threshold. It keeps at most
+three size-diverse finalists and normally completes in seconds to a few minutes.
 
 Inspect `proposal.json`, `ranked-layout-proposals.png`, and each finalist's
 `qa/fixture-name-matrix.png`. Scores are deterministic prioritization evidence,
 not aesthetic approval. Confirm pet prominence, intended art overlap, embedded
 lettering, and—for `layout-text`—short/typical/long name behavior. Art overlap
 is a ranking penalty rather than a hard failure because some designs intend
-layer interaction.
+layer interaction. When no authoritative layout region was supplied, the CLI
+and `proposal.json` explicitly warn that the reference/free-space estimate still
+requires manual visual approval.
 
 If a proposal is acceptable, choose its rank and import it into the ordinary
 immutable layout attempt:
