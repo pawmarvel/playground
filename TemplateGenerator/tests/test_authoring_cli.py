@@ -54,8 +54,18 @@ class AuthoringCliTests(unittest.TestCase):
 
         self.assertEqual(args.command, "propose-layout")
         self.assertEqual(args.pet_name, ["BO", "MARSHMALLOW"])
+        self.assertEqual(args.attempt_prefix, "release-")
         self.assertEqual(args.max_candidates, 40)
         self.assertEqual(args.finalists, 2)
+
+        default_args = build_parser().parse_args(
+            [
+                "propose-layout",
+                "--experiment", "layout-v01",
+                "--proposal-id", "proposal-v02",
+            ]
+        )
+        self.assertIsNone(default_args.attempt_prefix)
 
     def test_empty_optional_array_argument_has_actionable_error(self) -> None:
         stderr = io.StringIO()

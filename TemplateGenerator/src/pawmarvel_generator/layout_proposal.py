@@ -185,7 +185,7 @@ def _pet_evidence(
     experiment: Path,
     meta: Mapping[str, Any],
     *,
-    attempt_prefix: str,
+    attempt_prefix: str | None,
 ) -> tuple[list[PetEvidence], dict[str, Any]]:
     product = experiment.parents[2]
     inputs = meta.get("inputs")
@@ -213,21 +213,27 @@ def _pet_evidence(
     if pet_meta.get("kind") != "pet":
         raise LayoutProposalError(f"pinned pet experiment is not kind=pet: {pet_experiment}")
 
+    attempt_pattern = (
+        f"attempts/{attempt_prefix}*/run.json"
+        if attempt_prefix is not None
+        else "attempts/*/run.json"
+    )
     attempts = sorted(
-        pet_experiment.glob(f"attempts/{attempt_prefix}*/run.json"),
+        pet_experiment.glob(attempt_pattern),
         key=lambda path: (
             path.parent.resolve() != pinned_attempt,
             path.parent.name,
         ),
     )
     if not attempts:
+        qualifier = (
+            f" matching prefix {attempt_prefix!r}" if attempt_prefix is not None else ""
+        )
         raise LayoutProposalError(
-            f"no pet attempts match prefix {attempt_prefix!r}: "
-            f"{pet_experiment / 'attempts'}"
+            f"no pet attempts{qualifier}: {pet_experiment / 'attempts'}"
         )
     evidence: list[PetEvidence] = []
     failures: list[str] = []
-    seen_hashes: set[str] = set()
     for run_path in attempts:
         run = _json(run_path, "pet attempt")
         if run.get("status") != "succeeded":
@@ -238,9 +244,6 @@ def _pet_evidence(
             failures.append(run_path.parent.name)
             continue
         digest = sha256(output)
-        if digest in seen_hashes:
-            continue
-        seen_hashes.add(digest)
         evidence.append(
             PetEvidence(
                 attempt_id=run_path.parent.name,
@@ -252,7 +255,7 @@ def _pet_evidence(
     if not evidence:
         raise LayoutProposalError(
             f"no successful transformed-pet evidence found in {pet_experiment}; "
-            f"attempt_prefix={attempt_prefix!r}; failed={failures}"
+            f"attempt_filter={attempt_prefix!r}; failed={failures}"
         )
     pinned_run = _json(pinned_run_path, "pinned pet attempt")
     prompt_variables = pinned_run.get("prompt_variables")
@@ -321,9 +324,8 @@ def _art_free_region(art_alpha: Image.Image) -> Rect:
     else:
         top = lower + run[0]
         bottom = lower + run[1]
-        expansion = round(height * 0.08)
-        top = max(round(height * 0.05), top - expansion)
-        bottom = min(round(height * 0.95), bottom + expansion)
+        # Preserve the detected boundary. Expanding this band used to pull fixed
+        # top/bottom lettering into the nominally free personalization region.
     horizontal_margin = round(width * 0.05)
     return Rect(
         x=horizontal_margin,
@@ -625,80 +627,40 @@ def _clamped_scaled_box(
     return Rect(x=x, y=y, width=width, height=height)
 
 
-def _authoritative_pet_boxes(
-    seed: Rect, canvas_size: tuple[int, int]
-) -> list[PetBoxCandidate]:
-    offsets = (
-        (0.0, 0.0),
-        (0.0, -0.04),
-        (-0.04, 0.0),
-        (0.04, 0.0),
-        (0.0, 0.04),
-        (-0.04, -0.04),
-        (0.04, -0.04),
-        (-0.04, 0.04),
-        (0.04, 0.04),
-    )
-    result: list[PetBoxCandidate] = []
-    seen: set[tuple[int, int, int, int]] = set()
-    for tier, scale in (("balanced", 1.0), ("prominent", 1.08), ("compact", 0.92)):
-        for dx, dy in offsets:
-            box = _clamped_scaled_box(
-                seed, scale=scale, dx=dx, dy=dy, canvas_size=canvas_size
-            )
-            key = (box.x, box.y, box.width, box.height)
-            if key not in seen:
-                seen.add(key)
-                result.append(PetBoxCandidate(size_tier=tier, box=box))
-    return result
-
-
-def _heuristic_pet_boxes(
-    seed: SearchSeed, canvas_size: tuple[int, int]
-) -> list[PetBoxCandidate]:
-    width, height = canvas_size
-    center_x_ratio = (seed.pet_box.x + seed.pet_box.width / 2) / width
-    center_y_ratio = (seed.pet_box.y + seed.pet_box.height / 2) / height
-    targets: list[tuple[str, float, float]] = [
-        ("compact", 0.60, 0.48),
-        ("balanced", 0.75, 0.58),
-        ("prominent", 0.90, 0.68),
-    ]
-    if seed.reference is not None and seed.reference.confidence >= 0.65:
-        tier = "prominent" if seed.reference.width_ratio >= 0.825 else "balanced"
-        targets.append(
-            (tier, seed.reference.width_ratio, seed.reference.height_ratio)
-        )
-    offsets = (
-        (0.0, 0.0),
-        (0.0, -0.04),
-        (0.0, 0.04),
-        (-0.035, 0.0),
-        (0.035, 0.0),
-    )
-    result: list[PetBoxCandidate] = []
-    seen: set[tuple[int, int, int, int]] = set()
-    # Interleave sizes so a reduced budget still explores each prominence tier.
-    for dx, dy in offsets:
-        for tier, width_ratio, height_ratio in targets:
-            box = _rect_from_ratios(
-                canvas_size=canvas_size,
-                width_ratio=width_ratio,
-                height_ratio=height_ratio,
-                center_x_ratio=center_x_ratio + dx,
-                center_y_ratio=center_y_ratio + dy,
-            )
-            key = (box.x, box.y, box.width, box.height)
-            if key not in seen:
-                seen.add(key)
-                result.append(PetBoxCandidate(size_tier=tier, box=box))
-    return result
-
-
 def _pet_boxes(seed: SearchSeed, canvas_size: tuple[int, int]) -> list[PetBoxCandidate]:
-    if seed.authoritative:
-        return _authoritative_pet_boxes(seed.pet_box, canvas_size)
-    return _heuristic_pet_boxes(seed, canvas_size)
+    """Search broadly enough to find a fit; finalists are refined near the winner."""
+    scales = (0.80, 0.86, 0.92, 0.98, 1.04, 1.10)
+    offsets = (
+        (0.0, 0.0),
+        (0.0, -0.025),
+        (0.0, 0.025),
+        (-0.02, 0.0),
+        (0.02, 0.0),
+        (0.0, -0.05),
+        (0.0, 0.05),
+    )
+    result: list[PetBoxCandidate] = []
+    seen: set[tuple[int, int, int, int]] = set()
+    for dx, dy in offsets:
+        for scale in scales:
+            if scale < 0.95:
+                tier = "smaller"
+            elif scale > 1.05:
+                tier = "larger"
+            else:
+                tier = "baseline"
+            box = _clamped_scaled_box(
+                seed.pet_box,
+                scale=scale,
+                dx=dx,
+                dy=dy,
+                canvas_size=canvas_size,
+            )
+            key = (box.x, box.y, box.width, box.height)
+            if key not in seen:
+                seen.add(key)
+                result.append(PetBoxCandidate(size_tier=tier, box=box))
+    return result
 
 
 def _shifted_name_box(seed: Rect, dy: float, canvas_size: tuple[int, int]) -> Rect:
@@ -756,6 +718,54 @@ def _overlap_with_art(placement: Any, art_alpha: Image.Image) -> float:
     return _ink_mass(ImageChops.multiply(pet_alpha, crop)) / mass
 
 
+def _art_clearance_mask(art_alpha: Image.Image) -> Image.Image:
+    """Return a cheap reduced mask that reserves breathing room around fixed art."""
+    width, height = art_alpha.size
+    reduction = 4 if min(width, height) >= 800 else 2
+    reduced_size = (
+        max(1, (width + reduction - 1) // reduction),
+        max(1, (height + reduction - 1) // reduction),
+    )
+    reduced = art_alpha.resize(reduced_size, Image.Resampling.BOX).point(
+        lambda value: 255 if value > ALPHA_THRESHOLD else 0
+    )
+    clearance = max(1, round(min(width, height) * 0.018 / reduction))
+    kernel = clearance * 2 + 1
+    return reduced.filter(ImageFilter.MaxFilter(kernel))
+
+
+def _overlap_with_clearance(
+    placement: Any,
+    clearance_mask: Image.Image,
+    canvas_size: tuple[int, int],
+) -> float:
+    """Measure pet ink inside fixed-art clearance, not only direct collision."""
+    canvas_width, canvas_height = canvas_size
+    mask_width, mask_height = clearance_mask.size
+    left, top, right, bottom = placement.bounds
+    scaled_left = max(0, min(mask_width - 1, left * mask_width // canvas_width))
+    scaled_top = max(0, min(mask_height - 1, top * mask_height // canvas_height))
+    scaled_right = max(
+        scaled_left + 1,
+        min(mask_width, (right * mask_width + canvas_width - 1) // canvas_width),
+    )
+    scaled_bottom = max(
+        scaled_top + 1,
+        min(mask_height, (bottom * mask_height + canvas_height - 1) // canvas_height),
+    )
+    pet_alpha = _alpha_mask(placement.image).resize(
+        (scaled_right - scaled_left, scaled_bottom - scaled_top),
+        Image.Resampling.BOX,
+    )
+    pet_alpha = pet_alpha.point(lambda value: 255 if value > ALPHA_THRESHOLD else 0)
+    reserved = clearance_mask.crop(
+        (scaled_left, scaled_top, scaled_right, scaled_bottom)
+    )
+    return _ink_mass(ImageChops.multiply(pet_alpha, reserved)) / max(
+        1.0, _ink_mass(pet_alpha)
+    )
+
+
 def _overlap_with_text(placement: Any, text: Any, name: str) -> float:
     left, top, right, bottom = text.bounds
     intersect_left = max(left, placement.x)
@@ -797,10 +807,12 @@ def _score_candidate(
     layout: Layout,
     pets: list[PetEvidence],
     art_alpha: Image.Image,
+    art_clearance: Image.Image,
     names: tuple[str, ...],
     seed: SearchSeed,
 ) -> tuple[float, dict[str, Any]]:
     art_overlaps: list[float] = []
+    clearance_overlaps: list[float] = []
     pet_scales: list[float] = []
     pet_widths: list[float] = []
     pet_heights: list[float] = []
@@ -810,6 +822,13 @@ def _score_candidate(
     for pet in pets:
         placement = prepare_pet_placement(pet.image, layout.pet_box)
         art_overlaps.append(_overlap_with_art(placement, art_alpha))
+        clearance_overlaps.append(
+            _overlap_with_clearance(
+                placement,
+                art_clearance,
+                (layout.canvas_width, layout.canvas_height),
+            )
+        )
         pet_scales.append(placement.scale)
         pet_widths.append(placement.image.width / layout.canvas_width)
         pet_heights.append(placement.image.height / layout.canvas_height)
@@ -830,6 +849,8 @@ def _score_candidate(
             name_overlaps.append(_overlap_with_text(placement, text, name))
     max_art_overlap = max(art_overlaps)
     mean_art_overlap = sum(art_overlaps) / len(art_overlaps)
+    max_clearance_overlap = max(clearance_overlaps)
+    mean_clearance_overlap = sum(clearance_overlaps) / len(clearance_overlaps)
     max_name_overlap = max(name_overlaps, default=0.0)
     minimum_text_scale = min(text_scales, default=1.0)
     minimum_pet_scale = min(pet_scales)
@@ -869,8 +890,10 @@ def _score_candidate(
     )
     score = (
         100.0
-        - 500.0 * max_art_overlap
-        - 180.0 * mean_art_overlap
+        - 1400.0 * max_art_overlap
+        - 350.0 * mean_art_overlap
+        - 650.0 * max_clearance_overlap
+        - 120.0 * mean_clearance_overlap
         - 500.0 * max_name_overlap
         - 80.0 * (1.0 - minimum_text_scale)
         - 100.0 * prominence_distance
@@ -882,6 +905,8 @@ def _score_candidate(
         "score": round(score, 6),
         "maximum_art_alpha_overlap_ratio": round(max_art_overlap, 6),
         "mean_art_alpha_overlap_ratio": round(mean_art_overlap, 6),
+        "maximum_art_clearance_overlap_ratio": round(max_clearance_overlap, 6),
+        "mean_art_clearance_overlap_ratio": round(mean_clearance_overlap, 6),
         "maximum_pet_name_alpha_overlap_ratio": round(max_name_overlap, 6),
         "minimum_pet_source_scale": round(minimum_pet_scale, 6),
         "representative_pet_canvas_width_ratio": round(
@@ -906,33 +931,109 @@ def _score_candidate(
     return score, metrics
 
 
-def _select_diverse_finalists(
+def _select_fine_tuned_finalists(
     candidates: list[Candidate], finalist_count: int
 ) -> list[Candidate]:
-    """Keep the best compact, balanced, and prominent options for review."""
-    selected: list[Candidate] = []
-    selected_ids: set[int] = set()
-    for tier in ("balanced", "prominent", "compact"):
-        candidate = next(
-            (item for item in candidates if item.size_tier == tier), None
+    """Keep the winner plus safe size and position refinements near it."""
+    if not candidates:
+        return []
+    best = candidates[0]
+    best_center = (
+        best.pet_box.x + best.pet_box.width / 2,
+        best.pet_box.y + best.pet_box.height / 2,
+    )
+    selected = [best]
+    selected_geometry = {
+        (best.pet_box.x, best.pet_box.y, best.pet_box.width, best.pet_box.height)
+    }
+
+    def geometry(candidate: Candidate) -> tuple[int, int, int, int]:
+        return (
+            candidate.pet_box.x,
+            candidate.pet_box.y,
+            candidate.pet_box.width,
+            candidate.pet_box.height,
         )
-        if candidate is not None:
-            selected.append(candidate)
-            selected_ids.add(id(candidate))
-        if len(selected) == finalist_count:
-            break
-    if len(selected) < finalist_count:
-        for candidate in candidates:
-            if id(candidate) in selected_ids:
+
+    def nearby(candidate: Candidate) -> bool:
+        center = (
+            candidate.pet_box.x + candidate.pet_box.width / 2,
+            candidate.pet_box.y + candidate.pet_box.height / 2,
+        )
+        width_ratio = candidate.pet_box.width / best.pet_box.width
+        height_ratio = candidate.pet_box.height / best.pet_box.height
+        return (
+            0.88 <= width_ratio <= 1.12
+            and 0.88 <= height_ratio <= 1.12
+            and abs(center[0] - best_center[0]) <= best.pet_box.width * 0.07
+            and abs(center[1] - best_center[1]) <= best.pet_box.height * 0.08
+        )
+
+    def safe(candidate: Candidate) -> bool:
+        return (
+            candidate.metrics["maximum_art_alpha_overlap_ratio"]
+            <= max(0.003, best.metrics["maximum_art_alpha_overlap_ratio"] + 0.002)
+            and candidate.metrics["maximum_art_clearance_overlap_ratio"]
+            <= max(
+                0.01,
+                best.metrics["maximum_art_clearance_overlap_ratio"] + 0.006,
+            )
+        )
+
+    def add_first(predicate: Any) -> None:
+        if len(selected) >= finalist_count:
+            return
+        for candidate in candidates[1:]:
+            key = geometry(candidate)
+            if key in selected_geometry or not nearby(candidate) or not safe(candidate):
+                continue
+            if not predicate(candidate):
                 continue
             selected.append(candidate)
-            selected_ids.add(id(candidate))
-            if len(selected) == finalist_count:
+            selected_geometry.add(key)
+            return
+
+    # Prefer one subtle scale alternative and one subtle vertical-placement
+    # alternative. These are more actionable than symmetric horizontal nudges.
+    add_first(
+        lambda candidate: 0.03
+        <= abs(candidate.pet_box.width / best.pet_box.width - 1.0)
+        <= 0.12
+    )
+    add_first(
+        lambda candidate: (
+            abs(
+                (candidate.pet_box.y + candidate.pet_box.height / 2)
+                - best_center[1]
+            )
+            >= best.pet_box.height * 0.015
+            and 0.95
+            <= candidate.pet_box.width / best.pet_box.width
+            <= 1.05
+        )
+    )
+
+    for candidate in candidates[1:]:
+        if len(selected) >= finalist_count:
+            break
+        key = geometry(candidate)
+        if key in selected_geometry or not nearby(candidate) or not safe(candidate):
+            continue
+        selected.append(candidate)
+        selected_geometry.add(key)
+
+    if len(selected) < finalist_count:
+        for candidate in candidates[1:]:
+            if len(selected) >= finalist_count:
                 break
+            key = geometry(candidate)
+            if key in selected_geometry:
+                continue
+            selected.append(candidate)
+            selected_geometry.add(key)
+
     selected.sort(key=lambda item: item.sort_key)
     return selected
-
-
 def _checkerboard(size: tuple[int, int]) -> Image.Image:
     image = Image.new("RGB", size, (244, 244, 244))
     draw = ImageDraw.Draw(image)
@@ -1000,7 +1101,7 @@ def propose_layout(
     proposal_id: str,
     name_mode: str = "auto",
     pet_names: Iterable[str] = (),
-    attempt_prefix: str = "release-",
+    attempt_prefix: str | None = None,
     max_candidates: int = MAX_SEARCH_CANDIDATES,
     finalists: int = MAX_FINALISTS,
 ) -> Path:
@@ -1013,7 +1114,7 @@ def propose_layout(
         )
     if not 1 <= finalists <= MAX_FINALISTS:
         raise LayoutProposalError(f"finalists must be between 1 and {MAX_FINALISTS}")
-    if (
+    if attempt_prefix is not None and (
         not attempt_prefix
         or attempt_prefix.strip() != attempt_prefix
         or any(character in attempt_prefix for character in "/*?[]\\")
@@ -1035,6 +1136,7 @@ def propose_layout(
     art_image = _open_rgba(art, "art")
     canvas_size = art_image.size
     art_alpha = _alpha_mask(art_image)
+    art_clearance = _art_clearance_mask(art_alpha)
     pets, pet_context = _pet_evidence(
         experiment, meta, attempt_prefix=attempt_prefix
     )
@@ -1155,6 +1257,7 @@ def propose_layout(
                 layout=layout,
                 pets=pets,
                 art_alpha=art_alpha,
+                art_clearance=art_clearance,
                 names=names,
                 seed=seed,
             )
@@ -1164,6 +1267,7 @@ def propose_layout(
         sort_key = (
             -score,
             metrics["maximum_art_alpha_overlap_ratio"],
+            metrics["maximum_art_clearance_overlap_ratio"],
             metrics["maximum_pet_name_alpha_overlap_ratio"],
             metrics["representative_prominence_distance"],
             metrics["normalized_seed_displacement"],
@@ -1188,7 +1292,7 @@ def propose_layout(
             )
         )
     scored.sort(key=lambda item: item.sort_key)
-    selected = _select_diverse_finalists(scored, finalists)
+    selected = _select_fine_tuned_finalists(scored, finalists)
     if not selected:
         raise LayoutProposalError(
             "bounded search produced no valid layout candidates; "
@@ -1335,7 +1439,7 @@ def propose_layout(
             ),
             "reference_evidence": reference_evidence,
             "search": {
-                "method": "bounded-alpha-grid-v2",
+                "method": "bounded-alpha-clearance-grid-v3",
                 "candidate_limit": max_candidates,
                 "evaluated_candidates": len(search),
                 "valid_candidates": len(scored),
@@ -1346,10 +1450,15 @@ def propose_layout(
                     seed.name_box.to_dict() if resolved_mode == "layout-text" else None
                 ),
                 "pet_name_probes": list(names),
-                "finalist_strategy": "size-diverse",
+                "finalist_strategy": "best-fit-nearby-refinements",
             },
             "pet_evidence": {
                 "attempt_prefix": attempt_prefix,
+                "attempt_filter": (
+                    {"mode": "prefix", "prefix": attempt_prefix}
+                    if attempt_prefix is not None
+                    else {"mode": "all-successful"}
+                ),
                 "successful_attempts": [
                     {
                         "attempt_id": pet.attempt_id,

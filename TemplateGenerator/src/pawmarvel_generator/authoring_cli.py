@@ -277,8 +277,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     proposal.add_argument(
         "--attempt-prefix",
-        default="release-",
-        help="successful pet-attempt prefix used as placement evidence",
+        help=(
+            "optional successful pet-attempt prefix; omitted uses every successful "
+            "attempt in the selected pet experiment"
+        ),
     )
     proposal.add_argument(
         "--max-candidates",

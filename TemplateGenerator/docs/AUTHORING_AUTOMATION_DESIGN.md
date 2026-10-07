@@ -512,9 +512,11 @@ that a reusable runtime passed fixture QA; benchmark the frozen pet runtime.
 ## 8. Layout proposal and name-mode coverage
 
 MVP implementation: `pawmarvel-author propose-layout` consumes an existing
-layout experiment, discovers its successful release-prefixed transformed-pet
-attempts, evaluates at most 60 deterministic candidates, and retains at most
-three size-diverse finalists. It writes private `proposal.json`, importable
+layout experiment, discovers its successful transformed-pet attempts,
+evaluates at most 60 deterministic candidates, and retains the best
+fit plus at most two nearby refinements. By default all successful attempts in
+the selected pet experiment contribute evidence; an optional prefix is only a
+diagnostic filter. It writes private `proposal.json`, importable
 layout-v2 candidates, representative/debug previews, a ranked contact sheet,
 and per-finalist fixture/name matrices under
 `<layout-experiment>/proposals/<proposal-id>/`.
@@ -529,12 +531,12 @@ do not implement a second geometry engine in the optimizer or browser.
 An existing layout is not a prerequisite. Prefer an operator-confirmed layout
 reference when one exists. Otherwise, derive a candidate region from transparent
 art free space and use finished-reference foreground subtraction only as a
-confidence-gated advisory estimate. Search compact, balanced, and prominent
-absolute size tiers plus bounded position variants; do not penalize candidates
-for moving away from an arbitrary generic seed. Preserve at least one finalist
-from each viable size tier so a single heuristic cannot hide materially larger
-compositions. Record the seed source, free region, reference estimate,
-confidence, warnings, and scoring metrics in `proposal.json`.
+confidence-gated advisory estimate. Search a bounded scale/position grid to find
+the optimum, including a clearance mask around fixed top and bottom art. Return
+nearby refinements around that optimum rather than forced compact/prominent
+extremes. Record the seed source, free region, reference estimate, confidence,
+direct overlap, clearance overlap, warnings, and scoring metrics in
+`proposal.json`.
 
 The finished-design image used for this analysis is an immutable layout-
 experiment input. By default, layout creation selects the first content-identical

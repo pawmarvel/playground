@@ -44,6 +44,22 @@ class LayoutProposalTest(unittest.TestCase):
                     "status": "succeeded",
                 },
             )
+        scratch_attempt = self.pet_experiment / "attempts" / "attempt-0001"
+        make_transparent_mark(
+            scratch_attempt / "outputs" / "transformed-pet.png",
+            size=(145, 205),
+            color=(100, 160, 90, 255),
+        )
+        self._write_json(
+            scratch_attempt / "run.json",
+            {
+                "schema_version": 1,
+                "attempt_id": scratch_attempt.name,
+                "experiment_id": "pet-gpt-v01",
+                "kind": "pet",
+                "status": "succeeded",
+            },
+        )
         self._write_json(
             self.pet_experiment / "experiment.json",
             {
@@ -136,18 +152,31 @@ class LayoutProposalTest(unittest.TestCase):
         )
         proposal = json.loads((result / "proposal.json").read_text(encoding="utf-8"))
         self.assertEqual(proposal["name_mode"], "embedded-in-pet")
-        self.assertEqual(len(proposal["pet_evidence"]["successful_attempts"]), 2)
-        self.assertEqual(len(proposal["candidates"]), 3)
-        self.assertEqual(proposal["search"]["method"], "bounded-alpha-grid-v2")
+        self.assertEqual(len(proposal["pet_evidence"]["successful_attempts"]), 3)
         self.assertEqual(
-            {candidate["size_tier"] for candidate in proposal["candidates"]},
-            {"compact", "balanced", "prominent"},
+            proposal["pet_evidence"]["attempt_filter"], {"mode": "all-successful"}
+        )
+        self.assertEqual(len(proposal["candidates"]), 3)
+        self.assertEqual(
+            proposal["search"]["method"], "bounded-alpha-clearance-grid-v3"
+        )
+        self.assertEqual(
+            proposal["search"]["finalist_strategy"],
+            "best-fit-nearby-refinements",
         )
         self.assertFalse(proposal["seed"]["authoritative"])
         self.assertTrue(proposal["warnings"])
         self.assertTrue((result / "ranked-layout-proposals.png").is_file())
         scores = [candidate["metrics"]["score"] for candidate in proposal["candidates"]]
         self.assertEqual(scores, sorted(scores, reverse=True))
+        layouts = [
+            load_layout((result / candidate["layout"]).parent)
+            for candidate in proposal["candidates"]
+        ]
+        best = layouts[0].pet_box
+        for layout in layouts[1:]:
+            self.assertGreaterEqual(layout.pet_box.width / best.width, 0.88)
+            self.assertLessEqual(layout.pet_box.width / best.width, 1.12)
         for candidate in proposal["candidates"]:
             layout_path = result / candidate["layout"]
             self.assertFalse(load_layout(layout_path.parent).has_name)
@@ -197,7 +226,7 @@ class LayoutProposalTest(unittest.TestCase):
             self.assertTrue(layout.has_name)
             self.assertTrue((layout_path.parent / "fonts" / "OFL.txt").is_file())
             metrics = json.loads((layout_path.parent / "metrics.json").read_text())
-            self.assertEqual(len(metrics["fixture_name_matrix"]), 4)
+            self.assertEqual(len(metrics["fixture_name_matrix"]), 6)
 
     def test_rejects_existing_proposal_and_invalid_budget(self) -> None:
         self._layout_record(embedded_name="MILO")

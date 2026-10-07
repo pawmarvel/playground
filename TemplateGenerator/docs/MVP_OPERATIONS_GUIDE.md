@@ -1472,7 +1472,6 @@ PAWMARVEL_LAYOUT_PROPOSAL="$("$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" pro
   --experiment "$PAWMARVEL_LAYOUT_EXPERIMENT" \
   --proposal-id proposal-v01 \
   --name-mode "$PAWMARVEL_NAME_MODE" \
-  --attempt-prefix release- \
   --max-candidates 60 \
   --finalists 3 \
   "${PAWMARVEL_LAYOUT_PROPOSAL_NAME_ARGS[@]}")"
@@ -1489,10 +1488,16 @@ image content was used by both selected experiments. For prompt-only designs,
 `PAWMARVEL_SAMPLE` is empty and the initialized optional array contributes no
 argument.
 
+The proposal evaluates every successful attempt in the selected pet experiment
+by default, including scratch, smoke, and release attempts. This catches
+morphology-dependent clipping and overlap before layout review. Use
+`--attempt-prefix` only for an intentional diagnostic subset; do not use it for
+the normal layout decision.
+
 This proposal stage is local and deterministic. It makes no OpenAI, Gemini or
 other paid API call. It uses Pillow, the exact production compositor's
 alpha-trim/contain/bottom-center placement, a maximum of 60 bounded geometry
-candidates, every distinct successful `release-*` transformed-pet output, and the
+candidates, every successful transformed-pet attempt in the selected experiment, and the
 snapshotted OFL font catalog when a separate text layer is enabled. A prior
 layout is not required. The layout experiment automatically snapshots the first
 finished-design reference shared by its selected art and pet experiments. The
@@ -1502,9 +1507,12 @@ its path, hash, selection method, and upstream usage are recorded as
 layout creation with their hashes. Without an operator-authored layout reference,
 the tool derives usable space from `art.png`, optionally estimates
 personalized-foreground prominence from the finished reference after subtracting
-fixed art, and searches compact, balanced, and prominent size tiers. Reference
-estimates are used only above a recorded confidence threshold. It keeps at most
-three size-diverse finalists and normally completes in seconds to a few minutes.
+fixed art, searches around that estimate, and penalizes both direct collision and
+missing visual clearance around fixed headlines. Reference estimates are used
+only above a recorded confidence threshold. It keeps the highest-scoring result
+plus at most two nearby size/position refinements; it does not force unrealistic
+large and small extremes. The command normally completes in seconds to a few
+minutes.
 
 Inspect `proposal.json`, `ranked-layout-proposals.png`, and each finalist's
 `qa/fixture-name-matrix.png`. Scores are deterministic prioritization evidence,
