@@ -58,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="graduation pool (default: sibling Graduation Pool)",
     )
     parser.add_argument(
+        "--release-root",
+        type=_path,
+        help="published design pool (default: sibling Release Pool)",
+    )
+    parser.add_argument(
         "--database",
         type=_path,
         default=DEFAULT_REVIEW_ROOT / "gallery-votes.sqlite3",
@@ -78,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="days to retain votes after a design leaves the pool (default: 30)",
     )
     parser.add_argument(
+        "--project-root",
+        type=_path,
+        default=DEFAULT_PROJECT_ROOT,
+        help="TemplateGenerator project root used by operator workflow defaults",
+    )
+    parser.add_argument(
         "--authoring-root",
         type=_path,
         default=DEFAULT_PROJECT_ROOT / "work/authoring",
@@ -85,6 +96,31 @@ def build_parser() -> argparse.ArgumentParser:
             "authoring root used to discover complete art and release-pet reviews "
             "(default: <project>/work/authoring)"
         ),
+    )
+    parser.add_argument(
+        "--exchange-root",
+        type=_path,
+        default=DEFAULT_PROJECT_ROOT / "work/exchange",
+        help=(
+            "local bundle/release exchange root used to classify released designs "
+            "and build operator-approved local releases"
+        ),
+    )
+    parser.add_argument(
+        "--s3-bucket",
+        help="publication bucket (default: PAWMARVEL_S3_BUCKET)",
+    )
+    parser.add_argument(
+        "--s3-prefix",
+        help="publication key prefix (default: PAWMARVEL_S3_PREFIX or empty)",
+    )
+    parser.add_argument(
+        "--aws-profile",
+        help="AWS CLI profile (default: AWS_PROFILE)",
+    )
+    parser.add_argument(
+        "--aws-region",
+        help="AWS region (default: AWS_REGION or AWS_DEFAULT_REGION)",
     )
     parser.add_argument(
         "--collection",
@@ -138,6 +174,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         operator_code = args.operator_access_code or os.environ.get(
             "PAWMARVEL_GALLERY_OPERATOR_ACCESS_CODE"
         )
+        s3_bucket = args.s3_bucket or os.environ.get("PAWMARVEL_S3_BUCKET")
+        s3_prefix = (
+            args.s3_prefix
+            if args.s3_prefix is not None
+            else os.environ.get("PAWMARVEL_S3_PREFIX", "")
+        )
+        aws_profile = args.aws_profile or os.environ.get("AWS_PROFILE")
+        aws_region = (
+            args.aws_region
+            or os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+        )
+        if s3_prefix != s3_prefix.strip("/"):
+            parser.error(
+                "S3 prefix must not have a leading or trailing slash; "
+                f"actual={s3_prefix!r}"
+            )
         if args.bind not in {"127.0.0.1", "localhost", "::1"} and (
             not reviewer_code or not operator_code
         ):
@@ -158,7 +211,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 root=root,
                 index=index,
                 database=database,
+                project_root=args.project_root.resolve(),
                 authoring_root=args.authoring_root.resolve(),
+                exchange_root=args.exchange_root.resolve(),
                 abandoned_root=(
                     args.abandoned_root.resolve()
                     if args.abandoned_root is not None
@@ -169,6 +224,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if args.graduation_root is not None
                     else None
                 ),
+                release_root=(
+                    args.release_root.resolve()
+                    if args.release_root is not None
+                    else None
+                ),
+                s3_bucket=s3_bucket,
+                s3_prefix=s3_prefix,
+                aws_profile=aws_profile,
+                aws_region=aws_region,
                 collections=tuple(args.collection),
                 reviewer_access_code=reviewer_code,
                 operator_access_code=operator_code,
@@ -189,6 +253,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{sum(bool(item['review_contexts']) for item in server.concepts)}"
         )
         print(f"Votes: {database}")
+        if s3_bucket:
+            key_prefix = f"{s3_prefix}/" if s3_prefix else ""
+            print(
+                "Operator S3 publication: "
+                f"s3://{s3_bucket}/{key_prefix} "
+                f"(profile={aws_profile or '<default>'}, "
+                f"region={aws_region or '<default>'})"
+            )
+        else:
+            print(
+                "Operator S3 publication disabled: set PAWMARVEL_S3_BUCKET "
+                "and restart the gallery.",
+                file=sys.stderr,
+            )
         result = server.reconciliation
         print(
             "Pool reconciliation: "

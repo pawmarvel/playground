@@ -7,7 +7,7 @@ import json
 import re
 import subprocess
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 from .artifact_io import sha256
 from .bundle import BundleError
@@ -69,6 +69,127 @@ def _publication_key(prefix: str, relative: str) -> str:
         if prefix_path is not None
         else relative_path.as_posix()
     )
+
+
+def _is_macos_metadata(path: Path) -> bool:
+    return path.name == ".DS_Store" or path.name.startswith("._")
+
+
+def _release_bundle_roots_for_cleanup(
+    *, release_catalog: Path, exchange_root: Path
+) -> list[Path]:
+    """Resolve only bundle roots explicitly referenced by a release catalog.
+
+    This deliberately performs a small, security-focused parse before the normal
+    strict release validation. Finder metadata is not part of an immutable bundle,
+    so strict validation cannot run until that metadata has been removed.
+    """
+
+    root = exchange_root.expanduser().resolve()
+    catalog_path = release_catalog.expanduser().resolve()
+    releases_root = (root / "releases").resolve()
+    try:
+        catalog_path.relative_to(releases_root)
+    except ValueError as exc:
+        raise BundleError(
+            "release catalog must be inside the exchange releases directory for "
+            f"publication preflight: catalog={catalog_path}; "
+            f"releases_root={releases_root}"
+        ) from exc
+    try:
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BundleError(
+            f"release catalog is not readable JSON for publication preflight: "
+            f"{catalog_path}: {exc}"
+        ) from exc
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("templates"), list):
+        raise BundleError(
+            "release catalog must contain a templates array for publication "
+            f"preflight: {catalog_path}"
+        )
+
+    bundles_root = (root / "bundles").resolve()
+    result: list[Path] = []
+    seen: set[Path] = set()
+    for index, entry in enumerate(catalog["templates"]):
+        manifest_text = entry.get("manifest_path") if isinstance(entry, dict) else None
+        if not isinstance(manifest_text, str) or not manifest_text:
+            raise BundleError(
+                "release catalog template has no manifest_path for publication "
+                f"preflight: catalog={catalog_path}; template_index={index}"
+            )
+        relative = PurePosixPath(manifest_text)
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or relative.parts[0] != "bundles"
+            or relative.name != "bundle.json"
+        ):
+            raise BundleError(
+                "unsafe bundle manifest path in release catalog publication "
+                f"preflight: catalog={catalog_path}; manifest_path={manifest_text!r}"
+            )
+        manifest_path = root.joinpath(*relative.parts).resolve()
+        bundle_root = manifest_path.parent
+        try:
+            bundle_root.relative_to(bundles_root)
+        except ValueError as exc:
+            raise BundleError(
+                "bundle manifest escapes the exchange bundles directory during "
+                f"publication preflight: catalog={catalog_path}; "
+                f"manifest={manifest_path}; bundles_root={bundles_root}"
+            ) from exc
+        if bundle_root == bundles_root:
+            raise BundleError(
+                "bundle manifest must be inside a bundle revision directory during "
+                f"publication preflight: {manifest_path}"
+            )
+        if bundle_root not in seen:
+            result.append(bundle_root)
+            seen.add(bundle_root)
+    return result
+
+
+def sanitize_release_bundle_metadata(
+    *,
+    release_catalog: Path,
+    exchange_root: Path,
+    progress: Callable[[str], None] | None = None,
+) -> list[Path]:
+    """Remove Finder metadata only from bundles selected by one release.
+
+    Unknown files remain untouched and are rejected by the unchanged strict bundle
+    validator that runs immediately after this preflight.
+    """
+
+    removed: list[Path] = []
+    for bundle_root in _release_bundle_roots_for_cleanup(
+        release_catalog=release_catalog,
+        exchange_root=exchange_root,
+    ):
+        if not bundle_root.is_dir():
+            continue
+        for candidate in sorted(bundle_root.rglob("*")):
+            if not _is_macos_metadata(candidate):
+                continue
+            if not (candidate.is_file() or candidate.is_symlink()):
+                continue
+            try:
+                candidate.unlink()
+            except OSError as exc:
+                raise BundleError(
+                    "failed to remove local macOS metadata before publication "
+                    f"validation: path={candidate}; error={exc}. Close Finder windows "
+                    "using this bundle, remove the file manually, and retry."
+                ) from exc
+            message = f"Removed local macOS metadata before validation: {candidate}"
+            print(message)
+            if progress is not None:
+                progress(message)
+            removed.append(candidate)
+    return removed
 
 
 def build_s3_publication_plan(
@@ -211,19 +332,29 @@ def publish_s3(
     region: str | None,
     authoring_root: Path | None,
     execute: bool,
+    progress: Callable[[str], None] | None = None,
 ) -> str:
     if not bucket or bucket.startswith("s3://") or "/" in bucket:
         raise BundleError("--bucket must be an S3 bucket name, without s3:// or a path")
+    _validate_prefix(prefix)
+    sanitize_release_bundle_metadata(
+        release_catalog=release_catalog,
+        exchange_root=exchange_root,
+        progress=progress,
+    )
     plan = build_s3_publication_plan(
         release_catalog=release_catalog,
         exchange_root=exchange_root,
         prefix=prefix,
     )
     destination = f"s3://{bucket}/{plan[-1]['key']}"
-    print(
+    plan_message = (
         f"S3 publication plan: {len(plan)} immutable objects; "
         f"catalog will be uploaded last to {destination}"
     )
+    print(plan_message)
+    if progress is not None:
+        progress(plan_message)
     if not execute:
         for item in plan:
             print(f"DRY RUN {item['source']} -> s3://{bucket}/{item['key']}")
@@ -237,7 +368,13 @@ def publish_s3(
 
     for index, item in enumerate(plan, start=1):
         checksum = base64.b64encode(bytes.fromhex(item["sha256"])).decode("ascii")
-        print(f"Uploading {index}/{len(plan)}: s3://{bucket}/{item['key']}")
+        upload_message = (
+            f"Uploading and verifying {index}/{len(plan)}: "
+            f"s3://{bucket}/{item['key']}"
+        )
+        print(upload_message)
+        if progress is not None:
+            progress(upload_message)
         result = _aws_cli(
             [
                 "s3api",
@@ -289,6 +426,8 @@ def publish_s3(
         authoring_root=authoring_root,
         transfer_location=destination,
     )
+    if progress is not None:
+        progress(f"Publication verified and receipts recorded: {destination}")
     return destination
 
 

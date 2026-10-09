@@ -1,190 +1,262 @@
 "use strict";
 
-const state={dashboard:null,tab:"active",selected:new Set(),pending:false};
+const state={dashboard:null,tab:"active",selected:new Set(),pending:false,poll:null,workflowChoices:new Map()};
 const root=document.querySelector("#designs");
 const template=document.querySelector("#design-template");
 const status=document.querySelector("#status");
+const jobs=document.querySelector("#jobs");
 const operatorInput=document.querySelector("#operator-id");
 const batchToolbar=document.querySelector("#batch-toolbar");
 const selectedCount=document.querySelector("#selected-count");
 const graduateSelected=document.querySelector("#graduate-selected");
 const abandonSelected=document.querySelector("#abandon-selected");
 const restoreSelected=document.querySelector("#restore-selected");
+const workflowBatchToolbar=document.querySelector("#workflow-batch-toolbar");
+const workflowBatchStep=document.querySelector("#workflow-batch-step");
+const workflowBatchHelp=document.querySelector("#workflow-batch-help");
+const workflowBatchRun=document.querySelector("#workflow-batch-run");
 const collectionFilter=document.querySelector("#collection-filter");
 const titleFilter=document.querySelector("#title-filter");
 const bottomLineFilter=document.querySelector("#bottom-line-filter");
 const voteFilter=document.querySelector("#vote-filter");
 const selectionFilter=document.querySelector("#selection-filter");
+const workflowStepFilter=document.querySelector("#workflow-step-filter");
 const filterCount=document.querySelector("#filter-count");
 operatorInput.value=localStorage.getItem("pawmarvelOperatorId")||"";
 
-async function request(url,options={}){
-  const response=await fetch(url,options); const payload=await response.json();
-  if(!response.ok)throw new Error(payload.error||`Request failed (${response.status})`);
-  return payload;
-}
-
-function node(tag,text,className=""){
-  const value=document.createElement(tag); if(text!==undefined)value.textContent=text;
-  if(className)value.className=className; return value;
-}
-
-function choiceLabel(choice){
-  return {graduate:"Graduate",consider:"Improve",pass:"Abandon"}[choice]||choice;
-}
-
-function actionButton(label,action,className=""){
-  const button=node("button",label,className);button.type="button";
-  button.addEventListener("click",event=>runAction(event.currentTarget.dataset.designId,action));
-  return button;
-}
-
+async function request(url,options={}){const response=await fetch(url,options);const payload=await response.json();if(!response.ok)throw new Error(payload.error||`Request failed (${response.status})`);return payload}
+function node(tag,text,className=""){const value=document.createElement(tag);if(text!==undefined)value.textContent=text;if(className)value.className=className;return value}
+function choiceLabel(choice){return {graduate:"Graduate",consider:"Improve",pass:"Abandon"}[choice]||choice}
 function matchesText(value,query){return String(value||"").toLocaleLowerCase().includes(query)}
+function actionButton(label,action,className=""){const button=node("button",label,className);button.type="button";button.addEventListener("click",event=>runAction(event.currentTarget.dataset.designId,action));return button}
+function badge(text,className=""){return node("span",text,`badge ${className}`.trim())}
+function field(label,value,type="text"){const wrapper=node("label");wrapper.append(node("span",label));const input=document.createElement("input");input.type=type;input.value=value||"";wrapper.append(input);return {wrapper,input}}
+function newest(entries){return [...(entries||[])].sort((a,b)=>String(a.created_at||"").localeCompare(String(b.created_at||""))).at(-1)}
+function nextId(source){const match=String(source||"").match(/^(.*?)(?:-v|-)?(\d+)$/);return match?`${match[1]}-v${String(Number(match[2])+1).padStart(match[2].length,"0")}`:`${source||"experiment"}-v02`}
+function operatorId(){const value=operatorInput.value.trim();if(!value){alert("Enter your operator identity first.");operatorInput.focus();return null}localStorage.setItem("pawmarvelOperatorId",value);return value}
+function iterationToken(){return new Date().toISOString().replace(/\D/g,"").slice(0,17)}
 
-function filteredDesigns(){
-  const designs=state.dashboard?.[state.tab]||[];
-  const collection=collectionFilter.value;
-  const title=titleFilter.value.trim().toLocaleLowerCase();
-  const bottomLine=bottomLineFilter.value.trim().toLocaleLowerCase();
-  const vote=voteFilter.value;
-  const selection=selectionFilter.value;
-  return designs.filter(design=>{
-    if(collection&&design.collection!==collection)return false;
-    if(title&&!matchesText(`${design.headline||""} ${design.design_id}`,title))return false;
-    if(bottomLine&&!matchesText(design.bottom_line,bottomLine))return false;
-    if(vote==="unvoted"&&design.vote_count!==0)return false;
-    if(["graduate","consider","pass"].includes(vote)&&design.vote_totals[vote]===0)return false;
-    const selected=state.selected.has(design.design_id);
-    if(selection==="selected"&&!selected)return false;
-    if(selection==="unselected"&&selected)return false;
-    return true;
-  });
+function decidedReview(product,kind,{releaseOnly=false}={}){return newest((product.reviews[kind]||[]).filter(item=>item.active!==false&&item.decision&&(!releaseOnly||item.fixture_tier==="release")).map(item=>({...item,created_at:item.decision?.decision?.selected_at||item.created_at})))}
+function pendingReview(product,kind,{releaseOnly=false}={}){return newest((product.reviews[kind]||[]).filter(item=>item.active!==false&&!item.decision&&!item.composed&&item.hard_gates?.status==="passed"&&(!releaseOnly||item.fixture_tier==="release")))}
+function activeComposedReviews(product){return (product.reviews.pet||[]).filter(item=>item.active!==false&&item.composed)}
+function activeLayoutProposals(product){return (product.layout_proposals||[]).filter(item=>item.active!==false)}
+function activePrintCandidates(product){return (product.print_candidates||[]).filter(item=>item.active!==false&&item.status==="succeeded")}
+function activeReleases(product){return (product.releases||[]).filter(item=>item.active!==false)}
+function reviewChoiceKey(product,kind,review){return `${product.design_id}/${product.product_profile_id}/${kind}/${review.review_id}`}
+function defaultReviewChoice(review,kind){const candidate=(review.candidates||[]).find(item=>item.hard_gates_passed);if(!candidate)return null;const attempt=kind==="art"?(candidate.attempts||[]).find(item=>item.status==="succeeded"&&item.hard_gates?.status==="passed")?.attempt_id:null;return {review_id:review.review_id,selected_experiment:candidate.experiment_id,selected_attempt:attempt}}
+function selectedReviewChoice(product,kind,review){return state.workflowChoices.get(reviewChoiceKey(product,kind,review))||defaultReviewChoice(review,kind)}
+function latestExperiment(product,kind){return newest(product.experiments[kind]||[])}
+function hasAttemptPrefix(experiment,prefix){return (experiment?.attempts||[]).some(item=>item.attempt_id.startsWith(`${prefix}-`))}
+function petReviewPassed(product,tier,experimentId){return (product.reviews.pet||[]).some(review=>review.fixture_tier===tier&&review.hard_gates?.status==="passed"&&(review.candidates||[]).some(candidate=>candidate.experiment_id===experimentId&&candidate.hard_gates_passed))}
+
+function workflowStep(product){
+  if(product.released)return {id:"complete",label:"Released"};
+  if(!decidedReview(product,"art")){
+    if(pendingReview(product,"art"))return {id:"art-decision",label:"Record art decision"};
+    if(!latestExperiment(product,"art"))return {id:"manual",label:"Create initial art experiment"};
+    return {id:"art-evidence",label:"Generate art evidence"};
+  }
+  if(!decidedReview(product,"pet",{releaseOnly:true})){
+    if(pendingReview(product,"pet",{releaseOnly:true}))return {id:"pet-decision",label:"Record pet decision"};
+    const source=latestExperiment(product,"pet");
+    if(!source)return {id:"manual",label:"Create initial pet experiment"};
+    if(!hasAttemptPrefix(source,"smoke"))return {id:"pet-smoke-current",label:"Run pet smoke fixtures"};
+    if(petReviewPassed(product,"smoke",source.experiment_id)&&!hasAttemptPrefix(source,"release"))return {id:"pet-release-current",label:"Run pet release fixtures"};
+    return {id:"pet-smoke-new",label:"Generate a new pet smoke experiment"};
+  }
+  if(!decidedReview(product,"layout"))return activeLayoutProposals(product).length?{id:"layout-decision",label:"Select a layout proposal"}:{id:"layout-proposal",label:"Generate layout proposals"};
+  if(!activeComposedReviews(product).length)return {id:"composition",label:"Generate composed release evidence"};
+  if(!activePrintCandidates(product).length)return {id:"print",label:"Prepare and inspect print finalist"};
+  if(!activeReleases(product).length)return {id:"local-release",label:"Build local release"};
+  if(!activeReleases(product).some(item=>item.published))return {id:"publish",label:"Publish local release to S3"};
+  return {id:"complete",label:"Released"};
 }
 
-function populateCollections(){
-  const current=collectionFilter.value;
-  const designs=["active","abandoned","graduated"].flatMap(pool=>state.dashboard?.[pool]||[]);
-  const collections=[...new Set(designs.map(design=>design.collection).filter(Boolean))].sort((left,right)=>left.localeCompare(right));
-  collectionFilter.replaceChildren(new Option("All collections",""),...collections.map(value=>new Option(value,value)));
-  if(collections.includes(current))collectionFilter.value=current;
+function effectiveReviewWarnings(review){if(!review)return[];const accepted=review.decision?.decision?.accepted_warnings;if(Array.isArray(accepted))return uniqueWarnings(accepted);if(review.composed)return uniqueWarnings(review.warnings,...(review.candidates||[]).map(candidate=>candidate.warnings));return uniqueWarnings(review.warnings)}
+function releaseWarnings(product){return uniqueWarnings(effectiveReviewWarnings(decidedReview(product,"art")),effectiveReviewWarnings(decidedReview(product,"pet",{releaseOnly:true})),effectiveReviewWarnings(decidedReview(product,"layout")),activeLayoutProposals(product).at(-1)?.warnings,...activeComposedReviews(product).map(effectiveReviewWarnings))}
+
+function selectedWorkflowTargets(){
+  const selected=(state.dashboard?.graduated||[]).filter(design=>state.selected.has(design.design_id));
+  const targets=[];
+  for(const design of selected){
+    const products=(design.workflow||[]).filter(product=>!product.released);
+    if(products.length!==1)return {error:`${design.design_id} has ${products.length} unfinished product profiles. Process that design individually so the target profile is explicit.`};
+    const product={...products[0],design_id:design.design_id};
+    targets.push({design,product,step:workflowStep(product)});
+  }
+  const steps=[...new Set(targets.map(item=>item.step.id))];
+  if(steps.length>1)return {error:`Selected designs are at different steps: ${targets.map(item=>`${item.design.design_id} (${item.step.label})`).join(", ")}`};
+  return {targets,step:targets[0]?.step||null};
 }
 
-function updateBatchToolbar(){
-  const poolIds=new Set((state.dashboard?.[state.tab]||[]).map(design=>design.design_id));
-  for(const designId of state.selected)if(!poolIds.has(designId))state.selected.delete(designId);
-  batchToolbar.hidden=false;
-  selectedCount.textContent=`${state.selected.size} selected`;
-  const unavailable=state.pending||state.selected.size===0;
-  graduateSelected.hidden=state.tab!=="active";
-  abandonSelected.hidden=state.tab!=="active";
-  restoreSelected.hidden=state.tab==="active";
-  graduateSelected.disabled=unavailable;
-  abandonSelected.disabled=unavailable;
-  restoreSelected.disabled=unavailable;
-  selectionFilter.disabled=false;
+function batchWarningTargets(selection){if(!selection.step)return[];return selection.targets.filter(item=>{if(selection.step.id==="print")return releaseWarnings(item.product).length>0;if(selection.step.id==="layout-decision")return uniqueWarnings(item.product.layout_proposals?.at(-1)?.warnings).length>0;if(!["art-decision","pet-decision"].includes(selection.step.id))return false;const kind=selection.step.id.startsWith("art")?"art":"pet";const review=pendingReview(item.product,kind,{releaseOnly:kind==="pet"});const choice=review&&selectedReviewChoice(item.product,kind,review);const candidate=(review?.candidates||[]).find(value=>value.experiment_id===choice?.selected_experiment);return candidateWarnings(candidate).length>0})}
+
+function batchActionFor(product,step){
+  const base={design_id:product.design_id,product_profile_id:product.product_profile_id};
+  if(step.id==="art-decision"||step.id==="pet-decision"){
+    const kind=step.id.startsWith("art")?"art":"pet";
+    const review=pendingReview(product,kind,{releaseOnly:kind==="pet"});
+    const choice=review&&selectedReviewChoice(product,kind,review);
+    if(!review||!choice||!choice.selected_experiment||(kind==="art"&&!choice.selected_attempt))throw new Error(`Select a passing ${kind} candidate for ${product.design_id}/${product.product_profile_id}.`);
+    const candidate=(review.candidates||[]).find(item=>item.experiment_id===choice.selected_experiment);const warnings=candidateWarnings(candidate);if(warnings.length)throw new Error(`${product.design_id}/${product.product_profile_id} has ${warnings.length} selected-candidate warning${warnings.length===1?"":"s"} requiring an individual decision and explicit acceptance.`);
+    return {...base,action:"record-decision",kind,review_id:review.review_id,...choice,notes:`Batch-approved ${kind} evidence in operator UI`};
+  }
+  if(step.id==="art-evidence"||step.id==="pet-smoke-new"){
+    const kind=step.id==="art-evidence"?"art":"pet";
+    const source=latestExperiment(product,kind);
+    if(!source?.prompt_text)throw new Error(`No editable ${kind} source prompt exists for ${product.design_id}/${product.product_profile_id}.`);
+    const experiment_id=nextId(source.experiment_id);
+    return {...base,action:"rerun-experiment",kind,source_experiment_id:source.experiment_id,experiment_id,review_id:`${experiment_id}-${kind==="pet"?"smoke-":""}review`,attempt_id:"attempt-0001",tier:kind==="pet"?"smoke":null,prompt:source.prompt_text};
+  }
+  if(step.id==="pet-smoke-current"||step.id==="pet-release-current"){
+    const source=latestExperiment(product,"pet");
+    const tier=step.id==="pet-smoke-current"?"smoke":"release";
+    return {...base,action:"run-pet-benchmark",experiment_id:source.experiment_id,review_id:`${source.experiment_id}-${tier}-review`,tier};
+  }
+  if(step.id==="layout-proposal"){
+    const source=latestExperiment(product,"layout");
+    const experiment_id=source?nextId(source.experiment_id):"layout-v01";
+    return {...base,action:"generate-layout-proposal",experiment_id,proposal_id:"proposal-v01",name_mode:"auto"};
+  }
+  if(step.id==="layout-decision"){
+    const proposal=activeLayoutProposals(product).at(-1);
+    const warnings=uniqueWarnings(proposal.warnings);if(warnings.length)throw new Error(`${product.design_id}/${product.product_profile_id} has ${warnings.length} layout-proposal warning${warnings.length===1?"":"s"} requiring individual review and explicit acceptance.`);
+    const choice=state.workflowChoices.get(`${product.design_id}/${product.product_profile_id}/layout/${proposal.experiment_id}/${proposal.proposal_id}`);
+    if(!choice)throw new Error(`Select a layout proposal for ${product.design_id}/${product.product_profile_id}.`);
+    const token=iterationToken();return {...base,action:"accept-layout-proposal",experiment_id:proposal.experiment_id,proposal_id:proposal.proposal_id,candidate_id:choice.candidate_id,attempt_id:`attempt-${String(choice.rank).padStart(4,"0")}-${token}`,review_id:`${proposal.experiment_id}-${choice.candidate_id}-${token}-review`,composition_review_id:`${proposal.experiment_id}-${choice.candidate_id}-${token}-composition`,name_mode:"auto",notes:`Batch-accepted ${proposal.proposal_id}/${choice.candidate_id} in operator UI`};
+  }
+  if(step.id==="composition")return {...base,action:"generate-composition"};
+  if(step.id==="print"){const warnings=releaseWarnings(product);if(warnings.length)throw new Error(`${product.design_id}/${product.product_profile_id} has ${warnings.length} warning${warnings.length===1?"":"s"} requiring an individual review and explicit acceptance.`);return {...base,action:"prepare-print",composition_approved:true,backend:"deterministic",notes:"Batch-approved composed comparison in operator UI"}}
+  if(step.id==="local-release"){const candidate=activePrintCandidates(product).at(-1);if(!candidate)throw new Error(`No active print finalist exists for ${product.design_id}/${product.product_profile_id}.`);return {...base,action:"build-local-release",candidate_id:candidate.candidate_id,notes:"Batch-approved print finalist in operator UI"}}
+  throw new Error(`${step.label} is not an automated batch step. Follow the displayed instruction for each design.`);
 }
 
-function render(){
-  root.replaceChildren(); if(!state.dashboard)return;
-  updateBatchToolbar();
-  document.querySelectorAll(".tabs button").forEach(button=>{
-    button.classList.toggle("selected",button.dataset.tab===state.tab);
-    button.querySelector("span").textContent=`(${state.dashboard[button.dataset.tab].length})`;
-  });
-  const poolDesigns=state.dashboard[state.tab];
-  const designs=filteredDesigns();
-  filterCount.textContent=`Showing ${designs.length} of ${poolDesigns.length} designs in this pool`;
-  if(!designs.length){root.append(node("p",poolDesigns.length?"No designs match the current filters.":"No designs in this pool.","empty"));return}
-  for(const design of designs){
-    const card=template.content.firstElementChild.cloneNode(true);
-    const selector=card.querySelector(".batch-choice");
-    const checkbox=selector.querySelector("input");
-    checkbox.checked=state.selected.has(design.design_id);
-    card.classList.toggle("selected",checkbox.checked);
-    checkbox.addEventListener("change",()=>{
-      if(checkbox.checked)state.selected.add(design.design_id);
-      else state.selected.delete(design.design_id);
-      if(selectionFilter.value)render();
-      else{card.classList.toggle("selected",checkbox.checked);updateBatchToolbar()}
-    });
-    card.querySelector("img").src=design.operator_image_url;
-    card.querySelector("img").alt=design.headline||design.design_id;
-    card.querySelector(".meta").textContent=`${design.collection} · ${design.concept}`;
-    card.querySelector("h2").textContent=design.headline||design.design_id;
-    card.querySelector("code").textContent=design.design_id;
-    card.querySelector(".slogan").textContent=design.bottom_line||"";
-    card.querySelector(".rank").textContent=design.rank?`#${design.rank}`:"";
-    const counts=card.querySelector(".counts");
-    counts.append(
-      node("span",`Graduate ${design.vote_totals.graduate}`,"count graduate"),
-      node("span",`Improve ${design.vote_totals.consider}`,"count improve"),
-      node("span",`Abandon ${design.vote_totals.pass}`,"count abandon"),
-      node("span",`Total ${design.vote_count}`,"count")
-    );
-    card.querySelector(".round").textContent=`Review round ${design.review_round}${design.purge_after?` · feedback expires ${design.purge_after}`:""}`;
-    const feedback=card.querySelector(".feedback");
-    if(!design.feedback.length)feedback.append(node("p","No feedback in this round."));
-    for(const vote of design.feedback){
-      const item=node("article");
-      item.append(node("strong",`${vote.reviewer_name} · ${choiceLabel(vote.choice)}`));
-      item.append(node("p",vote.comment||"No written feedback.")); feedback.append(item);
+function filteredDesigns(){const designs=state.dashboard?.[state.tab]||[];const collection=collectionFilter.value;const title=titleFilter.value.trim().toLocaleLowerCase();const bottomLine=bottomLineFilter.value.trim().toLocaleLowerCase();const vote=voteFilter.value;const selection=selectionFilter.value;const workflow=state.tab==="graduated"?workflowStepFilter.value:"";return designs.filter(design=>{if(collection&&design.collection!==collection)return false;if(title&&!matchesText(`${design.headline||""} ${design.design_id}`,title))return false;if(bottomLine&&!matchesText(design.bottom_line,bottomLine))return false;if(vote==="unvoted"&&design.vote_count!==0)return false;if(["graduate","consider","pass"].includes(vote)&&design.vote_totals[vote]===0)return false;const selected=state.selected.has(design.design_id);if(selection==="selected"&&!selected)return false;if(selection==="unselected"&&selected)return false;if(workflow&&!(design.workflow||[]).some(product=>{const step=workflowStep({...product,design_id:design.design_id}).id;return step===workflow||step.startsWith(`${workflow}-`)}))return false;return true})}
+function populateCollections(){const current=collectionFilter.value;const designs=["active","abandoned","graduated","released"].flatMap(pool=>state.dashboard?.[pool]||[]);const collections=[...new Set(designs.map(design=>design.collection).filter(Boolean))].sort((a,b)=>a.localeCompare(b));collectionFilter.replaceChildren(new Option("All collections",""),...collections.map(value=>new Option(value,value)));if(collections.includes(current))collectionFilter.value=current}
+function updateBatchToolbar(){const poolIds=new Set((state.dashboard?.[state.tab]||[]).map(design=>design.design_id));for(const designId of state.selected)if(!poolIds.has(designId))state.selected.delete(designId);batchToolbar.hidden=state.tab==="released";selectedCount.textContent=`${state.selected.size} selected`;const unavailable=state.pending||state.selected.size===0;graduateSelected.hidden=state.tab!=="active";abandonSelected.hidden=state.tab!=="active";restoreSelected.hidden=state.tab==="active"||state.tab==="released";graduateSelected.disabled=unavailable;abandonSelected.disabled=unavailable;restoreSelected.disabled=unavailable;selectionFilter.disabled=state.tab==="released";workflowStepFilter.disabled=state.tab!=="graduated";updateWorkflowBatchToolbar()}
+function updateWorkflowBatchToolbar(){workflowBatchToolbar.hidden=state.tab!=="graduated";if(state.tab!=="graduated")return;const selection=selectedWorkflowTargets();if(!state.selected.size){workflowBatchStep.textContent="Select graduated designs at the same step";workflowBatchHelp.textContent="Completed steps stay collapsed. Select cards to batch the shared next step.";workflowBatchRun.textContent="Continue selected designs";workflowBatchRun.disabled=true;return}if(selection.error){workflowBatchStep.textContent="Selection needs attention";workflowBatchHelp.textContent=selection.error;workflowBatchRun.textContent="Mixed workflow steps";workflowBatchRun.disabled=true;return}const activeTargets=new Set((state.dashboard?.jobs||[]).filter(job=>["queued","running"].includes(job.status)).map(job=>`${job.design_id}/${job.product_profile_id}`));const activeCount=selection.targets.filter(item=>activeTargets.has(`${item.product.design_id}/${item.product.product_profile_id}`)).length;if(activeCount){workflowBatchStep.textContent=`${activeCount} selected workflow jobs in progress`;workflowBatchHelp.textContent="Selection is preserved. The shared next step updates automatically when the jobs finish.";workflowBatchRun.textContent="Waiting for current batch";workflowBatchRun.disabled=true;return}const warningTargets=batchWarningTargets(selection);if(warningTargets.length){workflowBatchStep.textContent=`${warningTargets.length} selected design${warningTargets.length===1?" has":"s have"} warnings`;workflowBatchHelp.textContent="Open each warning-bearing design, inspect the evidence, and record its explicit acceptance individually.";workflowBatchRun.textContent="Individual review required";workflowBatchRun.disabled=true;return}workflowBatchStep.textContent=`${selection.targets.length} selected · ${selection.step.label}`;workflowBatchHelp.textContent="Every selected design was preflighted at the same product workflow step.";workflowBatchRun.textContent=`${selection.step.label} for ${selection.targets.length}`;workflowBatchRun.disabled=state.pending||["manual","publish","complete"].includes(selection.step.id)}
+function elapsedTime(value){const started=Date.parse(value||"");if(!Number.isFinite(started))return "";const seconds=Math.max(0,Math.floor((Date.now()-started)/1000));return seconds<60?`${seconds}s`:seconds<3600?`${Math.floor(seconds/60)}m ${seconds%60}s`:`${Math.floor(seconds/3600)}h ${Math.floor((seconds%3600)/60)}m`}
+function actionLabel(value){return String(value||"workflow").replaceAll("-"," ")}
+function latestProductJob(product){return (state.dashboard?.jobs||[]).find(job=>job.design_id===product.design_id&&job.product_profile_id===product.product_profile_id&&!failedJobOutcomeExists(job))||null}
+function workflowProductForJob(job){for(const pool of ["active","abandoned","graduated","released"]){const design=(state.dashboard?.[pool]||[]).find(item=>item.design_id===job.design_id);const product=(design?.workflow||[]).find(item=>item.product_profile_id===job.product_profile_id);if(product)return product}return null}
+function failedJobOutcomeExists(job){if(job.status!=="failed")return false;const product=workflowProductForJob(job);if(!product)return false;if(job.action==="generate-composition")return activeComposedReviews(product).length>0;return false}
+function visibleJobs(values){const latest=new Map();for(const job of values){const key=`${job.design_id}/${job.product_profile_id}`;if(!latest.has(key))latest.set(key,job)}return [...latest.values()].filter(job=>["queued","running","failed"].includes(job.status)&&!failedJobOutcomeExists(job)).slice(0,8)}
+function jobStatusBanner(job){const active=["queued","running"].includes(job.status);const item=node("article",undefined,`job-status ${job.status}`);const heading=node("div",undefined,"job-heading");if(active){const spinner=node("span",undefined,"spinner");spinner.setAttribute("aria-hidden","true");heading.append(spinner)}heading.append(badge(job.status,job.status==="failed"?"failed":""),node("strong",`${actionLabel(job.action)} · ${job.design_id} / ${job.product_profile_id}`));if(active)heading.append(node("span",elapsedTime(job.created_at),"job-elapsed"));item.append(heading,node("p",job.message||`${active?"Working":"Failed"}…`));if(job.status==="failed"){item.append(node("p",job.error?.message||"The operation failed without a provider error message.","job-error"),node("small","Inspect the immutable attempt/review artifacts and correct the reported issue before retrying."))}return item}
+function renderJobs(){const values=state.dashboard?.jobs||[];const visible=visibleJobs(values);jobs.hidden=!visible.length;jobs.replaceChildren();if(visible.length)jobs.append(node("h3","Background work"));for(const job of visible)jobs.append(jobStatusBanner(job));const active=values.some(job=>["queued","running"].includes(job.status));if(active&&!state.poll)state.poll=setInterval(load,2500);if(!active&&state.poll){clearInterval(state.poll);state.poll=null}}
+
+function formatSeconds(value){return value!==null&&value!==""&&Number.isFinite(Number(value))?`${Number(value).toFixed(1)}s`:"—"}
+function formatPercent(value){return value!==null&&value!==""&&Number.isFinite(Number(value))?`${Math.round(Number(value)*100)}%`:"—"}
+function uniqueWarnings(...groups){return [...new Set(groups.flatMap(group=>Array.isArray(group)?group:[]).map(value=>String(value)).filter(Boolean))]}
+function errorMessage(value,fallback){if(typeof value==="string"&&value)return value;if(value&&typeof value.message==="string")return value.message;if(value&&typeof value==="object")return JSON.stringify(value);return fallback}
+function candidateWarnings(candidate){return uniqueWarnings(candidate?.warnings)}
+function warningPanel(values,title="Warnings requiring attention"){const warnings=uniqueWarnings(values);if(!warnings.length)return null;const box=node("section",undefined,"evidence-warning");box.append(node("strong",title));const list=node("ul");for(const warning of warnings)list.append(node("li",warning));box.append(list);return box}
+function reviewEvidence(review){const panel=node("section",undefined,"evidence-summary");const heading=node("div",undefined,"evidence-heading");const gate=review.hard_gates?.status||"unknown";heading.append(badge(`Hard gates: ${gate}`,gate==="passed"?"done":"failed"));if(review.fixture_tier)heading.append(badge(`${review.fixture_tier} fixtures`));if(review.review_mode)heading.append(badge(review.review_mode));panel.append(heading);
+  const totals=review.measurements||{};if(Number(totals.attempts)>0)panel.append(node("p",`Overall: ${totals.hard_gate_passes||0}/${totals.attempts} hard-gate passes (${formatPercent(totals.hard_gate_pass_rate)}); latency median ${formatSeconds(totals.median_seconds)}, range ${formatSeconds(totals.minimum_seconds)}–${formatSeconds(totals.maximum_seconds)}.`,"evidence-metrics"));
+  const globalWarnings=warningPanel(review.warnings);if(globalWarnings)panel.append(globalWarnings);
+  if(review.decision_error)panel.append(node("p",review.decision_error,"job-error"));
+  if(review.decision){const decision=review.decision.decision||{};const accepted=warningPanel(decision.accepted_warnings,"Warnings explicitly accepted by the recorded decision");if(accepted)panel.append(accepted);if(decision.notes)panel.append(node("p",`Decision notes: ${decision.notes}`,"decision-notes"))}if(review.active===false){const retirement=review.retirement||{};panel.append(node("p",`Superseded${retirement.retired_by?` by ${retirement.retired_by}`:""}${retirement.reason?`: ${retirement.reason}`:""}`,"muted"))}
+  if(review.candidates?.length){const details=node("details",undefined,"candidate-evidence");const warningCount=review.candidates.reduce((count,item)=>count+candidateWarnings(item).length,0);details.open=warningCount>0||review.hard_gates?.status!=="passed";details.append(node("summary",`Runtime evidence for ${review.candidates.length} candidate${review.candidates.length===1?"":"s"}${warningCount?` · ${warningCount} warning${warningCount===1?"":"s"}`:""}`));for(const candidate of review.candidates){const item=node("article");const generation=candidate.configuration||{};const measures=candidate.measurements||{};item.append(node("strong",candidate.experiment_id||"Assembly candidate"));if(generation.model){const parameters=generation.parameters||{};item.append(node("span",`${generation.provider||"provider"} / ${generation.model}${parameters.quality?` · quality ${parameters.quality}`:""}${generation.transport?` · ${generation.transport}`:""}`,"muted"))}if(Number(measures.attempts)>0)item.append(node("p",`${measures.hard_gate_passes||0}/${measures.attempts} passes · success ${formatPercent(measures.success_rate)} · median ${formatSeconds(measures.median_seconds)} · range ${formatSeconds(measures.minimum_seconds)}–${formatSeconds(measures.maximum_seconds)}`));const coverage=candidate.fixture_coverage;if(coverage)item.append(node("p",`Fixture coverage: ${coverage.covered_fixtures}/${coverage.expected_fixtures} (${formatPercent(coverage.coverage_rate)})${coverage.missing_fixture_ids?.length?` · missing: ${coverage.missing_fixture_ids.join(", ")}`:""}`,coverage.status==="passed"?"":"evidence-alert"));const warnings=warningPanel(candidateWarnings(candidate),`Candidate warnings · ${candidate.experiment_id}`);if(warnings)item.append(warnings);const failed=(candidate.attempts||[]).filter(attempt=>attempt.status!=="succeeded"||attempt.hard_gates?.status!=="passed");if(failed.length){const failures=node("ul",undefined,"attempt-errors");for(const attempt of failed)failures.append(node("li",`${attempt.attempt_id}: ${errorMessage(attempt.error,attempt.status||"hard gates failed")}`));item.append(node("strong",`${failed.length} failed attempt${failed.length===1?"":"s"}`),failures)}details.append(item)}panel.append(details)}
+  const links=node("p",undefined,"evidence-links");if(review.evaluation_url){const link=node("a","Open raw evaluation JSON");link.href=review.evaluation_url;link.target="_blank";links.append(link)}if(review.decision_url){const link=node("a","Open decision JSON");link.href=review.decision_url;link.target="_blank";links.append(link)}if(review.retirement_url){const link=node("a","Open supersession record");link.href=review.retirement_url;link.target="_blank";links.append(link)}if(links.childElementCount)panel.append(links);return panel}
+function reviewArtifact(review,kind,product,interactive=true){
+  const box=node("div",undefined,"artifact");
+  const top=node("div");
+  const stateLabel=review.active===false?"Superseded evidence":review.composed?(review.decision?"Composition evidence · legacy approval recorded":"Composition evidence · inspect before release"):(review.decision?"Decision recorded":"Review pending");
+  top.append(badge(stateLabel,review.active===false?"":review.decision?"done":"warning"),node("strong",review.review_id));
+  box.append(top,reviewEvidence(review));
+  if(review.comparison_url){const link=document.createElement("a");link.href=review.comparison_url;link.target="_blank";const image=document.createElement("img");image.src=review.comparison_url;image.loading="lazy";image.alt=`${kind} comparison ${review.review_id}`;link.append(image);box.append(link)}
+  if(interactive&&!review.composed&&!review.decision&&["art","pet"].includes(kind)&&review.hard_gates?.status==="passed"&&(kind!=="pet"||review.fixture_tier==="release")){
+    const passing=(review.candidates||[]).filter(candidate=>candidate.hard_gates_passed);
+    if(passing.length){
+      const key=reviewChoiceKey(product,kind,review);
+      const select=document.createElement("select");
+      for(const candidate of passing)select.append(new Option(candidate.experiment_id,candidate.experiment_id));
+      const existing=state.workflowChoices.get(key);
+      if(existing&&passing.some(item=>item.experiment_id===existing.selected_experiment))select.value=existing.selected_experiment;
+      const attempts=document.createElement("select");
+      const selectedWarning=node("p",undefined,"selection-warning");
+      function capture(){state.workflowChoices.set(key,{review_id:review.review_id,selected_experiment:select.value,selected_attempt:kind==="art"?attempts.value:null});const warnings=candidateWarnings(passing.find(item=>item.experiment_id===select.value));selectedWarning.textContent=warnings.length?`Selected candidate has ${warnings.length} warning${warnings.length===1?"":"s"}. Decision notes are required.`:"Selected candidate has no evaluation warnings.";selectedWarning.className=warnings.length?"selection-warning evidence-alert":"selection-warning muted";updateWorkflowBatchToolbar()}
+      function fill(){const candidate=passing.find(item=>item.experiment_id===select.value);attempts.replaceChildren(...(candidate?.attempts||[]).filter(item=>item.status==="succeeded"&&item.hard_gates?.status==="passed").map(item=>new Option(item.attempt_id,item.attempt_id)));attempts.hidden=kind!=="art";if(existing&&select.value===existing.selected_experiment&&[...attempts.options].some(item=>item.value===existing.selected_attempt))attempts.value=existing.selected_attempt;capture()}
+      select.addEventListener("change",fill);attempts.addEventListener("change",capture);fill();
+      const approve=node("button","Record winner decision");approve.type="button";approve.addEventListener("click",()=>{const warnings=candidateWarnings(passing.find(item=>item.experiment_id===select.value));let notes="";if(warnings.length){notes=prompt(`The selected candidate has warnings:\n\n${warnings.map(item=>`- ${item}`).join("\n")}\n\nDocument why they are acceptable:`,"");if(notes===null)return;if(!notes.trim()){alert("Decision notes are required to explicitly accept the displayed warnings.");return}}submitWorkflow({action:"record-decision",design_id:product.design_id,product_profile_id:product.product_profile_id,kind,review_id:review.review_id,selected_experiment:select.value,selected_attempt:kind==="art"?attempts.value:null,notes},false)});
+      const actions=node("div",undefined,"stage-actions");actions.append(select,attempts,approve);box.append(selectedWarning,actions)
     }
-    const actions=card.querySelector(".actions");
-    if(state.tab==="active"){
-      actions.append(
-        actionButton("Start new review round","new-round","secondary"),
-        actionButton("Graduate","graduate"),
-        actionButton("Abandon","abandon","danger")
-      );
-    }else actions.append(actionButton("Restore to active review","restore"));
-    actions.querySelectorAll("button").forEach(button=>button.dataset.designId=design.design_id);
-    root.append(card);
+  }
+  return box
+}
+
+function offlineHandoff(title,guideSection,instructions){const box=node("aside",undefined,"offline-handoff");box.append(badge("Offline prerequisite","warning"),node("strong",title),node("p",instructions),node("code",`docs/MVP_OPERATIONS_GUIDE.md · ${guideSection}`),node("p","Complete the command-line step in the same authoring root, then return here and select Refresh.","muted"));return box}
+
+function experimentEditor(kind,product){const stage=node("section",undefined,"stage");stage.append(node("h4",kind==="art"?"1. Art template":"2. Pet transformation"));const source=newest(product.experiments[kind]);if(!source){stage.append(offlineHandoff(kind==="art"?"Create the first immutable art experiment":"Create the first immutable pet experiment",kind==="art"?"§5 Develop generated or empty-canvas art.png":"§6 Iterate the transformed-pet prompt and model",kind==="art"?"Configure inputs, tune the prompt in disposable scratch, then create and compare the first immutable art experiment.":"Tune one representative pet in disposable scratch, then create the first immutable pet experiment and its smoke evidence."));return stage}stage.append(badge(`${source.experiment_id} · ${source.generation?.model||"local"}`));const newId=nextId(source.experiment_id);const id=field("New immutable experiment ID",newId);const review=field("Comparison review ID",`${newId}-review`);const textarea=document.createElement("textarea");textarea.value=source.prompt_text||"";textarea.setAttribute("aria-label",`${kind} prompt`);stage.append(id.wrapper,review.wrapper,node("label","Edit prompt for the new experiment"),textarea);if(kind==="art")stage.append(node("p","For a substantial visual change, first validate the edited prompt with the disposable scratch loop in guide §5.1, then paste the successful prompt here.","muted"));else stage.append(node("p","Prompt text can be iterated here. Changing provider, model, quality, references, fixtures, or name mode remains an offline successor-experiment step in guide §6; refresh afterward.","muted"));const actions=node("div",undefined,"stage-actions");const run=(label,tier)=>{const button=node("button",label);button.type="button";button.addEventListener("click",()=>submitWorkflow({action:"rerun-experiment",design_id:product.design_id,product_profile_id:product.product_profile_id,kind,source_experiment_id:source.experiment_id,experiment_id:id.input.value.trim(),review_id:review.input.value.trim(),attempt_id:"attempt-0001",tier,prompt:textarea.value},true));actions.append(button)};if(kind==="art")run("Run art + comparison",null);else{run("Run smoke as new experiment","smoke");run("Run release as new experiment","release");const releaseAttempts=(source.attempts||[]).filter(item=>item.attempt_id.startsWith("release-"));const release=node("button",releaseAttempts.length?"Release fixtures already run":"Run release on current experiment","secondary");release.type="button";release.disabled=releaseAttempts.length>0;release.title=releaseAttempts.length?"This immutable experiment already contains release fixture attempts.":"Uses the immutable current prompt above; unsaved textarea edits are ignored.";release.addEventListener("click",()=>submitWorkflow({action:"run-pet-benchmark",design_id:product.design_id,product_profile_id:product.product_profile_id,experiment_id:source.experiment_id,review_id:`${source.experiment_id}-release-review`,tier:"release"},true));actions.append(release)}stage.append(actions);const reviews=(product.reviews[kind]||[]).filter(item=>!item.composed);if(reviews.length)stage.append(node("h5","Comparison reviews"));for(const item of reviews)stage.append(reviewArtifact(item,kind,product));return stage}
+
+function reopenStage(product,stage,label){if(!confirm(`Reopen ${label} for ${product.design_id}/${product.product_profile_id}? Current downstream decisions and composed/local-release evidence will be superseded, not deleted.`))return;const reason=prompt("Why is this stage being reopened for improvement?","");if(reason===null)return;if(!reason.trim()){alert("A reason is required so the superseded decision chain remains understandable.");return}submitWorkflow({action:"reopen-stage",design_id:product.design_id,product_profile_id:product.product_profile_id,stage,reason:reason.trim()},false)}
+function completedStep(label,content,product,stage){const details=node("details",undefined,"completed-step");details.append(node("summary",`✓ ${label} finished · view decision evidence`),content);const actions=node("div",undefined,"stage-actions");const redo=node("button",`Redo / improve ${label.toLocaleLowerCase()}`,"secondary");redo.type="button";redo.addEventListener("click",()=>reopenStage(product,stage,label));actions.append(redo);details.append(actions);return details}
+function currentStep(content,active){if(active)content.classList.add("current-step");return content}
+function layoutStage(product){
+  const stage=node("section",undefined,"stage");stage.append(node("h4","3. Layout"));
+  const layoutDecision=decidedReview(product,"layout");const artDecision=decidedReview(product,"art");const petDecision=decidedReview(product,"pet",{releaseOnly:true});
+  if(layoutDecision){stage.append(badge(`Layout decided: ${layoutDecision.review_id}`,"done"),reviewArtifact(layoutDecision,"layout",product));const sourceWarnings=warningPanel(product.layout_proposals?.at(-1)?.warnings,"Source layout proposal warnings");if(sourceWarnings)stage.append(sourceWarnings)}
+  else if(activeLayoutProposals(product).length){
+    const proposal=activeLayoutProposals(product).at(-1);const choiceKey=`${product.design_id}/${product.product_profile_id}/layout/${proposal.experiment_id}/${proposal.proposal_id}`;
+    stage.append(badge(`${proposal.experiment_id}/${proposal.proposal_id}`,"warning"));
+    stage.append(node("p",`Deterministic proposal runtime: ${formatSeconds(proposal.duration_seconds)}${proposal.name_mode?` · name mode: ${proposal.name_mode}`:""}`,"evidence-metrics"));const proposalWarnings=warningPanel(proposal.warnings,"Layout proposal warnings");if(proposalWarnings)stage.append(proposalWarnings);
+    if(proposal.ranked_url){const link=document.createElement("a");link.href=proposal.ranked_url;link.target="_blank";const image=document.createElement("img");image.src=proposal.ranked_url;image.loading="lazy";image.alt="Ranked layout proposals";link.append(image);const artifact=node("div",undefined,"artifact");artifact.append(link);stage.append(artifact)}
+    const grid=node("div",undefined,"candidate-grid");
+    for(const candidate of proposal.candidates){
+      const card=node("div",undefined,"artifact");const image=document.createElement("img");image.src=candidate.preview_url;image.loading="lazy";image.alt=`Layout ${candidate.candidate_id}`;const metrics=candidate.metrics||{};card.append(image,node("strong",candidate.candidate_id),node("small",`score ${Number.isFinite(Number(metrics.score))?Number(metrics.score).toFixed(2):"—"} · max art overlap ${formatPercent(metrics.maximum_art_alpha_overlap_ratio)} · min edge clearance ${formatPercent(metrics.minimum_edge_clearance_ratio)}`));
+      const batchSelect=node("button",state.workflowChoices.get(choiceKey)?.candidate_id===candidate.candidate_id?"Selected for batch":"Select for batch","secondary");batchSelect.type="button";batchSelect.addEventListener("click",()=>{state.workflowChoices.set(choiceKey,{candidate_id:candidate.candidate_id,rank:candidate.rank});render()});
+      const accept=node("button","Select, decide, and compose");accept.type="button";accept.addEventListener("click",()=>{const warnings=uniqueWarnings(proposal.warnings);let notes=`Accepted ${proposal.proposal_id}/${candidate.candidate_id} in operator UI`;if(warnings.length){const response=prompt(`The layout proposal has advisory warnings:\n\n${warnings.map(item=>`- ${item}`).join("\n")}\n\nDocument why the selected layout is acceptable:`,"");if(response===null)return;if(!response.trim()){alert("Decision notes are required to explicitly accept the displayed layout warnings.");return}notes=response.trim()}const token=iterationToken();submitWorkflow({action:"accept-layout-proposal",design_id:product.design_id,product_profile_id:product.product_profile_id,experiment_id:proposal.experiment_id,proposal_id:proposal.proposal_id,candidate_id:candidate.candidate_id,attempt_id:`attempt-${String(candidate.rank).padStart(4,"0")}-${token}`,review_id:`${proposal.experiment_id}-${candidate.candidate_id}-${token}-review`,composition_review_id:`${proposal.experiment_id}-${candidate.candidate_id}-${token}-composition`,name_mode:"auto",notes},false)});
+      const actions=node("div",undefined,"stage-actions");actions.append(batchSelect,accept);card.append(actions);grid.append(card)
+    }
+    stage.append(grid,offlineHandoff("Use manual layout authoring only when no ranked proposal is acceptable","§7 Iterate layout and font","Open the local layout editor, adjust placement/font/name fixtures, save a new immutable layout attempt, compare it, and record its decision. The GUI will discover that decision after refresh."))
+  }else if(artDecision&&petDecision){const previous=latestExperiment(product,"layout");const exp=field("Layout experiment ID",previous?nextId(previous.experiment_id):"layout-v01");const prop=field("Proposal ID","proposal-v01");const button=node("button","Generate deterministic proposals");button.type="button";button.addEventListener("click",()=>submitWorkflow({action:"generate-layout-proposal",design_id:product.design_id,product_profile_id:product.product_profile_id,experiment_id:exp.input.value.trim(),proposal_id:prop.input.value.trim(),name_mode:"auto"},false));stage.append(node("p","Art and pet decisions are ready. Generate ranked local proposals (no paid API call)."),exp.wrapper,prop.wrapper,button)}
+  else stage.append(node("p","Record art and pet decisions before layout proposal generation.","muted"));
+  return stage
+}
+function compositionStage(product){const stage=node("section",undefined,"stage");stage.append(node("h4","4. Composed release QA"));const composed=activeComposedReviews(product);if(composed.length){const inherited=warningPanel(releaseWarnings(product),"Component warnings carried into composed release QA");if(inherited)stage.append(inherited);for(const item of composed)stage.append(reviewArtifact(item,"pet",product));return stage}if(decidedReview(product,"layout")){stage.append(node("p","Generate the release-fixture composition from the recorded art, pet, and layout decisions."));const button=node("button","Generate composed evidence");button.type="button";button.addEventListener("click",()=>submitWorkflow({action:"generate-composition",design_id:product.design_id,product_profile_id:product.product_profile_id},false));stage.append(button)}else stage.append(node("p","Complete layout selection first.","muted"));return stage}
+
+function printStage(product){const stage=node("section",undefined,"stage");stage.append(node("h4","5. Print finalist"));const candidates=activePrintCandidates(product);if(candidates.length){const candidate=candidates.at(-1);stage.append(badge(`${candidate.candidate_id} · ready for review`,"warning"),node("p","Inspect both images at full resolution. Approve the finalist in the next stage only when output dimensions, clipping, alpha, text, and composition are acceptable."));const grid=node("div",undefined,"print-grid");for(const [label,url] of [["Final print",candidate.final_print_url],["Debug print",candidate.debug_print_url]]){if(!url)continue;const artifact=node("div",undefined,"artifact");const link=document.createElement("a");link.href=url;link.target="_blank";const image=document.createElement("img");image.src=url;image.loading="lazy";image.alt=`${label} ${candidate.candidate_id}`;link.append(image);artifact.append(node("strong",label),link);grid.append(artifact)}stage.append(grid,node("p","If the print exposes an art, pet, or layout issue, use Redo / improve on that completed stage. The current finalist remains immutable audit evidence but is removed from the active release chain.","muted"));return stage}if(activeComposedReviews(product).length){const warnings=releaseWarnings(product);const warningBox=warningPanel(warnings,"Warnings that require explicit acceptance before print preparation");if(warningBox)stage.append(warningBox);stage.append(node("p","Visually inspect the composed release-fixture comparison first. This action records assembly approval and prepares the high-resolution finalist, but does not graduate or bundle it."));const button=node("button",warnings.length?"Accept warnings and prepare print finalist":"Approve composition and prepare print finalist");button.type="button";button.addEventListener("click",()=>{if(!confirm("Have you inspected and approved the composed release-fixture comparison? This prepares a print finalist for a separate review; it does not build a bundle."))return;let notes="Approved composed comparison in operator UI";if(warnings.length){const response=prompt(`Document why these warnings are acceptable:\n\n${warnings.map(item=>`- ${item}`).join("\n")}`,"");if(response===null)return;if(!response.trim()){alert("Print-preparation notes are required to accept the displayed warnings.");return}notes=response.trim()}submitWorkflow({action:"prepare-print",design_id:product.design_id,product_profile_id:product.product_profile_id,composition_approved:true,backend:"deterministic",notes},false)});stage.append(button)}else stage.append(node("p","Generate and inspect composed release QA first.","muted"));return stage}
+
+function releaseStage(product){
+  const stage=node("section",undefined,"stage");stage.append(node("h4","6. Bundle and S3 release"));
+  const releases=activeReleases(product);const published=releases.filter(item=>item.published);
+  if(published.length){stage.append(badge("Published to S3","done"));const list=node("ul",undefined,"release-list");for(const release of releases)list.append(node("li",`${release.release_id} · bundle v${String(release.bundle_revision).padStart(6,"0")} · ${release.published?"published":"local"}`));stage.append(list);if(product.lifecycle_state!=="released"){stage.append(node("p","The publication receipt exists, but the source folder has not reached the Release Pool.","evidence-alert"));const reconcile=node("button","Complete release-pool move");reconcile.type="button";reconcile.addEventListener("click",()=>submitWorkflow({action:"publish-s3",design_id:product.design_id,product_profile_id:product.product_profile_id},false));stage.append(reconcile)}return stage}
+  if(releases.length){
+    stage.append(badge("Local release pending S3 publication","warning"));
+    const list=node("ul",undefined,"release-list");for(const release of releases)list.append(node("li",`${release.release_id} · bundle v${String(release.bundle_revision).padStart(6,"0")}`));stage.append(list);
+    const publication=state.dashboard?.workflow_contract?.publication;
+    if(!publication?.configured){stage.append(node("p","S3 publication is disabled. Set PAWMARVEL_S3_BUCKET and the shared AWS settings, then restart the gallery.","evidence-alert"));return stage}
+    const prefix=publication.prefix?`/${publication.prefix}`:"";stage.append(node("p",`Destination: s3://${publication.bucket}${prefix} · profile ${publication.aws_profile||"default"} · region ${publication.aws_region||"default"}`,"muted"));
+    const button=node("button","Publish verified release to S3");button.type="button";button.addEventListener("click",()=>{if(!confirm(`Publish this immutable release to s3://${publication.bucket}${prefix}, verify every object, record the publication receipt, and move the design to the Release Pool?`))return;submitWorkflow({action:"publish-s3",design_id:product.design_id,product_profile_id:product.product_profile_id},false)});stage.append(button);return stage
+  }
+  const ready=Boolean(decidedReview(product,"art")&&decidedReview(product,"pet",{releaseOnly:true})&&decidedReview(product,"layout"));const composed=activeComposedReviews(product).length>0;const candidate=activePrintCandidates(product).at(-1);if(!ready||!composed||!candidate){stage.append(node("p","Requires art, release-tier pet, and layout decisions, composed fixture evidence, and an inspected print finalist.","muted"));return stage}
+  stage.append(node("p",`Approve print finalist ${candidate.candidate_id} to record graduation, build the next immutable bundle revision, and create a local release catalog. This still does not upload to S3.`));const button=node("button","Approve print and build local release");button.type="button";button.addEventListener("click",()=>{if(!confirm(`Have you inspected and approved print finalist ${candidate.candidate_id} at full resolution? This creates immutable graduation, bundle, and local release artifacts.`))return;const notes=prompt("Record the print approval notes:","Approved print finalist in operator UI");if(notes===null)return;if(!notes.trim()){alert("Print approval notes are required.");return}submitWorkflow({action:"build-local-release",design_id:product.design_id,product_profile_id:product.product_profile_id,candidate_id:candidate.candidate_id,notes:notes.trim()},false)});stage.append(button);return stage
+}
+function releasedEvidence(product){const details=node("details",undefined,"released-evidence");details.append(node("summary",`View release evidence · ${product.product_profile_id}`));const pipeline=node("div",undefined,"pipeline");const groups=[{title:"Art evidence",kind:"art",reviews:(product.reviews.art||[]).filter(item=>item.decision)},{title:"Pet evidence",kind:"pet",reviews:(product.reviews.pet||[]).filter(item=>item.decision&&!item.composed)},{title:"Pet release composition",kind:"pet",reviews:(product.reviews.pet||[]).filter(item=>item.composed)},{title:"Layout evidence",kind:"layout",reviews:(product.reviews.layout||[]).filter(item=>item.decision)}];for(const group of groups){const stage=node("section",undefined,"stage");stage.append(node("h4",group.title));if(!group.reviews.length)stage.append(node("p","No local comparison retained.","muted"));for(const item of group.reviews)stage.append(reviewArtifact(item,group.kind,product,false));pipeline.append(stage)}if(activePrintCandidates(product).length)pipeline.append(printStage(product));pipeline.append(releaseStage(product));details.append(pipeline);return details}
+function renderWorkflow(container,design){
+  if(!["graduated","released"].includes(state.tab))return;
+  if(!design.workflow?.length){container.append(offlineHandoff("Initialize this design/product authoring workspace","§2–§5 Install, configure, and develop art","Create and source the shared/design configuration, prepare the design inputs and references, tune art in scratch, and create the first immutable art experiment. This page can discover the product only after product.json exists."));return}
+  if(state.tab==="released"){for(const original of design.workflow)container.append(releasedEvidence({...original,design_id:design.design_id,lifecycle_state:design.lifecycle_state}));return}
+  for(const original of design.workflow){
+    const product={...original,design_id:design.design_id,lifecycle_state:design.lifecycle_state};const step=workflowStep(product);const section=node("section",undefined,"workflow-product");
+    section.append(node("h3",product.product_profile_id),badge(`Next: ${step.label}`,step.id==="complete"?"done":"warning"));
+    const job=latestProductJob(product);const activeJob=job&&["queued","running"].includes(job.status);if(job&&["queued","running","failed"].includes(job.status))section.append(jobStatusBanner(job));
+    const pipeline=node("div",undefined,"pipeline");
+    const art=experimentEditor("art",product);pipeline.append(decidedReview(product,"art")?completedStep("Art template",art,product,"art"):currentStep(art,step.id.startsWith("art-")));
+    const pet=experimentEditor("pet",product);pipeline.append(decidedReview(product,"pet",{releaseOnly:true})?completedStep("Pet transformation",pet,product,"pet"):currentStep(pet,step.id.startsWith("pet-")));
+    const layout=layoutStage(product);pipeline.append(decidedReview(product,"layout")?completedStep("Layout",layout,product,"layout"):currentStep(layout,step.id.startsWith("layout-")));
+    const composition=compositionStage(product);pipeline.append(activePrintCandidates(product).length?completedStep("Composed release QA",composition,product,"layout"):currentStep(composition,step.id==="composition"));
+    pipeline.append(currentStep(printStage(product),step.id==="print"));
+    pipeline.append(currentStep(releaseStage(product),["local-release","publish"].includes(step.id)));
+    section.append(pipeline);if(activeJob){section.classList.add("workflow-busy");section.querySelectorAll("button,input,select,textarea").forEach(control=>control.disabled=true)}container.append(section)
   }
 }
 
-async function load(){
-  try{status.className="";status.textContent="Loading…";state.dashboard=await request("/api/operator/designs");populateCollections();render();status.textContent=`Updated ${new Date().toLocaleTimeString()}`}
-  catch(error){status.textContent=error.message;status.className="error"}
-}
+function render(){root.replaceChildren();if(!state.dashboard)return;updateBatchToolbar();renderJobs();document.querySelectorAll(".tabs button").forEach(button=>{button.classList.toggle("selected",button.dataset.tab===state.tab);button.querySelector("span").textContent=`(${state.dashboard[button.dataset.tab].length})`});const poolDesigns=state.dashboard[state.tab];const designs=filteredDesigns();filterCount.textContent=`Showing ${designs.length} of ${poolDesigns.length} designs in this pool`;if(!designs.length){root.append(node("p",poolDesigns.length?"No designs match the current filters.":"No designs in this pool.","empty"));return}for(const design of designs){const card=template.content.firstElementChild.cloneNode(true);card.classList.toggle("released-summary",state.tab==="released");const selector=card.querySelector(".batch-choice");const checkbox=selector.querySelector("input");selector.hidden=state.tab==="released";checkbox.checked=state.selected.has(design.design_id);card.classList.toggle("selected",checkbox.checked);checkbox.addEventListener("change",()=>{if(checkbox.checked)state.selected.add(design.design_id);else state.selected.delete(design.design_id);if(selectionFilter.value)render();else{card.classList.toggle("selected",checkbox.checked);updateBatchToolbar()}});card.querySelector("img").src=design.operator_image_url;card.querySelector("img").alt=design.headline||design.design_id;card.querySelector(".meta").textContent=`${design.collection} · ${design.concept}`;card.querySelector("h2").textContent=design.headline||design.design_id;card.querySelector("code").textContent=design.design_id;card.querySelector(".slogan").textContent=design.bottom_line||"";card.querySelector(".rank").textContent=design.rank?`#${design.rank}`:"";const counts=card.querySelector(".counts");counts.append(node("span",`Graduate ${design.vote_totals.graduate}`,"count graduate"),node("span",`Improve ${design.vote_totals.consider}`,"count improve"),node("span",`Abandon ${design.vote_totals.pass}`,"count abandon"),node("span",`Total ${design.vote_count}`,"count"));card.querySelector(".round").textContent=`Review round ${design.review_round}${design.purge_after?` · feedback expires ${design.purge_after}`:""}`;const feedback=card.querySelector(".feedback");if(!design.feedback.length)feedback.append(node("p","No feedback in this round."));for(const vote of design.feedback){const item=node("article");item.append(node("strong",`${vote.reviewer_name} · ${choiceLabel(vote.choice)}`),node("p",vote.comment||"No written feedback."));feedback.append(item)}const actions=card.querySelector(".actions");if(state.tab==="active")actions.append(actionButton("Start new review round","new-round","secondary"),actionButton("Graduate","graduate"),actionButton("Abandon","abandon","danger"));else if(state.tab!=="released")actions.append(actionButton("Restore to active review","restore"));actions.querySelectorAll("button").forEach(button=>button.dataset.designId=design.design_id);renderWorkflow(card.querySelector(".workflow"),design);root.append(card)}}
 
-async function runAction(designId,action){
-  const operator_id=operatorInput.value.trim();
-  if(!operator_id){alert("Enter your operator identity first.");operatorInput.focus();return}
-  localStorage.setItem("pawmarvelOperatorId",operator_id);
-  const labels={"new-round":"start a clean review round for","graduate":"graduate","abandon":"abandon","restore":"restore"};
-  if(!confirm(`Confirm: ${labels[action]} ${designId}?`))return;
-  const reason=prompt("Decision reason or improvement summary:",""); if(reason===null)return;
-  try{
-    status.className="";status.textContent="Applying decision…";
-    const result=await request("/api/operator/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,design_id:designId,operator_id,reason})});
-    state.dashboard=result.dashboard;render();status.textContent="Decision saved";
-  }catch(error){status.textContent=error.message;status.className="error"}
-}
-
-async function runBatchAction(action){
-  const operator_id=operatorInput.value.trim();
-  if(!operator_id){alert("Enter your operator identity first.");operatorInput.focus();return}
-  const design_ids=[...state.selected].sort();
-  if(!design_ids.length)return;
-  localStorage.setItem("pawmarvelOperatorId",operator_id);
-  if(!confirm(`Confirm: ${action} ${design_ids.length} selected designs as one batch?\n\n${design_ids.join("\n")}`))return;
-  const reason=prompt("Shared decision reason for this batch:",""); if(reason===null)return;
-  try{
-    state.pending=true;updateBatchToolbar();status.className="";status.textContent=`Applying ${action} batch…`;
-    const result=await request("/api/operator/actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,design_ids,operator_id,reason})});
-    const completed={graduate:"graduated",abandon:"abandoned",restore:"restored to active review"}[action];
-    state.selected.clear();state.dashboard=result.dashboard;render();status.textContent=`${result.processed_count} designs ${completed}`;
-  }catch(error){status.textContent=error.message;status.className="error"}
-  finally{state.pending=false;updateBatchToolbar()}
-}
-
-document.querySelector("#refresh").addEventListener("click",load);
-document.querySelectorAll(".tabs button").forEach(button=>button.addEventListener("click",()=>{state.tab=button.dataset.tab;render()}));
-document.querySelector("#select-all").addEventListener("click",()=>{for(const design of filteredDesigns())state.selected.add(design.design_id);render()});
-document.querySelector("#clear-selection").addEventListener("click",()=>{state.selected.clear();render()});
-for(const filter of [collectionFilter,titleFilter,bottomLineFilter,voteFilter,selectionFilter])filter.addEventListener(filter.matches("input[type=search]")?"input":"change",render);
-document.querySelector("#clear-filters").addEventListener("click",()=>{collectionFilter.value="";titleFilter.value="";bottomLineFilter.value="";voteFilter.value="";selectionFilter.value="";render()});
-graduateSelected.addEventListener("click",()=>runBatchAction("graduate"));
-abandonSelected.addEventListener("click",()=>runBatchAction("abandon"));
-restoreSelected.addEventListener("click",()=>runBatchAction("restore"));
-load();
+function workflowContractError(action){const contract=state.dashboard?.workflow_contract;if(!contract)return "The operator UI is newer than the running gallery backend. Restart the gallery server, then hard-refresh this page before running workflow actions.";if(!Array.isArray(contract.actions)||!contract.actions.includes(action))return `The running gallery backend does not support workflow action ${action}. Restart the gallery server so its Python backend matches the operator UI.`;return null}
+async function load(){try{status.className="";status.textContent="Loading…";state.dashboard=await request("/api/operator/designs");populateCollections();render();if(!state.dashboard.workflow_contract){status.textContent="Gallery server restart required: the operator UI and Python workflow backend are different versions.";status.className="error"}else status.textContent=`Updated ${new Date().toLocaleTimeString()}`}catch(error){status.textContent=error.message;status.className="error"}}
+async function submitWorkflow(payload,confirmPaid){const operator_id=operatorId();if(!operator_id)return;const contractError=workflowContractError(payload.action);if(contractError){status.textContent=contractError;status.className="error";alert(contractError);return}if(confirmPaid&&!confirm("This creates a new immutable experiment and may make paid image API calls. Continue?"))return;try{status.className="";status.textContent="Queueing workflow…";const result=await request("/api/operator/workflow",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...payload,operator_id})});status.textContent=`Queued job ${result.job.job_id.slice(0,8)}`;await load()}catch(error){status.textContent=error.message;status.className="error"}}
+async function runWorkflowBatch(){const operator_id=operatorId();if(!operator_id)return;const selection=selectedWorkflowTargets();if(selection.error){alert(selection.error);return}if(!selection.targets?.length)return;let actions;try{actions=selection.targets.map(item=>batchActionFor(item.product,item.step))}catch(error){alert(error.message);return}const paid=["art-evidence","pet-smoke-current","pet-smoke-new","pet-release-current"].includes(selection.step.id);const quality=selection.step.id==="print"?"You must have visually reviewed every selected composed comparison. ":selection.step.id==="local-release"?"You must have inspected every selected print finalist at full resolution. ":"";if(!confirm(`${quality}${selection.step.label} for ${actions.length} designs?${paid?" This queues paid image API calls.":""}`))return;try{state.pending=true;updateBatchToolbar();status.className="";status.textContent=`Queueing ${actions.length} workflow jobs…`;const result=await request("/api/operator/workflows",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({operator_id,actions})});status.textContent=`Queued ${result.jobs.length} ${selection.step.label.toLocaleLowerCase()} jobs`;await load()}catch(error){status.textContent=error.message;status.className="error"}finally{state.pending=false;updateBatchToolbar()}}
+async function runAction(designId,action){const operator_id=operatorId();if(!operator_id)return;const labels={"new-round":"start a clean review round for","graduate":"graduate","abandon":"abandon","restore":"restore"};if(!confirm(`Confirm: ${labels[action]} ${designId}?`))return;const reason=prompt("Decision reason or improvement summary:","");if(reason===null)return;try{status.className="";status.textContent="Applying decision…";const result=await request("/api/operator/action",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,design_id:designId,operator_id,reason})});state.dashboard=result.dashboard;render();status.textContent="Decision saved"}catch(error){status.textContent=error.message;status.className="error"}}
+async function runBatchAction(action){const operator_id=operatorId();if(!operator_id)return;const design_ids=[...state.selected].sort();if(!design_ids.length)return;if(!confirm(`Confirm: ${action} ${design_ids.length} selected designs as one batch?\n\n${design_ids.join("\n")}`))return;const reason=prompt("Shared decision reason for this batch:","");if(reason===null)return;try{state.pending=true;updateBatchToolbar();status.className="";status.textContent=`Applying ${action} batch…`;const result=await request("/api/operator/actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,design_ids,operator_id,reason})});const completed={graduate:"graduated",abandon:"abandoned",restore:"restored to active review"}[action];state.selected.clear();state.dashboard=result.dashboard;render();status.textContent=`${result.processed_count} designs ${completed}`}catch(error){status.textContent=error.message;status.className="error"}finally{state.pending=false;updateBatchToolbar()}}
+document.querySelector("#refresh").addEventListener("click",load);document.querySelectorAll(".tabs button").forEach(button=>button.addEventListener("click",()=>{state.tab=button.dataset.tab;render()}));document.querySelector("#select-all").addEventListener("click",()=>{for(const design of filteredDesigns())state.selected.add(design.design_id);render()});document.querySelector("#clear-selection").addEventListener("click",()=>{state.selected.clear();render()});for(const filter of [collectionFilter,titleFilter,bottomLineFilter,voteFilter,selectionFilter,workflowStepFilter])filter.addEventListener(filter.matches("input[type=search]")?"input":"change",render);document.querySelector("#clear-filters").addEventListener("click",()=>{collectionFilter.value="";titleFilter.value="";bottomLineFilter.value="";voteFilter.value="";selectionFilter.value="";workflowStepFilter.value="";render()});graduateSelected.addEventListener("click",()=>runBatchAction("graduate"));abandonSelected.addEventListener("click",()=>runBatchAction("abandon"));restoreSelected.addEventListener("click",()=>runBatchAction("restore"));workflowBatchRun.addEventListener("click",runWorkflowBatch);load();

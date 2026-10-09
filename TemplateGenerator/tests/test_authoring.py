@@ -235,8 +235,17 @@ class AuthoringLifecycleTests(unittest.TestCase):
         )
         layout_evaluation = compare(kind="layout", review_id="layout-eval", authoring_product=product,
             experiments=[layout_exp.name, layout_exp_v02.name], evaluation_protocol=self.protocol, fixture_set=None,
-            art_attempt=None, pet_experiment=None, layout_attempt=None, base_bundle_revision=None)
+            art_attempt=None, pet_experiment=None, layout_attempt=None, base_bundle_revision=None,
+            advisory_warnings=["layout proposal requires visual approval"])
         layout_evaluation_record = json.loads(layout_evaluation.read_text())
+        self.assertEqual(
+            layout_evaluation_record["warnings"],
+            ["layout proposal requires visual approval"],
+        )
+        self.assertEqual(
+            layout_evaluation_record["candidates"][0]["warnings"],
+            ["layout proposal requires visual approval"],
+        )
         self.assertEqual(
             layout_evaluation_record["review_artifacts"][0]["kind"],
             "layout-contact-sheet",
@@ -299,6 +308,10 @@ class AuthoringLifecycleTests(unittest.TestCase):
         layout_decision = record_decision(
             review=layout_evaluation.parent, selected_by="owner", notes="best composition",
             selected_experiment=layout_exp.name, selected_attempt=layout_attempt.name,
+        )
+        self.assertEqual(
+            json.loads(layout_decision.read_text())["decision"]["accepted_warnings"],
+            ["layout proposal requires visual approval"],
         )
         assembly_decision = record_decision(
             review=evaluation.parent, selected_by="owner", notes="compatible",

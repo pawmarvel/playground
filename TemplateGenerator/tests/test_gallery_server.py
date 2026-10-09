@@ -242,6 +242,34 @@ class GalleryServerTests(unittest.TestCase):
                 )
             )
 
+    def test_release_pool_and_s3_settings_are_preserved_by_server_factory(self) -> None:
+        release_root = self.temp_root / "Release Pool"
+        release_root.mkdir(exist_ok=True)
+        (self.root / "other-one").replace(release_root / "other-one")
+        restarted = create_gallery_server(
+            GalleryConfig(
+                root=self.root,
+                index=self.index,
+                database=self.temp_root / "release.sqlite3",
+                authoring_root=self.authoring_root,
+                release_root=release_root,
+                s3_bucket="test-bucket",
+                s3_prefix="templates/mvp",
+                aws_profile="test-profile",
+                aws_region="us-east-1",
+            )
+        )
+        try:
+            self.assertEqual(
+                restarted.designs["other-one"]["lifecycle_state"], "released"
+            )
+            self.assertEqual(restarted.gallery_config.s3_bucket, "test-bucket")
+            self.assertEqual(restarted.gallery_config.s3_prefix, "templates/mvp")
+            self.assertEqual(restarted.gallery_config.aws_profile, "test-profile")
+            self.assertEqual(restarted.gallery_config.aws_region, "us-east-1")
+        finally:
+            restarted.server_close()
+
     def test_reviewer_page_uses_one_batch_save_action(self) -> None:
         with urllib.request.urlopen(self.base + "/") as response:
             html = response.read().decode("utf-8")
@@ -273,11 +301,82 @@ class GalleryServerTests(unittest.TestCase):
         self.assertIn('id="bottom-line-filter"', html)
         self.assertIn('id="vote-filter"', html)
         self.assertIn('id="selection-filter"', html)
+        self.assertIn('id="workflow-step-filter"', html)
         self.assertIn('id="restore-selected"', html)
+        self.assertIn('data-tab="released"', html)
         self.assertIn('request("/api/operator/actions"', javascript)
+        self.assertIn('request("/api/operator/workflow"', javascript)
+        self.assertIn('request("/api/operator/workflows"', javascript)
+        self.assertIn('Run release on current experiment', javascript)
+        self.assertIn('Approve composition and prepare print finalist', javascript)
+        self.assertIn('Approve print and build local release', javascript)
+        self.assertIn('action:"prepare-print"', javascript)
+        self.assertIn('Publish verified release to S3', javascript)
+        self.assertIn('action:"publish-s3"', javascript)
+        self.assertIn('action:"reopen-stage"', javascript)
+        self.assertIn('Redo / improve', javascript)
+        self.assertIn('Open supersession record', javascript)
+        self.assertIn('move the design to the Release Pool', javascript)
+        self.assertIn('Complete release-pool move', javascript)
+        self.assertIn('workflow_contract', javascript)
+        self.assertIn('Gallery server restart required', javascript)
+        self.assertIn('function failedJobOutcomeExists', javascript)
+        self.assertIn('&&!failedJobOutcomeExists(job)', javascript)
+        self.assertIn('Select graduated designs at the same step', html)
+        self.assertIn('Operation guide → GUI coverage and offline handoffs', html)
+        self.assertIn('Offline prerequisite', javascript)
+        self.assertIn('§5 Develop generated or empty-canvas art.png', javascript)
+        self.assertIn('view decision evidence', javascript)
+        self.assertIn('function jobStatusBanner', javascript)
+        self.assertIn('Background work', javascript)
+        self.assertIn('workflow-busy', javascript)
+        self.assertIn('function reviewEvidence', javascript)
+        self.assertIn('Open raw evaluation JSON', javascript)
+        self.assertIn('Warnings requiring attention', javascript)
+        self.assertIn('Selected candidate has no evaluation warnings.', javascript)
+        self.assertIn('View release evidence', javascript)
+        self.assertIn('Pet release composition', javascript)
+        self.assertIn('released-summary', javascript)
         self.assertIn("function filteredDesigns()", javascript)
         self.assertIn("for(const design of filteredDesigns())", javascript)
         self.assertIn('runBatchAction("restore")', javascript)
+
+    def test_operator_batch_workflow_endpoint_queues_all_actions(self) -> None:
+        captured: dict[str, object] = {}
+
+        class Jobs:
+            @staticmethod
+            def submit_many(actions, *, operator_id):
+                captured["actions"] = actions
+                captured["operator_id"] = operator_id
+                return [{"job_id": f"job-{index}"} for index, _ in enumerate(actions)]
+
+        self.server.operator_jobs = Jobs()
+        actions = [
+            {
+                "action": "record-decision",
+                "design_id": "christmas-one",
+                "product_profile_id": "test-profile",
+            },
+            {
+                "action": "record-decision",
+                "design_id": "christmas-two",
+                "product_profile_id": "test-profile",
+            },
+        ]
+        request = urllib.request.Request(
+            self.base + "/api/operator/workflows",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(
+                {"operator_id": "application-owner", "actions": actions}
+            ).encode("utf-8"),
+        )
+        with urllib.request.urlopen(request) as response:
+            payload = json.loads(response.read())
+        self.assertEqual(len(payload["jobs"]), 2)
+        self.assertEqual(captured["actions"], actions)
+        self.assertEqual(captured["operator_id"], "application-owner")
 
     def test_batch_save_atomically_upserts_changed_votes(self) -> None:
         result = self.post_votes(

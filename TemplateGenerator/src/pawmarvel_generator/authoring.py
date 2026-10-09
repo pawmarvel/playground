@@ -1098,7 +1098,8 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
             art_attempt: Path | None, pet_experiment: Path | None,
             layout_attempt: Path | None, base_bundle_revision: int | None,
             attempt_prefix: str | None = None,
-            fixture_selection: Path | None = None) -> Path:
+            fixture_selection: Path | None = None,
+            advisory_warnings: list[str] | None = None) -> Path:
     if kind not in {*KINDS, "assembly"}:
         raise AuthoringError("comparison kind must be art, pet, layout, or assembly")
     _id(review_id, "review ID")
@@ -1170,6 +1171,11 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
         if fixture_inventory and selected_fixtures
         else ()
     )
+    selection_warnings.extend(
+        str(warning).strip()
+        for warning in (advisory_warnings or [])
+        if str(warning).strip()
+    )
     coverage_warnings.extend(selection_warnings)
     if kind in KINDS:
         if not experiments:
@@ -1233,6 +1239,7 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
                 )
                 runs.append({"attempt_id": attempt.name, "status": record.get("status"),
                              "duration_seconds": record.get("duration_seconds"),
+                             "error": record.get("error"),
                              "input_pet_sha256": input_pet_sha256,
                              "representative_pet_sha256": record.get(
                                  "layout_fixture", {}

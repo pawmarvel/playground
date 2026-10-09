@@ -8,7 +8,7 @@
 </head>
 <body>
   <header>
-    <div><p class="eyebrow">PawMarvel private operation</p><h1>Design review decisions</h1><p>Review rankings and move designs through their lifecycle.</p></div>
+    <div><p class="eyebrow">PawMarvel private operation</p><h1>Design operations</h1><p>Review concepts, author graduated designs, and track local releases.</p></div>
     <nav><a href="/api/results.json" target="_blank">Results JSON</a><a href="/api/results.csv">CSV</a><a href="/operator/logout">Log out</a></nav>
   </header>
   <section class="controls">
@@ -16,6 +16,23 @@
     <button id="refresh" type="button">Refresh</button>
     <span id="status">Loading…</span>
   </section>
+  <section id="jobs" class="jobs" hidden aria-live="polite"></section>
+  <details class="workflow-map">
+    <summary>Operation guide → GUI coverage and offline handoffs</summary>
+    <p>The GUI operates on immutable authoring products after their first experiment exists. Complete prerequisites marked <strong>Offline</strong>, return to this page, and select <strong>Refresh</strong>.</p>
+    <div class="coverage-table" role="table" aria-label="Operation guide workflow coverage">
+      <div role="row"><strong role="cell">Guide stage</strong><strong role="cell">Where to complete it</strong><strong role="cell">Return condition</strong></div>
+      <div role="row"><span role="cell">§2–§4 install, private config, inputs, artifact root</span><span role="cell"><b>Offline</b> · CLI/config files</span><span role="cell"><code>product.json</code> and source inputs exist</span></div>
+      <div role="row"><span role="cell">§5 art scratch and first immutable experiment</span><span role="cell"><b>Offline first</b>; later prompt reruns, comparison, and decision are in Art template</span><span role="cell">Art experiment/evaluation appears, then record its winner here</span></div>
+      <div role="row"><span role="cell">§6 pet scratch and first immutable experiment</span><span role="cell"><b>Offline first</b>; prompt reruns, smoke/release fixtures, evidence, and decision are in Pet transformation</span><span role="cell">Pet experiment appears; model/provider/config changes remain offline</span></div>
+      <div role="row"><span role="cell">§7 layout/font and composed QA</span><span role="cell"><b>GUI</b> · ranked deterministic proposals and composition; <b>Offline</b> manual editor fallback</span><span role="cell">Refresh after saving/deciding a manual layout</span></div>
+      <div role="row"><span role="cell">§8 print finalist</span><span role="cell"><b>GUI</b> · prepare, then inspect final/debug print before approval</span><span role="cell">Approved finalist unlocks local release</span></div>
+      <div role="row"><span role="cell">§9 graduation, bundle, release, S3</span><span role="cell"><b>GUI</b> · build local release and publish; <b>Offline</b> shared S3 config and AWS SSO login</span><span role="cell">Restart gallery after config changes; retry publish after login</span></div>
+      <div role="row"><span role="cell">§10 improvement</span><span role="cell"><b>GUI</b> · Redo / improve before publication; <b>Offline</b> start a new authoring iteration after publication</span><span role="cell">New experiment evidence appears after refresh</span></div>
+      <div role="row"><span role="cell">§11–§17 profile port, consumer verification, cleanup, debug, alternate providers, font maintenance</span><span role="cell"><b>Offline / optional</b> · follow the named guide section</span><span role="cell">Return only when new authoring/release evidence should be reviewed</span></div>
+    </div>
+    <p class="muted">Canonical commands and recovery details: <code>docs/MVP_OPERATIONS_GUIDE.md</code>. Operator behavior: <code>docs/DESIGN_REVIEW_OPERATOR_GUIDE.md</code>.</p>
+  </details>
   <section class="filters" aria-label="Design filters">
     <label>Collection<select id="collection-filter"><option value="">All collections</option></select></label>
     <label>Title<input id="title-filter" type="search" placeholder="Search title or design ID"></label>
@@ -32,6 +49,16 @@
       <option value="selected">Selected only</option>
       <option value="unselected">Not selected</option>
     </select></label>
+    <label>Workflow step<select id="workflow-step-filter">
+      <option value="">All workflow steps</option>
+      <option value="art">Art</option>
+      <option value="pet">Pet transformation</option>
+      <option value="layout">Layout</option>
+      <option value="composition">Composed release QA</option>
+      <option value="print">Print finalist</option>
+      <option value="local-release">Build local release</option>
+      <option value="publish">Publish to S3</option>
+    </select></label>
     <button id="clear-filters" type="button" class="secondary">Clear filters</button>
     <strong id="filter-count" aria-live="polite"></strong>
   </section>
@@ -39,6 +66,7 @@
     <button type="button" data-tab="active" class="selected">Active review <span></span></button>
     <button type="button" data-tab="abandoned">Abandoned <span></span></button>
     <button type="button" data-tab="graduated">Graduated <span></span></button>
+    <button type="button" data-tab="released">Released <span></span></button>
   </nav>
   <section id="batch-toolbar" class="batch-toolbar" aria-label="Batch decisions">
     <strong id="selected-count">0 selected</strong>
@@ -47,6 +75,10 @@
     <button id="graduate-selected" type="button">Graduate selected</button>
     <button id="abandon-selected" type="button" class="danger">Abandon selected</button>
     <button id="restore-selected" type="button" hidden>Restore selected to active review</button>
+  </section>
+  <section id="workflow-batch-toolbar" class="batch-toolbar workflow-batch" aria-label="Batch graduated workflow" hidden>
+    <div><strong id="workflow-batch-step">Select graduated designs at the same step</strong><small id="workflow-batch-help">The tool validates every selected design before queueing work.</small></div>
+    <button id="workflow-batch-run" type="button" disabled>Continue selected designs</button>
   </section>
   <main id="designs"></main>
   <template id="design-template">
@@ -59,6 +91,7 @@
         <p class="round"></p>
         <details><summary>Reviewer feedback</summary><div class="feedback"></div></details>
         <div class="actions"></div>
+        <div class="workflow"></div>
       </div>
     </article>
   </template>

@@ -36,6 +36,28 @@ troubleshooting, and alternate providers. Create additional art, pet, or layout
 candidates only when the current evidence gives a reason; the first run does
 not require a synthetic alternative merely to exercise comparison tooling.
 
+### Operator GUI responsibility map
+
+The `/operator` page intentionally does not replace private-machine setup or
+disposable scratch development. Its expandable **Operation guide → GUI
+coverage and offline handoffs** panel mirrors this table. Whenever an offline
+step completes, write it into the same configured authoring root, return to the
+page, and select **Refresh**.
+
+| Guide step | Operator GUI coverage | Required offline handoff |
+| --- | --- | --- |
+| §§2–4 install, configuration, inputs, artifact root | Status/discovery only | Install the tools, create/source shared and design configs, copy private inputs, and create the authoring product. A design has no GUI workflow until `product.json` exists. |
+| §5 art | Edit a known prompt into a successor experiment, run/compare it, inspect evidence, and record the winner | Tune initial or substantial prompt changes in scratch; create the first immutable art experiment. Refresh when its experiment/evaluation exists. |
+| §6 pet | Edit a known prompt, run smoke or release fixtures, compare evidence, and record a release-tier winner | Tune scratch and create the first pet experiment. Provider/model/quality/reference/name-mode changes require a CLI successor experiment; refresh afterward. |
+| §7 layout and assembly | Generate/rank deterministic proposals, accept one, and generate composed release-fixture QA | If no proposal is acceptable, use the local manual layout editor, compare/decide the attempt, then refresh. |
+| §8 print finalist | Approve composed QA, generate the finalist, and display final/debug print images for a separate full-resolution review | None on the normal path. Advanced template-reuse diagnostics remain CLI-only. |
+| §9 graduation, bundle, release, publication | After print approval, graduate/build the local bundle and release; then publish/verify and move to Released | Configure S3 before gallery startup and run `aws sso login` when the session expires. Restart after shared-config changes. |
+| §10 improvement | Before publication, **Redo / improve** retires the selected stage and downstream chain, then resumes normal GUI iteration | A published release is immutable; initialize a new post-production authoring/config iteration and return after its first evidence exists. |
+| §§11–17 profile port, FE verification, cleanup, debug, providers, fonts | Evidence becomes visible after refresh where applicable | These optional/recovery/maintenance procedures remain CLI-led; follow their named sections. |
+
+The GUI and CLI write the same artifacts. Do not perform a GUI action and its
+equivalent CLI command simultaneously for the same design/product.
+
 ## 1. Operating rules
 
 - Scope every authoring workspace by both design and product profile:
@@ -1918,6 +1940,39 @@ the print art/layout/profile/font and upscales only the new pet.
 
 ## 9. Record the winner, stage locally, and publish to S3
 
+For designs selected through the team gallery, the operator may run the same
+immutable stages from `/operator` instead of copying each command below. The
+**Graduated** tab supports prompt-edited art reruns, pet smoke/release
+benchmarks, component decisions, deterministic layout proposal acceptance,
+composed fixture review, explicit print-finalist review, and local
+bundle/release creation. It writes the
+same `experiments/`, `reviews/`, `print-candidates/`, `graduations/`, bundles,
+and release catalogs documented here. Finished decision stages are collapsed,
+and designs waiting on the same single-product step can be selected and queued
+as a validated batch. Release-tier pet evidence remains required for the pet
+winner. After local release, the individual operator action can publish to the
+S3 destination loaded from `pawmarvel-shared.env`, verify the upload, record
+the receipt, and move the design from the graduation pool to the release pool.
+The commands later in this section remain the equivalent recovery and
+automation path. See
+[`DESIGN_REVIEW_OPERATOR_GUIDE.md`](DESIGN_REVIEW_OPERATOR_GUIDE.md#bring-a-graduated-design-to-a-local-release)
+for the UI sequence and background-job behavior.
+
+The GUI deliberately separates **Approve composition and prepare print
+finalist** from **Approve print and build local release**. Inspect its final and
+debug images at full resolution between those actions. This is the same quality
+checkpoint as section 8; GUI use does not waive print review.
+
+If composed QA reveals an art, pet, or layout problem, expand that finished
+stage in the Graduated tab and select **Redo / improve**. The operator UI records
+why the winner was superseded and returns the product to the corresponding
+iteration step. Earlier immutable experiments and reviews remain available for
+comparison. Art or pet reopening requires a fresh layout proposal because its
+inputs changed; layout reopening may reuse the existing ranked proposals and
+select another candidate. All affected composition, assembly, and unpublished
+release artifacts are excluded from the active chain. Complete the normal
+decision, composed-QA, print, bundle, and publication stages again.
+
 Graduate the exact print finalist and four review packets. `graduate` is the
 final approval action: it checks the finalist against each sibling
 `evaluation.json`/`decision.json`, binds their hashes and product-relative
@@ -2160,6 +2215,14 @@ after its assets, and uploads `catalog.json` last. Existing objects are accepted
 only when their stored checksum and byte count match, which makes retry after a
 partial upload safe. A conflicting object stops publication; create a new
 bundle revision or release rather than overwriting S3.
+
+Immediately before that strict validation, `publish-s3` removes only macOS
+Finder metadata (`.DS_Store` and AppleDouble `._*` files) from the bundle
+directories referenced by the selected release catalog. Every removed absolute
+path is printed and appears in operator progress. This prevents browsing a local
+bundle in Finder from breaking publication without weakening the bundle
+contract: any other uninventoried file still fails validation and must be
+investigated rather than silently deleted.
 
 AWS references: [conditional writes](https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html),
 [`put-object`](https://docs.aws.amazon.com/cli/latest/reference/s3api/put-object.html),

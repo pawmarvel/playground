@@ -672,6 +672,62 @@ class BundleContractTests(unittest.TestCase):
             "2026-09-07.001/catalog.json",
         )
 
+    def test_s3_publication_removes_only_macos_metadata_before_validation(
+        self,
+    ) -> None:
+        catalog_path = build_release(
+            release_id="2026-09-07.001",
+            bundles=[self.bundle],
+            exchange_root=self.exchange,
+            asset_base_url=None,
+        )
+        finder_metadata = self.bundle / ".DS_Store"
+        apple_double = self.bundle / "qa" / "._golden-preview.png"
+        finder_metadata.write_bytes(b"finder")
+        apple_double.write_bytes(b"apple-double")
+        progress: list[str] = []
+
+        publish_s3(
+            release_catalog=catalog_path,
+            exchange_root=self.exchange,
+            bucket="pawmarvel-template-catalog",
+            prefix="mvp",
+            aws_profile=None,
+            region=None,
+            authoring_root=None,
+            execute=False,
+            progress=progress.append,
+        )
+
+        self.assertFalse(finder_metadata.exists())
+        self.assertFalse(apple_double.exists())
+        self.assertTrue(any(str(finder_metadata) in message for message in progress))
+        self.assertTrue(any(str(apple_double) in message for message in progress))
+
+    def test_s3_publication_still_rejects_unknown_uninventoried_file(self) -> None:
+        catalog_path = build_release(
+            release_id="2026-09-07.001",
+            bundles=[self.bundle],
+            exchange_root=self.exchange,
+            asset_base_url=None,
+        )
+        unknown = self.bundle / "unexpected.tmp"
+        unknown.write_text("unexpected", encoding="utf-8")
+
+        with self.assertRaisesRegex(BundleError, "asset inventory"):
+            publish_s3(
+                release_catalog=catalog_path,
+                exchange_root=self.exchange,
+                bucket="pawmarvel-template-catalog",
+                prefix="mvp",
+                aws_profile=None,
+                region=None,
+                authoring_root=None,
+                execute=False,
+            )
+
+        self.assertTrue(unknown.exists())
+
     def test_s3_publication_executes_conditional_puts_and_verifies_each_object(
         self,
     ) -> None:

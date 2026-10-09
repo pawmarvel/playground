@@ -21,6 +21,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
+from .operator_workflow import (
+    OperatorJobManager,
+    OperatorWorkflowConfig,
+    OperatorWorkflowError,
+    OperatorWorkflowRunner,
+    discover_operator_workflows,
+    discover_releases,
+)
+
 
 CHOICES = ("graduate", "consider", "pass")
 MAX_BODY_BYTES = 16 * 1024
@@ -40,9 +49,16 @@ class GalleryConfig:
     root: Path
     index: Path
     database: Path
+    project_root: Path | None = None
     authoring_root: Path | None = None
+    exchange_root: Path | None = None
     abandoned_root: Path | None = None
     graduation_root: Path | None = None
+    release_root: Path | None = None
+    s3_bucket: str | None = None
+    s3_prefix: str = ""
+    aws_profile: str | None = None
+    aws_region: str | None = None
     collections: tuple[str, ...] = ()
     reviewer_access_code: str | None = None
     operator_access_code: str | None = None
@@ -676,7 +692,7 @@ class GalleryStore:
                         **{
                             key: value
                             for key, value in design.items()
-                            if key != "pool_path"
+                            if key not in {"pool_path", "operator_image_path"}
                         },
                         "review_round": registry["review_round"],
                         "removed_at": registry["removed_at"],
@@ -940,6 +956,9 @@ class GalleryHTTPServer(ThreadingHTTPServer):
         self.designs = designs
         self.concept_by_id = {item["design_id"]: item for item in concepts}
         self.review_asset_by_url = _review_asset_map(config, concepts)
+        self.operator_workflows, self.operator_workflow_asset_by_url = (
+            self._discover_operator_workflows()
+        )
         self.store = store
         self.reconciliation = reconciliation
         self.missing_design_ids = missing_design_ids
@@ -958,6 +977,53 @@ class GalleryHTTPServer(ThreadingHTTPServer):
         )
         self.auth_token = self.reviewer_auth_token
         self.lifecycle_lock = threading.Lock()
+        workflow_config = self._workflow_config()
+        self.operator_jobs = (
+            OperatorJobManager(
+                OperatorWorkflowRunner(workflow_config),
+                workflow_config.jobs_root,
+            )
+            if workflow_config is not None
+            else None
+        )
+
+    def _workflow_config(self) -> OperatorWorkflowConfig | None:
+        config = self.gallery_config
+        if (
+            config.project_root is None
+            or config.authoring_root is None
+            or config.exchange_root is None
+        ):
+            return None
+        return OperatorWorkflowConfig(
+            project_root=config.project_root,
+            authoring_root=config.authoring_root,
+            exchange_root=config.exchange_root,
+            jobs_root=config.database.parent / "operator-jobs",
+            graduation_root=(
+                config.graduation_root
+                or config.root.resolve().parent / "Graduation Pool"
+            ).resolve(),
+            release_root=(
+                config.release_root
+                or config.root.resolve().parent / "Release Pool"
+            ).resolve(),
+            s3_bucket=config.s3_bucket,
+            s3_prefix=config.s3_prefix,
+            aws_profile=config.aws_profile,
+            aws_region=config.aws_region,
+        )
+
+    def _discover_operator_workflows(
+        self,
+    ) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Path]]:
+        workflow_config = self._workflow_config()
+        if workflow_config is None:
+            return {}, {}
+        return discover_operator_workflows(
+            workflow_config,
+            set(self.designs),
+        )
 
     def refresh(self) -> None:
         snapshot = _load_concepts(self.gallery_config)
@@ -975,6 +1041,9 @@ class GalleryHTTPServer(ThreadingHTTPServer):
         self.review_asset_by_url = _review_asset_map(
             self.gallery_config, self.concepts
         )
+        self.operator_workflows, self.operator_workflow_asset_by_url = (
+            self._discover_operator_workflows()
+        )
         self.missing_design_ids = snapshot.missing_design_ids
 
 
@@ -985,6 +1054,9 @@ def _load_concepts(config: GalleryConfig) -> GallerySnapshot:
     ).resolve()
     graduation_root = (
         config.graduation_root or root.parent / "Graduation Pool"
+    ).resolve()
+    release_root = (
+        config.release_root or root.parent / "Release Pool"
     ).resolve()
     index = config.index.resolve()
     if not root.is_dir():
@@ -1021,6 +1093,7 @@ def _load_concepts(config: GalleryConfig) -> GallerySnapshot:
             ("active", (root / folder).resolve(), root),
             ("abandoned", (abandoned_root / folder).resolve(), abandoned_root),
             ("graduated", (graduation_root / folder).resolve(), graduation_root),
+            ("released", (release_root / folder).resolve(), release_root),
         ]
         located = [candidate for candidate in candidates if candidate[1].exists()]
         if len(located) > 1:
@@ -1064,6 +1137,7 @@ def _load_concepts(config: GalleryConfig) -> GallerySnapshot:
             **metadata,
             "lifecycle_state": lifecycle_state,
             "pool_path": str(design_folder),
+            "operator_image_path": str(image),
         }
         if lifecycle_state != "active":
             continue
@@ -1077,11 +1151,49 @@ def _load_concepts(config: GalleryConfig) -> GallerySnapshot:
                 "review_contexts": _discover_review_contexts(config, design_id),
             }
         )
+    if config.exchange_root is not None:
+        releases = discover_releases(config.exchange_root, config.authoring_root)
+        for (design_id, _), entries in sorted(releases.items()):
+            if (
+                design_id in all_designs
+                or not entries
+                or not any(entry.get("published") for entry in entries)
+            ):
+                continue
+            latest = entries[-1]
+            manifest_path = latest.get("manifest_path")
+            if not isinstance(manifest_path, str):
+                continue
+            bundle = (config.exchange_root / Path(manifest_path).parent).resolve()
+            try:
+                bundle.relative_to(config.exchange_root.resolve())
+            except ValueError:
+                continue
+            image = bundle / "reference-design.png"
+            if not image.is_file():
+                image = bundle / "art.png"
+            if not image.is_file():
+                continue
+            all_designs[design_id] = {
+                "design_id": design_id,
+                "collection": "Released catalog",
+                "concept": design_id.replace("-", " ").title(),
+                "headline": design_id.replace("-", " ").title(),
+                "bottom_line": "",
+                "bottom_line_option": None,
+                "priority": None,
+                "row": None,
+                "lifecycle_state": "released",
+                "pool_path": str(bundle),
+                "operator_image_path": str(image),
+            }
     return GallerySnapshot(
         concepts=selected,
         active_designs=active_designs,
         all_designs=all_designs,
-        missing_design_ids=tuple(sorted(missing_design_ids)),
+        missing_design_ids=tuple(
+            sorted(design_id for design_id in missing_design_ids if design_id not in all_designs)
+        ),
     )
 
 
@@ -1211,6 +1323,11 @@ body{{font:16px system-ui,sans-serif;background:#f4f2ed;margin:0;color:#222}}mai
 
 def _operator_payload(server: GalleryHTTPServer) -> dict[str, Any]:
     designs = server.store.operator_designs(server.designs)
+    gallery_config = getattr(server, "gallery_config", None)
+    for item in designs:
+        workflow = server.operator_workflows.get(item["design_id"], [])
+        item["workflow"] = workflow
+        item["released"] = any(product.get("released") for product in workflow)
     active = sorted(
         (item for item in designs if item["lifecycle_state"] == "active"),
         key=lambda item: (
@@ -1223,7 +1340,24 @@ def _operator_payload(server: GalleryHTTPServer) -> dict[str, Any]:
     for rank, item in enumerate(active, start=1):
         item["rank"] = rank
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "workflow_contract": {
+            "version": 1,
+            "actions": list(
+                getattr(
+                    getattr(server.operator_jobs, "runner", None),
+                    "supported_actions",
+                    (),
+                )
+            ),
+            "publication": {
+                "configured": bool(getattr(gallery_config, "s3_bucket", None)),
+                "bucket": getattr(gallery_config, "s3_bucket", None),
+                "prefix": getattr(gallery_config, "s3_prefix", ""),
+                "aws_profile": getattr(gallery_config, "aws_profile", None),
+                "aws_region": getattr(gallery_config, "aws_region", None),
+            },
+        },
         "generated_at": _timestamp(datetime.now(timezone.utc)),
         "active": active,
         "abandoned": sorted(
@@ -1231,9 +1365,18 @@ def _operator_payload(server: GalleryHTTPServer) -> dict[str, Any]:
             key=lambda item: item["design_id"],
         ),
         "graduated": sorted(
-            (item for item in designs if item["lifecycle_state"] == "graduated"),
+            (
+                item
+                for item in designs
+                if item["lifecycle_state"] == "graduated" and not item["released"]
+            ),
             key=lambda item: item["design_id"],
         ),
+        "released": sorted(
+            (item for item in designs if item["released"]),
+            key=lambda item: item["design_id"],
+        ),
+        "jobs": server.operator_jobs.list() if server.operator_jobs else [],
         "missing_design_ids": list(server.missing_design_ids),
     }
 
@@ -1600,12 +1743,15 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 "/static/operator.js",
                 "/static/operator.css",
                 "/api/operator/designs",
+                "/api/operator/jobs",
                 "/api/results.json",
                 "/api/results.csv",
                 "/operator/logout",
             }
-            if parsed.path in operator_paths or parsed.path.startswith(
-                "/operator-assets/"
+            if (
+                parsed.path in operator_paths
+                or parsed.path.startswith("/operator-assets/")
+                or parsed.path.startswith("/operator-workflow-assets/")
             ):
                 if not self._require_operator():
                     return
@@ -1631,7 +1777,15 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     )
                     return
                 if parsed.path == "/api/operator/designs":
+                    with self.server.lifecycle_lock:
+                        self.server.refresh()
                     self._json(HTTPStatus.OK, _operator_payload(self.server))
+                    return
+                if parsed.path == "/api/operator/jobs":
+                    self._json(
+                        HTTPStatus.OK,
+                        {"jobs": self.server.operator_jobs.list() if self.server.operator_jobs else []},
+                    )
                     return
                 if parsed.path.startswith("/operator-assets/"):
                     parts = parsed.path.strip("/").split("/")
@@ -1642,12 +1796,30 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     if design is None:
                         self._json(HTTPStatus.NOT_FOUND, {"error": "unknown design_id"})
                         return
-                    image = Path(str(design["pool_path"])) / "reference-design.png"
+                    image = Path(
+                        str(
+                            design.get("operator_image_path")
+                            or (Path(str(design["pool_path"])) / "reference-design.png")
+                        )
+                    )
                     self._send(
                         HTTPStatus.OK,
                         image.read_bytes(),
                         mimetypes.guess_type(image.name)[0] or "application/octet-stream",
                     )
+                    return
+                if parsed.path.startswith("/operator-workflow-assets/"):
+                    asset = self.server.operator_workflow_asset_by_url.get(parsed.path)
+                    if asset is None or not asset.is_file():
+                        self._json(
+                            HTTPStatus.NOT_FOUND,
+                            {"error": "operator workflow asset not found; refresh the dashboard"},
+                        )
+                        return
+                    media_type = mimetypes.guess_type(asset.name)[0] or "application/octet-stream"
+                    if asset.suffix == ".json":
+                        media_type = "application/json; charset=utf-8"
+                    self._send(HTTPStatus.OK, asset.read_bytes(), media_type)
                     return
                 if parsed.path == "/operator/logout":
                     self.send_response(HTTPStatus.SEE_OTHER)
@@ -1811,26 +1983,71 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 )
                 self.end_headers()
                 return
-            if parsed.path in {"/api/operator/action", "/api/operator/actions"}:
+            if parsed.path in {
+                "/api/operator/action",
+                "/api/operator/actions",
+                "/api/operator/workflow",
+                "/api/operator/workflows",
+            }:
                 if not self._require_operator():
                     return
                 try:
                     payload = json.loads(
                         self._read_body(
                             MAX_BATCH_BODY_BYTES
-                            if parsed.path == "/api/operator/actions"
+                            if parsed.path
+                            in {
+                                "/api/operator/actions",
+                                "/api/operator/workflow",
+                                "/api/operator/workflows",
+                            }
                             else MAX_BODY_BYTES
                         )
                     )
                     if not isinstance(payload, dict):
                         raise GalleryError("operator action payload must be a JSON object")
+                    if parsed.path == "/api/operator/workflow":
+                        operator_id = _identity(payload.get("operator_id"), "operator_id")
+                        if self.server.operator_jobs is None:
+                            raise GalleryError(
+                                "operator workflow is not configured; start the gallery with "
+                                "--project-root, --authoring-root, and --exchange-root"
+                            )
+                        result = {"job": self.server.operator_jobs.submit(payload, operator_id=operator_id)}
+                        self._json(HTTPStatus.ACCEPTED, result)
+                        return
+                    if parsed.path == "/api/operator/workflows":
+                        operator_id = _identity(payload.get("operator_id"), "operator_id")
+                        actions = payload.get("actions")
+                        if not isinstance(actions, list):
+                            raise GalleryError(
+                                "batch workflow actions must be a JSON array"
+                            )
+                        if self.server.operator_jobs is None:
+                            raise GalleryError(
+                                "operator workflow is not configured; start the gallery with "
+                                "--project-root, --authoring-root, and --exchange-root"
+                            )
+                        result = {
+                            "jobs": self.server.operator_jobs.submit_many(
+                                actions,
+                                operator_id=operator_id,
+                            )
+                        }
+                        self._json(HTTPStatus.ACCEPTED, result)
+                        return
                     with self.server.lifecycle_lock:
                         result = (
                             _operator_batch_action(self.server, payload)
                             if parsed.path == "/api/operator/actions"
                             else _operator_action(self.server, payload)
                         )
-                except (GalleryError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                except (
+                    GalleryError,
+                    OperatorWorkflowError,
+                    json.JSONDecodeError,
+                    UnicodeDecodeError,
+                ) as exc:
                     self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                     return
                 except Exception as exc:
@@ -1964,8 +2181,14 @@ def create_gallery_server(
         root=config.root.resolve(),
         index=config.index.resolve(),
         database=config.database.resolve(),
+        project_root=(
+            config.project_root.resolve() if config.project_root is not None else None
+        ),
         authoring_root=(
             config.authoring_root.resolve() if config.authoring_root is not None else None
+        ),
+        exchange_root=(
+            config.exchange_root.resolve() if config.exchange_root is not None else None
         ),
         abandoned_root=(
             config.abandoned_root.resolve()
@@ -1977,6 +2200,15 @@ def create_gallery_server(
             if config.graduation_root is not None
             else (config.root.parent / "Graduation Pool").resolve()
         ),
+        release_root=(
+            config.release_root.resolve()
+            if config.release_root is not None
+            else (config.root.parent / "Release Pool").resolve()
+        ),
+        s3_bucket=config.s3_bucket,
+        s3_prefix=config.s3_prefix,
+        aws_profile=config.aws_profile,
+        aws_region=config.aws_region,
         collections=config.collections,
         reviewer_access_code=config.reviewer_access_code,
         operator_access_code=config.operator_access_code,
@@ -1987,8 +2219,10 @@ def create_gallery_server(
     )
     assert resolved.abandoned_root is not None
     assert resolved.graduation_root is not None
+    assert resolved.release_root is not None
     resolved.abandoned_root.mkdir(parents=True, exist_ok=True)
     resolved.graduation_root.mkdir(parents=True, exist_ok=True)
+    resolved.release_root.mkdir(parents=True, exist_ok=True)
     snapshot = _load_concepts(resolved)
     store = GalleryStore(resolved.database, resolved.decisions_dir)
     reconciliation = store.reconcile(
