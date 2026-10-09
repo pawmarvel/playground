@@ -105,10 +105,12 @@ provenance and still create target-owned files. Recompute layout geometry and
 inspect preview and print results; equivalent ratios do not prove equivalent
 safe zones, physical scale, or vendor output.
 
-For MVP simplicity, the current manual tools remain authoritative. The
-[authoring automation design](AUTHORING_AUTOMATION_DESIGN.md#9-scenario-b-another-product-profile)
-defines the planned config-driven optimization; do not use its proposed
-commands until CLI help and the operations guide expose them.
+For the common post-scratch path, use the implemented config-driven coordinator
+in [operations section 11](MVP_OPERATIONS_GUIDE.md#11-config-driven-post-scratch-development-and-scaling).
+It validates and snapshots a source bundle, derives target-owned prompt inputs,
+runs art/smoke/release evidence to explicit review gates, and then hands off to
+the existing layout-through-publication workflow. Low-level commands remain the
+fallback for unusual experiments and recovery.
 
 ## Scale a design category or franchise
 
@@ -209,13 +211,13 @@ not selected or otherwise protected. Published revisions are immutable;
 retirement is a catalog/application decision, not deletion of production
 objects.
 
-## Planned workflow optimization
+## Workflow automation boundary
 
-The [authoring automation design](AUTHORING_AUTOMATION_DESIGN.md) proposes one
-config-driven coordinator for post-scratch new designs, profile adaptation,
-and category variants. It keeps the same human checkpoints and public bundle
-contract. Until each milestone is implemented, use the current operator GUI
-and canonical CLI commands above. Automation must reduce path/configuration
-mistakes; it must not automatically approve aesthetics or weaken fixture,
-layout, print, or publication review.
+The [authoring automation design](AUTHORING_AUTOMATION_DESIGN.md) defines the
+implemented coordinator for post-scratch new designs, profile adaptation, and
+category variants. It automates only deterministic setup and evidence
+execution through pet release review. Human approvals remain mandatory, and
+layout, print, graduation, publication, and FE activation keep their existing
+ownership. This boundary reduces typing and rerun mistakes without treating an
+automatic hard-gate pass as aesthetic approval.
 

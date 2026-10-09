@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pawmarvel.com/schemas/authoring-workflow-v1.schema.json",
+  "title": "PawMarvel private authoring workflow",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "workflow_id", "scenario", "created_at", "created_by",
+    "project_root", "authoring_root", "target", "source", "inputs",
+    "generation", "personalization", "quality_gates", "execution", "ids", "warnings"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "workflow_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*[a-z0-9]$|^[a-z0-9]$"},
+    "scenario": {"enum": ["new-design", "profile-expansion", "category-variant"]},
+    "created_at": {"type": "string"},
+    "created_by": {"type": "string", "minLength": 1},
+    "project_root": {"type": "string", "minLength": 1},
+    "authoring_root": {"type": "string", "minLength": 1},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["design_id", "product_profile_id", "product_profile"],
+      "properties": {
+        "design_id": {"type": "string", "minLength": 1},
+        "product_profile_id": {"type": "string", "minLength": 1},
+        "product_profile": {"type": "string", "minLength": 1}
+      }
+    },
+    "source": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bundle", "bundle_manifest_sha256", "template_id", "bundle_revision", "design_id", "product_profile_id"],
+          "properties": {
+            "bundle": {"type": "string", "minLength": 1},
+            "bundle_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "template_id": {"type": "string", "minLength": 1},
+            "bundle_revision": {"type": "integer", "minimum": 1},
+            "design_id": {"type": "string", "minLength": 1},
+            "product_profile_id": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["art_prompt", "art_empty_canvas", "pet_prompt", "references", "variant_delta", "evaluation_protocol", "fixture_sets"],
+      "properties": {
+        "art_prompt": {"type": ["string", "null"]},
+        "art_empty_canvas": {"type": "boolean"},
+        "pet_prompt": {"type": "string", "minLength": 1},
+        "references": {"type": "array", "maxItems": 4, "items": {"type": "string", "minLength": 1}},
+        "variant_delta": {"type": ["string", "null"]},
+        "evaluation_protocol": {"type": "string", "minLength": 1},
+        "fixture_sets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["smoke", "release"],
+          "properties": {
+            "smoke": {"$ref": "#/$defs/fixtureSelection"},
+            "release": {"$ref": "#/$defs/fixtureSelection"}
+          }
+        }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["art", "pet"],
+      "properties": {
+        "art": {"$ref": "#/$defs/generation"},
+        "pet": {"$ref": "#/$defs/generation"}
+      }
+    },
+    "personalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name_mode", "representative_pet_name"],
+      "properties": {
+        "name_mode": {"enum": ["layout-text", "embedded-in-pet", "none"]},
+        "representative_pet_name": {"type": ["string", "null"]}
+      }
+    },
+    "quality_gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scratch_approved"],
+      "properties": {"scratch_approved": {"type": "boolean"}}
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_paid_calls"],
+      "properties": {
+        "max_paid_calls": {"type": "integer", "minimum": 1}
+      }
+    },
+    "ids": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["art_experiment", "art_attempt", "art_review", "pet_experiment", "smoke_review", "release_review"],
+      "properties": {
+        "art_experiment": {"type": "string"},
+        "art_attempt": {"type": "string"},
+        "art_review": {"type": "string"},
+        "pet_experiment": {"type": "string"},
+        "smoke_review": {"type": "string"},
+        "release_review": {"type": "string"}
+      }
+    },
+    "warnings": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "fixtureSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest", "selection"],
+      "properties": {
+        "manifest": {"type": "string", "minLength": 1},
+        "selection": {"type": "string", "minLength": 1}
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "quality"],
+      "properties": {
+        "provider": {"enum": ["openai", "gemini", "local"]},
+        "model": {"type": "string", "minLength": 1},
+        "quality": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

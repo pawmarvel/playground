@@ -1,8 +1,9 @@
 # CLI purpose:
-# Manage immutable offline art, pet-runtime, and layout experiments; compare
-# attempts, keep evaluation/decision review packets together, prepare print
-# finalists, graduate and trace selections, record publications, safely clean
-# up losing artifacts, and initialize shared and per-design private configs.
+# Manage immutable offline art, pet-runtime, and layout experiments; coordinate
+# config-driven new-design/profile/category evidence workflows; compare attempts,
+# keep evaluation/decision review packets together, prepare print finalists,
+# graduate and trace selections, record publications, safely clean up losing
+# artifacts, and initialize shared and per-design private configs.
 
 from __future__ import annotations
 
@@ -29,6 +30,17 @@ from .operation_config import (
     UPSCALE_BACKENDS,
     write_operation_config,
     write_shared_config,
+)
+from .scaling_workflow import (
+    CHECKPOINTS,
+    REVIEW_GATES,
+    SCENARIOS,
+    ScalingWorkflowError,
+    initialize_workflow,
+    plan_workflow,
+    record_workflow_review,
+    run_workflow,
+    workflow_status,
 )
 
 
@@ -129,6 +141,145 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="replace an existing design/product config",
+    )
+
+    workflow = commands.add_parser(
+        "workflow",
+        help=(
+            "initialize, plan, and run config-driven art/pet evidence for a new "
+            "design, profile expansion, or category variant"
+        ),
+    )
+    workflow_commands = workflow.add_subparsers(
+        dest="workflow_command", required=True
+    )
+    workflow_init = workflow_commands.add_parser(
+        "init",
+        help="snapshot editable private inputs and write authoring-workflow-v1",
+    )
+    workflow_init.add_argument(
+        "--project-root", type=_path_argument, default=DEFAULT_PROJECT_ROOT
+    )
+    workflow_init.add_argument("--workflow-id", required=True)
+    workflow_init.add_argument("--scenario", choices=SCENARIOS, required=True)
+    workflow_init.add_argument("--design-id", required=True)
+    workflow_init.add_argument(
+        "--product-profile", type=_path_argument, required=True
+    )
+    workflow_init.add_argument("--art-prompt", type=_path_argument)
+    workflow_init.add_argument(
+        "--empty-canvas",
+        action="store_true",
+        help="use deterministic transparent preview art instead of an art prompt/API call",
+    )
+    workflow_init.add_argument("--pet-prompt", type=_path_argument)
+    workflow_init.add_argument(
+        "--reference-design", type=_path_argument, action="append", default=[]
+    )
+    workflow_init.add_argument("--source-bundle", type=_path_argument)
+    workflow_init.add_argument("--variant-delta", type=_path_argument)
+    workflow_init.add_argument(
+        "--name-mode",
+        choices=NAME_MODES,
+        help="default layout-text for new designs; source bundle mode for derived designs",
+    )
+    workflow_init.add_argument("--pet-name")
+    workflow_init.add_argument(
+        "--art-provider", choices=IMAGE_PROVIDERS, default="openai"
+    )
+    workflow_init.add_argument("--art-model")
+    workflow_init.add_argument(
+        "--art-quality", choices=CLI_GENERATION_QUALITIES, default="high"
+    )
+    workflow_init.add_argument(
+        "--pet-provider",
+        choices=IMAGE_PROVIDERS,
+        help="default OpenAI for new designs; source runtime provider for derived designs",
+    )
+    workflow_init.add_argument("--pet-model")
+    workflow_init.add_argument(
+        "--pet-quality",
+        choices=CLI_GENERATION_QUALITIES,
+        help="default low for new designs; source runtime quality for derived designs",
+    )
+    workflow_init.add_argument(
+        "--smoke-fixture-set",
+        type=_path_argument,
+        default=(
+            DEFAULT_PROJECT_ROOT
+            / "examples/authoring/fixture-sets/mvp-pets-smoke-v1/fixture-set.json"
+        ),
+    )
+    workflow_init.add_argument(
+        "--release-fixture-set",
+        type=_path_argument,
+        default=(
+            DEFAULT_PROJECT_ROOT
+            / "examples/authoring/fixture-sets/mvp-pets-v1/fixture-set.json"
+        ),
+    )
+    workflow_init.add_argument(
+        "--evaluation-protocol",
+        type=_path_argument,
+        default=(
+            DEFAULT_PROJECT_ROOT
+            / "examples/authoring/evaluation-protocols/mvp-image-v1.json"
+        ),
+    )
+    workflow_init.add_argument("--smoke-fixture-count", type=int)
+    workflow_init.add_argument("--release-fixture-count", type=int)
+    workflow_init.add_argument(
+        "--max-paid-calls",
+        type=int,
+        default=24,
+        help="maximum image API calls allowed by any plan for this workflow",
+    )
+    workflow_init.add_argument(
+        "--scratch-approved",
+        action="store_true",
+        help=(
+            "attest that representative art/pet scratch output was visually reviewed; "
+            "required before a paid execution plan can be created"
+        ),
+    )
+    workflow_init.add_argument("--force", action="store_true")
+
+    workflow_plan = workflow_commands.add_parser(
+        "plan",
+        help="write a no-cost immutable task/call plan through a review checkpoint",
+    )
+    workflow_plan.add_argument("--spec", type=_path_argument, required=True)
+    workflow_plan.add_argument(
+        "--checkpoint", choices=CHECKPOINTS, default="smoke-review"
+    )
+    workflow_plan.add_argument("--output", type=_path_argument)
+
+    workflow_run = workflow_commands.add_parser(
+        "run",
+        help="execute a reviewed plan and reconcile matching completed work",
+    )
+    workflow_run.add_argument("--plan", type=_path_argument, required=True)
+
+    workflow_approve = workflow_commands.add_parser(
+        "approve",
+        help="record a hash-bound human review before the next paid phase",
+    )
+    workflow_approve.add_argument("--spec", type=_path_argument, required=True)
+    workflow_approve.add_argument("--gate", choices=REVIEW_GATES, required=True)
+    workflow_approve.add_argument("--reviewed-by", default=_current_user())
+    workflow_approve.add_argument("--notes", required=True)
+    workflow_approve.add_argument(
+        "--accept-warnings",
+        action="store_true",
+        help="explicitly accept evaluation coverage warnings after inspecting them",
+    )
+
+    workflow_status_parser = workflow_commands.add_parser(
+        "status",
+        help="show completed evidence, pending quality gate, and the next operation",
+    )
+    workflow_status_parser.add_argument(
+        "--spec", type=_path_argument, required=True
     )
 
     fixture = commands.add_parser(
@@ -458,6 +609,80 @@ def main(argv: Sequence[str] | None = None) -> int:
                 upscale_backend=args.upscale_backend,
                 force=args.force,
             )
+        elif args.command == "workflow":
+            if args.workflow_command == "init":
+                result = initialize_workflow(
+                    project_root=args.project_root,
+                    workflow_id=args.workflow_id,
+                    scenario=args.scenario,
+                    design_id=args.design_id,
+                    product_profile=args.product_profile,
+                    art_prompt=args.art_prompt,
+                    pet_prompt=args.pet_prompt,
+                    references=args.reference_design,
+                    source_bundle=args.source_bundle,
+                    variant_delta=args.variant_delta,
+                    name_mode=args.name_mode,
+                    pet_name=args.pet_name,
+                    art_provider=args.art_provider,
+                    art_model=args.art_model,
+                    art_quality=args.art_quality,
+                    pet_provider=args.pet_provider,
+                    pet_model=args.pet_model,
+                    pet_quality=args.pet_quality,
+                    smoke_fixture_set=args.smoke_fixture_set,
+                    release_fixture_set=args.release_fixture_set,
+                    evaluation_protocol=args.evaluation_protocol,
+                    smoke_fixture_count=args.smoke_fixture_count,
+                    release_fixture_count=args.release_fixture_count,
+                    scratch_approved=args.scratch_approved,
+                    created_by=_current_user(),
+                    empty_canvas=args.empty_canvas,
+                    max_paid_calls=args.max_paid_calls,
+                    force=args.force,
+                )
+                specification = json.loads(result.read_text(encoding="utf-8"))
+                for warning in specification.get("warnings", []):
+                    print(f"WARNING: {warning}", file=sys.stderr, flush=True)
+            elif args.workflow_command == "plan":
+                result = plan_workflow(
+                    spec_path=args.spec,
+                    checkpoint=args.checkpoint,
+                    output=args.output,
+                )
+                plan = json.loads(result.read_text(encoding="utf-8"))
+                print(
+                    "Workflow plan: "
+                    f"tasks={len(plan['tasks'])}; "
+                    f"estimated_paid_calls={plan['estimated_paid_calls']}; "
+                    f"checkpoint={plan['checkpoint']}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                for warning in plan.get("warnings", []):
+                    print(f"WARNING: {warning}", file=sys.stderr, flush=True)
+            elif args.workflow_command == "run":
+                result = run_workflow(
+                    plan_path=args.plan,
+                    progress=lambda message: print(
+                        message, file=sys.stderr, flush=True
+                    ),
+                )
+            elif args.workflow_command == "approve":
+                result = record_workflow_review(
+                    spec_path=args.spec,
+                    gate=args.gate,
+                    reviewed_by=args.reviewed_by,
+                    notes=args.notes,
+                    accept_warnings=args.accept_warnings,
+                )
+            elif args.workflow_command == "status":
+                print(json.dumps(workflow_status(spec_path=args.spec), indent=2))
+                return 0
+            else:
+                raise ScalingWorkflowError(
+                    f"unsupported workflow command: {args.workflow_command!r}"
+                )
         elif args.command == "validate-fixture-set":
             print(json.dumps(load_fixture_set(args.fixture_set).summary(), indent=2))
             return 0

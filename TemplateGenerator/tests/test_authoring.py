@@ -294,6 +294,10 @@ class AuthoringLifecycleTests(unittest.TestCase):
         assembly_record = json.loads(evaluation.read_text())
         self.assertEqual(assembly_record["candidates"][0]["pet_name"], "SAUSAGE")
         self.assertEqual(
+            assembly_record["candidates"][0]["pet_attempt"],
+            pet_attempt.resolve().relative_to(product.resolve()).as_posix(),
+        )
+        self.assertEqual(
             (product / "reviews" / "assembly" / "assembly-eval" / "artifacts" / "preview.png").read_bytes(),
             (layout_attempt / "outputs" / "preview.png").read_bytes(),
         )
@@ -1707,6 +1711,130 @@ class AuthoringLifecycleTests(unittest.TestCase):
                 attempt_id_prefix="release",
             )
         mocked_run.assert_not_called()
+
+    def test_benchmark_resume_reuses_only_exact_immutable_attempts(self) -> None:
+        experiment = self._experiment(
+            "pet", "pet-resume-v01", self.pet_prompt, references=[]
+        )
+        second_pet = make_image(
+            self.root / "resume-pet-two.png", color=(80, 90, 100, 255)
+        )
+        fixture_set = self.root / "resume-fixture-set.json"
+        atomic_json(
+            fixture_set,
+            {
+                "schema_version": 2,
+                "fixture_set_id": "resume-smoke-v1",
+                "tier": "smoke",
+                "attempts_per_fixture": 1,
+                "fixtures": [
+                    {
+                        "id": "pet",
+                        "pet_image": self.pet.name,
+                        "sha256": sha256(self.pet),
+                        "species": "dog",
+                        "breed": {"id": "dog", "label": "Dog", "mixed": False},
+                        "size_class": "small",
+                        "morphology": ["compact"],
+                        "coat": {"length": "short", "texture": "smooth", "tone": "medium"},
+                        "capture": {"framing": "full-body", "view": "front", "subject_coverage": "isolated", "background_complexity": "simple"},
+                        "risk_tags": ["edge-detail"],
+                        "rights": {"source_kind": "test", "license": "test-only", "reviewed": False, "intended_use": "test"},
+                    },
+                    {
+                        "id": "pet-two",
+                        "pet_image": second_pet.name,
+                        "sha256": sha256(second_pet),
+                        "species": "dog",
+                        "breed": {"id": "dog-two", "label": "Dog Two", "mixed": False},
+                        "size_class": "medium",
+                        "morphology": ["compact"],
+                        "coat": {"length": "short", "texture": "smooth", "tone": "medium"},
+                        "capture": {"framing": "full-body", "view": "front", "subject_coverage": "isolated", "background_complexity": "simple"},
+                        "risk_tags": ["edge-detail"],
+                        "rights": {"source_kind": "test", "license": "test-only", "reviewed": False, "intended_use": "test"},
+                    },
+                ],
+            },
+        )
+        selection = write_fixture_selection(
+            fixture_set,
+            output=self.root / "resume-selection.json",
+            fixture_count=2,
+        )
+        experiment_record = json.loads(
+            (experiment / "experiment.json").read_text(encoding="utf-8")
+        )
+
+        def create_attempt(**kwargs: object) -> Path:
+            attempt = experiment / "attempts" / str(kwargs["attempt_id"])
+            input_pet = Path(str(kwargs["pet_image"]))
+            output = make_transparent_mark(
+                attempt / "outputs" / "transformed-pet.png",
+                size=(816, 816),
+            )
+            atomic_json(
+                attempt / "run.json",
+                {
+                    "status": "succeeded",
+                    "experiment_sha256": sha256(experiment / "experiment.json"),
+                    "input_pet_sha256": sha256(input_pet),
+                    "resolved_generation": experiment_record["generation"],
+                    "outputs": [
+                        {
+                            "path": "outputs/transformed-pet.png",
+                            "sha256": sha256(output),
+                            "bytes": output.stat().st_size,
+                        }
+                    ],
+                },
+            )
+            return attempt
+
+        with patch(
+            "pawmarvel_generator.authoring.run_attempt", side_effect=create_attempt
+        ):
+            first = benchmark(
+                experiment=experiment,
+                fixture_set=fixture_set,
+                fixture_selection=selection,
+                evaluation_protocol=self.protocol,
+                attempts_per_fixture=1,
+                attempt_id_prefix="smoke",
+            )
+        with patch("pawmarvel_generator.authoring.run_attempt") as paid_call:
+            resumed = benchmark(
+                experiment=experiment,
+                fixture_set=fixture_set,
+                fixture_selection=selection,
+                evaluation_protocol=self.protocol,
+                attempts_per_fixture=1,
+                attempt_id_prefix="smoke",
+                resume_existing=True,
+            )
+        self.assertEqual(resumed, first)
+        paid_call.assert_not_called()
+
+        record_path = first[0] / "run.json"
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        record["input_pet_sha256"] = "0" * 64
+        atomic_json(record_path, record)
+        with (
+            patch("pawmarvel_generator.authoring.run_attempt") as paid_call,
+            self.assertRaisesRegex(
+                AuthoringError, "resume preflight found conflicting immutable attempts"
+            ),
+        ):
+            benchmark(
+                experiment=experiment,
+                fixture_set=fixture_set,
+                fixture_selection=selection,
+                evaluation_protocol=self.protocol,
+                attempts_per_fixture=1,
+                attempt_id_prefix="smoke",
+                resume_existing=True,
+            )
+        paid_call.assert_not_called()
 
     def test_same_design_uses_independent_product_workspaces(self) -> None:
         second_profile = write_product_profile(

@@ -203,18 +203,17 @@ Prioritize only features required by rejected or slow-to-author designs:
 
 Automatic detection remains advisory; operators retain final control.
 
-#### Config-driven design scaling proposal
+#### Config-driven design scaling
 
-[Authoring automation](AUTHORING_AUTOMATION_DESIGN.md) defines the staged
-implementation for post-scratch benchmarks, bounded layout proposals, approved
-design profile expansion and category alternatives. The deterministic bounded
-layout proposer is now available; the broader workflow coordinator remains
-future work. All stages reuse the current bundle/FE contract and manual quality
-decisions. The proposal records its current review status and implementation
-exit criteria directly; design-review history remains in Git rather than a
-separate documentation artifact.
+[Authoring automation](AUTHORING_AUTOMATION_DESIGN.md) defines the implemented
+post-scratch art/smoke/release coordinator, bounded layout proposals, and MVP
+initializers for approved-design profile expansion and category alternatives.
+All stages reuse the current bundle/FE contract and manual quality decisions.
+Guided handoff from release approval through decisions/layout/package remains
+future work; design-review history remains in Git rather than a separate
+documentation artifact.
 
-Its M0–M5 milestones pull forward the necessary reports, renderer metrics and
+Remaining milestones pull forward the necessary reports, renderer metrics and
 service extractions from stages 3 and 5. Keep stage 1 vendor/customer-data work
 on its existing priority; faster authoring does not qualify a vendor output.
 Broader discovery, rotation, shadows, SVG, new providers and automatic aesthetic

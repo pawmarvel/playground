@@ -35,7 +35,7 @@ supported path is:
 5. review assembly, prepare print, graduate, bundle, and publish.
 
 Sections 10 through 17 are not prerequisites for that first bundle. They cover
-post-preview improvement, the planned approved-design profile-port workflow,
+post-preview improvement, the config-driven scaling workflow,
 consumer verification, cleanup, whole-pipeline debugging, focused
 troubleshooting, and alternate providers. Create additional art, pet, or layout
 candidates only when the current evidence gives a reason; the first run does
@@ -58,7 +58,7 @@ page, and select **Refresh**.
 | §8 print finalist | Approve composed QA, generate the finalist, and display final/debug print images for a separate full-resolution review | None on the normal path. Advanced template-reuse diagnostics remain CLI-only. |
 | §9 graduation, bundle, release, publication | After print approval, graduate/build the local bundle and release; then publish/verify and move to Released | Configure S3 before gallery startup and run `aws sso login` when the session expires. Restart after shared-config changes. |
 | §10 improvement | Before publication, **Redo / improve** retires the selected stage and downstream chain, then resumes normal GUI iteration | A published release is immutable; initialize a new post-production authoring/config iteration and return after its first evidence exists. |
-| §§11–17 profile port, FE verification, cleanup, debug, providers, fonts | Evidence becomes visible after refresh where applicable | These optional/recovery/maintenance procedures remain CLI-led; follow their named sections. |
+| §§11–17 workflow coordinator, FE verification, cleanup, debug, providers, fonts | Evidence becomes visible after refresh where applicable | These optional/recovery/maintenance procedures remain CLI-led; follow their named sections. |
 
 The GUI and CLI write the same artifacts. Do not perform a GUI action and its
 equivalent CLI command simultaneously for the same design/product.
@@ -68,7 +68,7 @@ equivalent CLI command simultaneously for the same design/product.
 - Scope every authoring workspace by both design and product profile:
   `authoring/<design-id>/<product-profile-id>/`.
 - Develop and own art and pet transformation independently inside each
-  design-product workspace. The planned profile-port workflow may copy an
+  design-product workspace. The config-driven profile workflow may copy an
   approved source profile's intent and configuration to bootstrap a target,
   but it never binds the target to another product root. Differing geometry and
   product QA remain target-owned and independently reviewed.
@@ -2450,35 +2450,196 @@ These successor paths preserve the first bundle and its evidence. They also
 avoid regenerating unaffected art or pet artifacts merely because a downstream
 layout or print issue changed.
 
-## 11. Planned: scale an approved design to another product profile
+## 11. Config-driven post-scratch development and scaling
 
-Profile expansion and category alternatives are planned in the
-[config-driven authoring automation proposal](AUTHORING_AUTOMATION_DESIGN.md).
-No profile-port orchestration command is implemented yet. Until milestone M3
-ships, use sections 3–9 to author the target as an independent design-product.
+`pawmarvel-author workflow` removes repeated path/model/fixture typing for the
+paid art and pet-evidence stages. It supports `new-design`,
+`profile-expansion`, and `category-variant`. It stops at human checkpoints; it
+does not approve images, select a layout, graduate, publish, or change the FE
+bundle contract.
 
-The planned workflow selects an exact production-approved source bundle from
-a verified published release and initializes one target config. It works even
-when the source authoring workspace is unavailable. The normal path generates
-new art for a different aspect ratio; the optional equal-ratio path copies or
-resizes art deterministically. Both paths run target pet fixtures, seed and
-review layout, inspect print output, and produce an ordinary self-contained
-bundle with the existing FE contract.
-
-The target continues to own its inputs:
+The private coordinator writes:
 
 ```text
-authoring/<design-id>/<source-profile-id>/       # existing source, if retained
-authoring/<design-id>/<target-profile-id>/       # independent target work
-exchange/bundles/<design-id>--<target-profile-id>/vNNNNNN/
+work/workflows/<workflow-id>/
+  workflow.json                 # editable draft identity/settings, then pinned by plans
+  inputs/                       # copied prompts, references, profile, fixtures, protocol
+  approvals/{scratch,candidates,release}.json
+  plans/<plan-id>.json          # exact hashes, tasks, call estimate and review evidence
+  runs/<plan-id>.json           # durable progress/error/reconciliation record
+
+work/authoring/<design-id>/<profile-id>/
+  experiments/...               # normal immutable artifacts used downstream
+  reviews/...
 ```
 
-The proposal covers input configuration, quality checkpoints, selective reruns,
-source provenance, recovery, cleanup, and milestone exit criteria. Candidate
-generation never accepts artwork on the operator's behalf. Review ratio reflow,
-pet identity/style, all three name modes, typography, fixture coverage and the
-print finalist before graduation. Existing manual iteration and publication
-commands remain available during the incremental rollout.
+Workflow/private files never enter a bundle. Every target still owns an
+independent `work/authoring/<design-id>/<profile-id>/` and produces the same
+`bundle-v1` consumed by FE.
+
+### 11.1 Common checkpoint loop
+
+For a new design whose prompt drafts already passed scratch inspection:
+
+```bash
+typeset -a PAWMARVEL_WORKFLOW_NAME_ARGS=()
+case "$PAWMARVEL_NAME_MODE" in
+  embedded-in-pet) PAWMARVEL_WORKFLOW_NAME_ARGS=(--pet-name "$PAWMARVEL_PET_NAME") ;;
+  layout-text|none) : ;;
+  *) printf 'unsupported PAWMARVEL_NAME_MODE: %s\n' "$PAWMARVEL_NAME_MODE" >&2; return 2 2>/dev/null || exit 2 ;;
+esac
+
+PAWMARVEL_WORKFLOW_SPEC="$($PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author workflow init \
+  --project-root "$PAWMARVEL_PROJECT" \
+  --workflow-id "$PAWMARVEL_DESIGN_ID--$PAWMARVEL_PRODUCT_PROFILE_ID--v01" \
+  --scenario new-design \
+  --design-id "$PAWMARVEL_DESIGN_ID" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  --art-prompt "$PAWMARVEL_ART_PROMPT" \
+  --pet-prompt "$PAWMARVEL_PET_PROMPT" \
+  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
+  --name-mode "$PAWMARVEL_NAME_MODE" \
+  "${PAWMARVEL_WORKFLOW_NAME_ARGS[@]}" \
+  --art-provider "$PAWMARVEL_ART_PROVIDER" \
+  --art-model "$PAWMARVEL_ART_MODEL" \
+  --art-quality "$PAWMARVEL_ART_QUALITY" \
+  --pet-provider "$PAWMARVEL_PET_PROVIDER" \
+  --pet-model "$PAWMARVEL_PET_MODEL" \
+  --pet-quality "$PAWMARVEL_PET_QUALITY" \
+  --smoke-fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET" \
+  --release-fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL" \
+  --scratch-approved)"
+
+PAWMARVEL_SMOKE_PLAN="$($PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author workflow plan \
+  --spec "$PAWMARVEL_WORKFLOW_SPEC" \
+  --checkpoint smoke-review)"
+cat "$PAWMARVEL_SMOKE_PLAN"
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" workflow run \
+  --plan "$PAWMARVEL_SMOKE_PLAN"
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" workflow status \
+  --spec "$PAWMARVEL_WORKFLOW_SPEC"
+```
+
+Inspect the art and smoke comparison PNGs plus latency, failures, coverage and
+warnings in their `evaluation.json` files. Only after accepting them:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" workflow approve \
+  --spec "$PAWMARVEL_WORKFLOW_SPEC" \
+  --gate candidates \
+  --reviewed-by application-owner \
+  --notes "Art candidate and pet smoke behavior accepted"
+
+PAWMARVEL_RELEASE_PLAN="$($PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author workflow plan \
+  --spec "$PAWMARVEL_WORKFLOW_SPEC" \
+  --checkpoint release-review)"
+cat "$PAWMARVEL_RELEASE_PLAN"
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" workflow run \
+  --plan "$PAWMARVEL_RELEASE_PLAN"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" workflow approve \
+  --spec "$PAWMARVEL_WORKFLOW_SPEC" \
+  --gate release \
+  --reviewed-by application-owner \
+  --notes "Release fixtures, latency, failures and coverage accepted" \
+  --accept-warnings
+```
+
+Omit `--accept-warnings` when the evaluation has none. The option never turns a
+failed hard gate into a pass. A release plan is rejected until the candidates
+approval exists. A plan exceeding `--max-paid-calls` is rejected before an API
+call. Re-running the same plan reconciles exact succeeded attempts; conflicting
+attempt bytes or an unknown `.partial` submission stop before another call.
+
+After release approval, record the ordinary art and pet decisions from these
+review packets, then resume sections 7–9 for deterministic layout proposal,
+layout/assembly decisions, print, graduation, bundle, release, and S3. The
+private workflow approval is a spending/quality checkpoint; it does not replace
+the existing decision files required by graduation.
+
+### 11.2 Scale an approved design to another product profile
+
+Use the exact locally cached, validated production bundle revision—not a
+mutable `latest` path. Different aspect ratio is the normal case:
+
+```bash
+PAWMARVEL_SOURCE_BUNDLE="$PAWMARVEL_EXCHANGE/bundles/$PAWMARVEL_SOURCE_TEMPLATE_ID/$PAWMARVEL_SOURCE_REVISION"
+
+PAWMARVEL_WORKFLOW_SPEC="$($PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author workflow init \
+  --project-root "$PAWMARVEL_PROJECT" \
+  --workflow-id "$PAWMARVEL_DESIGN_ID--$PAWMARVEL_PRODUCT_PROFILE_ID--v01" \
+  --scenario profile-expansion \
+  --design-id "$PAWMARVEL_DESIGN_ID" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  --source-bundle "$PAWMARVEL_SOURCE_BUNDLE" \
+  --smoke-fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET" \
+  --release-fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL")"
+```
+
+Initialization validates the source bundle, copies its prompt/reference inputs,
+inherits its pet runtime and name mode, and appends a target-profile directive
+to the copied art prompt. It does not depend on the source authoring tree after
+initialization. Inspect/edit only the copied inputs beneath the workflow,
+scratch-test target art and representative pets, then bind those exact bytes:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" workflow approve \
+  --spec "$PAWMARVEL_WORKFLOW_SPEC" \
+  --gate scratch \
+  --reviewed-by application-owner \
+  --notes "Target-ratio art and pet scratch outputs accepted"
+```
+
+Run the common smoke/release loop in 11.1, then create a target-owned layout and
+print result. Never stretch, crop, or rebind source-profile art/layout as target
+evidence. Even an equal-ratio target still requires target safe-zone, physical
+scale, fixture, layout, and print review in this MVP path.
+
+### 11.3 Scale a category/franchise from an approved base
+
+Create a small target delta file:
+
+```json
+{
+  "preserve": ["illustration medium", "typographic hierarchy"],
+  "change": ["headline to PORCH SUPERVISOR", "porch-themed corner motif"],
+  "forbid": ["source pet identity", "stale headline or props"]
+}
+```
+
+Initialize with a new design ID, the approved source bundle, the delta, and the
+target finished-design reference(s):
+
+```bash
+PAWMARVEL_WORKFLOW_SPEC="$($PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author workflow init \
+  --project-root "$PAWMARVEL_PROJECT" \
+  --workflow-id "$PAWMARVEL_DESIGN_ID--$PAWMARVEL_PRODUCT_PROFILE_ID--v01" \
+  --scenario category-variant \
+  --design-id "$PAWMARVEL_DESIGN_ID" \
+  --product-profile "$PAWMARVEL_PROFILE" \
+  --source-bundle "$PAWMARVEL_SOURCE_BUNDLE" \
+  --variant-delta "$PAWMARVEL_DESIGN_INPUT/variant-delta.json" \
+  "${PAWMARVEL_REFERENCE_ARGS[@]}" \
+  --smoke-fixture-set "$PAWMARVEL_SMOKE_FIXTURE_SET" \
+  --release-fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
+  --evaluation-protocol "$PAWMARVEL_EVALUATION_PROTOCOL")"
+```
+
+The copied prompts contain deterministic Preserve/Change/Forbid requirements.
+They are drafts, not proof that the model follows the delta. Edit and scratch-
+test them, record the scratch approval, then use the same common checkpoint
+loop. A category variant cannot silently reuse the source finished reference;
+at least one target reference is required. The resulting product remains a
+fully independent bundle.
+
+For a new no-reference design, omit every reference argument. For deterministic
+transparent art, replace `--art-prompt ...` with `--empty-canvas`. All three
+personalization modes are supported; `embedded-in-pet` requires `{{PET_NAME}}`
+in the pet prompt and a representative `--pet-name`, while the other modes
+forbid that token. Use a successor workflow ID for changed approved inputs;
+never overwrite an executed plan or immutable experiment.
 
 ## 12. Verify bundle consumption and FE-independent debugging
 

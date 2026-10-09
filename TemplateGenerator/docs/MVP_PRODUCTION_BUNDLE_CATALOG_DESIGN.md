@@ -1586,15 +1586,14 @@ goal, the operator creates a series that changes one variable at a time. The
 operator records the intended comparison in the experiment ID and review notes;
 the MVP schema does not add a second change-tracking vocabulary.
 
-### 8.13 Planned authoring automation and approved-design expansion
+### 8.13 Authoring automation and approved-design expansion
 
-Implementation planning for profile expansion now lives in
-[the authoring automation proposal](AUTHORING_AUTOMATION_DESIGN.md). It also
+The private implementation and remaining roadmap for profile expansion live in
+[the authoring automation design](AUTHORING_AUTOMATION_DESIGN.md). It also
 covers post-scratch new-design benchmarks, layout proposals and category
-alternatives. The proposal includes the private config/plan interface,
-implementation milestones, exit criteria and a
-record of resolved review requirements in the proposal itself. The workflow
-commands are not implemented yet.
+alternatives. The implemented workflow snapshots inputs and runs through
+release evidence with hash-bound human gates. Downstream decisions, layout,
+print, bundle, and publication retain their existing contracts and tools.
 
 Production compatibility and ownership remain governed by this document:
 
@@ -1789,18 +1788,19 @@ roles/order, and renderer/name semantics.
     delete draft or selected paths. It never operates on exchange or S3 paths;
     production retirement remains outside this command.
 
-### Planned authoring automation extension
+### Authoring automation extension
 
-Follow M0–M5 in [the automation proposal](AUTHORING_AUTOMATION_DESIGN.md).
-Deliver the post-scratch benchmark runner first, then layout assistance,
-published-source profile expansion, category derivation and package coordination.
-Use current manual downstream commands while each increment is introduced.
+Follow the implemented/remaining milestone table in
+[the automation design](AUTHORING_AUTOMATION_DESIGN.md). The post-scratch
+benchmark runner, layout assistance, and MVP source-bundle initializers are
+available. Continue using current downstream commands for decisions, layout
+acceptance, print, graduation, packaging, and publication until guided handoff
+is implemented.
 
 Each milestone must retain the existing public bundle/release/layout contracts,
-human quality decisions and independent target ownership. Remove planned
-warnings only after the corresponding commands, recovery tests, compatibility
-tests and operator examples are available. The new proposal is the single
-execution plan; this document remains the FE contract source of truth.
+human quality decisions and independent target ownership. This document
+remains the FE contract source of truth; private workflow schemas cannot alter
+it.
 
 ### Keep unchanged
 

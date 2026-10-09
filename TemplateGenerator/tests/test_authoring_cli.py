@@ -15,6 +15,36 @@ from pawmarvel_generator.authoring_cli import DEFAULT_PROJECT_ROOT, build_parser
 
 
 class AuthoringCliTests(unittest.TestCase):
+    def test_scaling_workflow_commands_parse_quality_gates_and_empty_canvas(self) -> None:
+        initialized = build_parser().parse_args(
+            [
+                "workflow",
+                "init",
+                "--workflow-id", "empty-shirt-v01",
+                "--scenario", "new-design",
+                "--design-id", "empty-shirt",
+                "--product-profile", "profile.json",
+                "--pet-prompt", "pet-transform-gpt.md",
+                "--empty-canvas",
+                "--scratch-approved",
+            ]
+        )
+        self.assertEqual(initialized.command, "workflow")
+        self.assertEqual(initialized.workflow_command, "init")
+        self.assertTrue(initialized.empty_canvas)
+        self.assertEqual(initialized.max_paid_calls, 24)
+
+        approval = build_parser().parse_args(
+            [
+                "workflow",
+                "approve",
+                "--spec", "workflow.json",
+                "--gate", "candidates",
+                "--notes", "accepted",
+            ]
+        )
+        self.assertEqual(approval.gate, "candidates")
+
     def test_layout_attempt_defaults_to_pet_and_supports_explicit_no_name(self) -> None:
         default = build_parser().parse_args(
             [

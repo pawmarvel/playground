@@ -968,7 +968,8 @@ def run_attempt(*, experiment: Path, attempt_id: str, pet_image: Path | None,
 
 def benchmark(*, experiment: Path, fixture_set: Path, evaluation_protocol: Path,
               attempts_per_fixture: int | None, attempt_id_prefix: str,
-              fixture_selection: Path, pet_name: str | None = None) -> list[Path]:
+              fixture_selection: Path, pet_name: str | None = None,
+              resume_existing: bool = False) -> list[Path]:
     experiment = experiment.expanduser().resolve()
     experiment_meta = _json(experiment / "experiment.json")
     if experiment_meta.get("kind") != "pet":
@@ -1003,9 +1004,81 @@ def benchmark(*, experiment: Path, fixture_set: Path, evaluation_protocol: Path,
     _json(evaluation_protocol.expanduser().resolve())
     results: list[Path] = []
     failures: list[tuple[str, str]] = []
+    expected_generation = deepcopy(experiment_meta.get("generation"))
+    if isinstance(expected_generation, dict):
+        if pet_name is None:
+            expected_generation.pop("prompt_variables", None)
+        else:
+            expected_generation["prompt_variables"] = {"pet_name": pet_name}
+
+    if resume_existing:
+        conflicts: list[tuple[str, str]] = []
+        for fixture in selected_fixtures:
+            for repetition in range(1, repetitions + 1):
+                attempt_id = f"{attempt_id_prefix}-{fixture.id}-{repetition:04d}"
+                existing = experiment / "attempts" / attempt_id
+                if not existing.exists():
+                    continue
+                record = _json(existing / "run.json")
+                expected = {
+                    "status": "succeeded",
+                    "experiment_sha256": sha256(experiment / "experiment.json"),
+                    "input_pet_sha256": fixture.image_sha256,
+                    "resolved_generation": expected_generation,
+                }
+                actual = {key: record.get(key) for key in expected}
+                output_path = existing / "outputs" / "transformed-pet.png"
+                output_descriptor = next(
+                    (
+                        item
+                        for item in record.get("outputs", [])
+                        if isinstance(item, dict)
+                        and item.get("path") == "outputs/transformed-pet.png"
+                    ),
+                    None,
+                )
+                output_matches = (
+                    output_path.is_file()
+                    and isinstance(output_descriptor, dict)
+                    and output_descriptor.get("sha256") == sha256(output_path)
+                    and output_descriptor.get("bytes") == output_path.stat().st_size
+                )
+                if actual != expected:
+                    conflicts.append(
+                        (
+                            attempt_id,
+                            mismatch(
+                                "existing benchmark attempt cannot be resumed",
+                                expected=expected,
+                                actual=actual,
+                            ),
+                        )
+                    )
+                elif not output_matches:
+                    conflicts.append(
+                        (
+                            attempt_id,
+                            "existing benchmark output inventory does not match "
+                            f"the transformed-pet file: {output_path}",
+                        )
+                    )
+        if conflicts:
+            details = "; ".join(
+                f"{attempt_id}: {message}" for attempt_id, message in conflicts
+            )
+            raise AuthoringError(
+                "benchmark resume preflight found conflicting immutable attempts; "
+                f"experiment={experiment}; conflicts=[{details}]. Create a successor "
+                "attempt prefix or correct the selected fixture input before any paid call."
+            )
+
     for fixture in selected_fixtures:
         for repetition in range(1, repetitions + 1):
             attempt_id = f"{attempt_id_prefix}-{fixture.id}-{repetition:04d}"
+            existing = experiment / "attempts" / attempt_id
+            if resume_existing and existing.exists():
+                results.append(existing)
+                continue
             try:
                 results.append(
                     run_attempt(
@@ -1313,16 +1386,41 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
             raise AuthoringError(
                 "layout attempt does not record its fixture pet name; create a new layout attempt"
             )
-        succeeded_pets = [p for p in sorted((pet_experiment.expanduser().resolve() / "attempts").glob("*")) if p.is_dir() and not p.name.endswith(".partial") and _attempt_record(p, require_success=False).get("status") == "succeeded"]
-        if not succeeded_pets:
-            raise AuthoringError("pet experiment has no succeeded attempts")
+        layout_experiment = layout_attempt.expanduser().resolve().parents[1]
+        layout_meta = _json(layout_experiment / "experiment.json")
+        pinned_descriptor = layout_meta.get("inputs", {}).get("pet_attempt")
+        if not isinstance(pinned_descriptor, dict):
+            raise AuthoringError(
+                f"layout experiment does not pin its representative pet attempt: {layout_experiment}"
+            )
+        pinned_pet_attempt = (
+            authoring_product / str(pinned_descriptor.get("path", ""))
+        ).resolve()
+        if not pinned_pet_attempt.is_relative_to(authoring_product):
+            raise AuthoringError(
+                f"layout representative pet attempt escapes the authoring product: {pinned_pet_attempt}"
+            )
+        supplied_pet_experiment = pet_experiment.expanduser().resolve()
+        if pinned_pet_attempt.parents[1] != supplied_pet_experiment:
+            raise AuthoringError(
+                "assembly pet experiment does not contain the layout-pinned representative; "
+                f"expected={pinned_pet_attempt.parents[1]}; actual={supplied_pet_experiment}"
+            )
+        _attempt_record(pinned_pet_attempt)
+        actual_pinned_sha = sha256(pinned_pet_attempt / "run.json")
+        if actual_pinned_sha != pinned_descriptor.get("sha256"):
+            raise AuthoringError(
+                "layout-pinned representative pet run changed; "
+                f"attempt={pinned_pet_attempt}; expected_sha256={pinned_descriptor.get('sha256')!r}; "
+                f"actual_sha256={actual_pinned_sha!r}"
+            )
         _require_matching_layout_art(
             art_attempt.expanduser().resolve(),
             layout_attempt.expanduser().resolve(),
         )
         artifacts = review / "artifacts"
         artifacts.mkdir(parents=True, exist_ok=False)
-        pet = succeeded_pets[0] / "outputs" / "transformed-pet.png"
+        pet = pinned_pet_attempt / "outputs" / "transformed-pet.png"
         try:
             render_to_files(template_dir=layout_attempt / "outputs", pet_image=pet,
                             pet_name=assembly_pet_name,
@@ -1333,6 +1431,7 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
         candidates.append({
                            "art_attempt": _product_relative(art_attempt, authoring_product),
                            "pet_experiment": _product_relative(pet_experiment, authoring_product),
+                           "pet_attempt": _product_relative(pinned_pet_attempt, authoring_product),
                            "layout_attempt": _product_relative(layout_attempt, authoring_product),
                            "pet_name": assembly_pet_name,
                            "hard_gates_passed": True})

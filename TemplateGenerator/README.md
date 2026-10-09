@@ -27,6 +27,8 @@ The MVP provides:
   dimensions from a product print canvas.
 - `pawmarvel-author`: create immutable art, pet-runtime, and layout experiments;
   benchmark, compare candidates with immutable art/pet/layout contact sheets,
+  coordinate config-driven new-design/profile/category evidence through
+  hash-bound human checkpoints,
   prepare a hash-bound print finalist, graduate and trace a reviewed selection,
   record publication, safely clean up losers, and initialize a private
   reusable shared configuration plus private per-design configurations.

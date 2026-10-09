@@ -15,7 +15,7 @@ duplicate those commands.
 | FE engineer | [Bundle catalog and FE contract](MVP_PRODUCTION_BUNDLE_CATALOG_DESIGN.md#11-fe-implementation-quick-reference) | Consume immutable bundles and catalogs; implement name-mode routing, validation, preview/print rendering, activation, and rollback |
 | Backend/tooling engineer | [Bundle catalog and FE contract](MVP_PRODUCTION_BUNDLE_CATALOG_DESIGN.md) | Maintain authoring/FE ownership boundaries, schemas, storage, publication, and integrity rules |
 | Review-service engineer | [Design-review workflow design](DESIGN_REVIEW_WORKFLOW_DESIGN.md) | Maintain review identity, voting, lifecycle, retention, HTTP endpoints, and operator authorization |
-| Automation engineer | [Authoring automation design](AUTHORING_AUTOMATION_DESIGN.md) | Implement the staged config-driven workflow without changing the public bundle contract |
+| Automation engineer | [Authoring automation design](AUTHORING_AUTOMATION_DESIGN.md) | Maintain and extend the config-driven workflow without changing the public bundle contract |
 | Product/engineering lead | [Future iterations](FUTURE_PERSONALIZATION_ITERATIONS.md) | Prioritize post-MVP quality, vendor, privacy, lifecycle, and scale work |
 
 ## Choose by task
@@ -32,7 +32,7 @@ duplicate those commands.
 | Debug a generation or authoring stage | [MVP operations guide: focused debugging](MVP_OPERATIONS_GUIDE.md#15-focused-debugging-and-troubleshooting) |
 | Implement or review FE bundle consumption | [FE quick reference](MVP_PRODUCTION_BUNDLE_CATALOG_DESIGN.md#11-fe-implementation-quick-reference) |
 | Change a public schema or runtime contract | [Bundle catalog and FE contract](MVP_PRODUCTION_BUNDLE_CATALOG_DESIGN.md) |
-| Plan workflow automation | [Authoring automation design](AUTHORING_AUTOMATION_DESIGN.md) |
+| Run or extend workflow automation | [Operations section 11](MVP_OPERATIONS_GUIDE.md#11-config-driven-post-scratch-development-and-scaling) and [authoring automation design](AUTHORING_AUTOMATION_DESIGN.md) |
 
 ## Source-of-truth rules
 
@@ -43,9 +43,10 @@ duplicate those commands.
    Private authoring files and gallery state are never FE inputs.
 3. **Review subsystem:**
    [design-review workflow design](DESIGN_REVIEW_WORKFLOW_DESIGN.md).
-4. **Planned automation:**
-   [authoring automation design](AUTHORING_AUTOMATION_DESIGN.md). A proposed
-   command is not available until the operations guide and CLI help include it.
+4. **Authoring automation:**
+   [authoring automation design](AUTHORING_AUTOMATION_DESIGN.md). Implemented
+   commands are listed in operations section 11 and CLI help; remaining
+   milestones are explicitly marked deferred.
 5. **Future priorities:**
    [future iterations](FUTURE_PERSONALIZATION_ITERATIONS.md).
 
