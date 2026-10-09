@@ -90,6 +90,7 @@ def select_fixtures(
     *,
     fixture_count: int | None = None,
     filters: tuple[str, ...] = (),
+    exclude_fixture_ids: tuple[str, ...] = (),
 ) -> tuple[PetFixture, ...]:
     """Resolve a deterministic tier-valid subset from repeatable FIELD=VALUE filters."""
     parsed: dict[str, set[str]] = {}
@@ -121,7 +122,20 @@ def select_fixtures(
         }
         return all(values[field] & accepted for field, accepted in parsed.items())
 
-    matched = tuple(fixture for fixture in fixture_set.fixtures if matches(fixture))
+    excluded = set(exclude_fixture_ids)
+    unknown_exclusions = sorted(
+        excluded - {fixture.id for fixture in fixture_set.fixtures}
+    )
+    if unknown_exclusions:
+        raise FixtureSetError(
+            "excluded fixture IDs are absent from the fixture set; "
+            f"fixture_set={fixture_set.fixture_set_id}; missing={unknown_exclusions}"
+        )
+    matched = tuple(
+        fixture
+        for fixture in fixture_set.fixtures
+        if fixture.id not in excluded and matches(fixture)
+    )
     if fixture_count is not None:
         if isinstance(fixture_count, bool) or fixture_count < 1:
             raise FixtureSetError("fixture count must be a positive integer")
@@ -164,14 +178,44 @@ def write_fixture_selection(
     output: Path,
     fixture_count: int | None = None,
     filters: tuple[str, ...] = (),
+    prior_selection: Path | None = None,
     force: bool = False,
 ) -> Path:
     """Write a reviewable, no-cost fixture selection for a later benchmark."""
     fixture_set = load_fixture_set(fixture_set_path)
+    prior_coverage: dict[str, Any] | None = None
+    excluded_ids: tuple[str, ...] = ()
+    if prior_selection is not None:
+        prior_path = prior_selection.expanduser().resolve()
+        prior_value = read_json(
+            prior_path,
+            label="prior fixture selection",
+            error_type=FixtureSetError,
+            require_object=True,
+            correction="regenerate the prior selection before preparing release coverage.",
+        )
+        prior_ids = prior_value.get("selected_fixture_ids")
+        if (
+            prior_value.get("schema_version") != 1
+            or not isinstance(prior_ids, list)
+            or not prior_ids
+            or not all(isinstance(item, str) for item in prior_ids)
+            or len(prior_ids) != len(set(prior_ids))
+        ):
+            raise FixtureSetError(
+                f"prior fixture selection has invalid selected_fixture_ids: {prior_path}"
+            )
+        available = {fixture.id for fixture in fixture_set.fixtures}
+        excluded_ids = tuple(item for item in prior_ids if item in available)
+        prior_coverage = {
+            "selection_sha256": sha256(prior_path),
+            "selected_fixture_ids": list(excluded_ids),
+        }
     selected = select_fixtures(
         fixture_set,
         fixture_count=fixture_count,
         filters=filters,
+        exclude_fixture_ids=excluded_ids,
     )
     output = output.expanduser().resolve()
     if output.exists() and not force:
@@ -181,6 +225,7 @@ def write_fixture_selection(
     if output.exists() and not output.is_file():
         raise FixtureSetError(f"fixture selection output is not a file: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
+    cumulative_count = len({*excluded_ids, *(fixture.id for fixture in selected)})
     atomic_json(
         output,
         {
@@ -191,9 +236,14 @@ def write_fixture_selection(
             "source_filter": {
                 "conditions": list(filters),
                 "requested_count": fixture_count,
+                "excluded_fixture_ids": list(excluded_ids),
             },
             "selected_fixture_ids": [fixture.id for fixture in selected],
-            "warnings": list(fixture_selection_warnings(fixture_set, len(selected))),
+            "prior_coverage": prior_coverage,
+            "cumulative_fixture_count": cumulative_count,
+            "warnings": list(
+                fixture_selection_warnings(fixture_set, cumulative_count)
+            ),
         },
     )
     return output
@@ -255,6 +305,38 @@ def load_fixture_selection(
             "fixture selection contains IDs absent from its fixture set; "
             f"selection={selection_path}; missing={missing}"
         )
+    prior_coverage = value.get("prior_coverage")
+    prior_ids: list[str] = []
+    if prior_coverage is not None:
+        if not isinstance(prior_coverage, dict):
+            raise FixtureSetError(
+                f"fixture selection prior_coverage must be an object or null: {selection_path}"
+            )
+        raw_prior_ids = prior_coverage.get("selected_fixture_ids")
+        prior_hash = prior_coverage.get("selection_sha256")
+        if (
+            not isinstance(raw_prior_ids, list)
+            or not all(isinstance(item, str) for item in raw_prior_ids)
+            or len(raw_prior_ids) != len(set(raw_prior_ids))
+            or not isinstance(prior_hash, str)
+            or re.fullmatch(r"[0-9a-f]{64}", prior_hash) is None
+        ):
+            raise FixtureSetError(
+                f"fixture selection prior_coverage is invalid: {selection_path}"
+            )
+        missing_prior = [item for item in raw_prior_ids if item not in fixtures_by_id]
+        if missing_prior:
+            raise FixtureSetError(
+                "fixture selection prior coverage contains IDs absent from its fixture set; "
+                f"selection={selection_path}; missing={missing_prior}"
+            )
+        prior_ids = raw_prior_ids
+        overlap = sorted(set(prior_ids) & set(selected_ids))
+        if overlap:
+            raise FixtureSetError(
+                "fixture selection duplicates prior coverage; "
+                f"selection={selection_path}; duplicate_fixture_ids={overlap}"
+            )
     selected = tuple(fixtures_by_id[fixture_id] for fixture_id in selected_ids)
     minimum, maximum = _SELECTION_LIMITS[fixture_set.tier]
     if not minimum <= len(selected) <= maximum:

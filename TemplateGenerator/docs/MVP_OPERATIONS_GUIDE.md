@@ -1231,7 +1231,17 @@ Use the two fixture tiers deliberately:
   prompts or request configurations.
 - `mvp-pets-v1` has a fifteen-pet inventory with twelve dogs and three cats,
   spanning varied body shapes, coats, tones, and source-background difficulty.
-  A release run selects 6-15 of them and runs once per shortlisted experiment.
+  After smoke passes, the standard release run selects three additional pets
+  not already covered by smoke. The combined evidence covers six unique pets
+  with no duplicate paid calls.
+
+For a high-confidence franchise variant, `workflow init --skip-smoke` may be
+used after representative scratch output has passed review. The workflow then
+retains the art review checkpoint but omits the smoke benchmark and defaults to
+six release fixtures. Do not use `--prior-selection` in that release-only mode.
+An explicit `--release-fixture-count` overrides the default: it means
+additional fixtures when smoke is enabled and total release fixtures when smoke
+is skipped.
 
 Both manifests fix `attempts_per_fixture` at one. Fixture selection is a
 no-cost, two-step operation: `prepare-benchmark` applies the requested count
@@ -1320,10 +1330,10 @@ ${EDITOR:-vi} "$PAWMARVEL_SMOKE_SELECTION"
 
 Review `pet-gpt-smoke/artifacts/pet-comparison.png`. If the prompt is still
 changing, create a new experiment and repeat only the smoke tier. Once the
-candidate is shortlisted, prepare an exact release selection. This example
-deliberately includes the Dachshund and white fluffy dog used by later layout
-and bundle-consumption checks, plus one dog and all three cat morphology
-complements:
+candidate is shortlisted, prepare an incremental release selection. The prior
+selection is hash-pinned, its IDs are excluded, and its three pets count toward
+the recommended six-pet cumulative coverage. This example adds one difficult
+dog and two cat morphology complements:
 
 ```bash
 PAWMARVEL_RELEASE_SELECTION="$PAWMARVEL_BENCHMARK_SELECTION_ROOT/pet-release-v01.json"
@@ -1331,13 +1341,11 @@ PAWMARVEL_RELEASE_SELECTION="$PAWMARVEL_BENCHMARK_SELECTION_ROOT/pet-release-v01
 # Step 1 (no API calls): filter into a reviewable draft.
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" prepare-benchmark \
   --fixture-set "$PAWMARVEL_RELEASE_FIXTURE_SET" \
-  --fixture-count 6 \
-  --fixture-filter id=sausage-dog \
-  --fixture-filter id=white-fluffy-dog \
+  --fixture-count 3 \
+  --prior-selection "$PAWMARVEL_SMOKE_SELECTION" \
   --fixture-filter id=australian-shepherd \
   --fixture-filter id=siamese-cat \
   --fixture-filter id=maine-coon-cat \
-  --fixture-filter id=british-shorthair-cat \
   --output "$PAWMARVEL_RELEASE_SELECTION"
 
 cat "$PAWMARVEL_RELEASE_SELECTION"
@@ -1373,14 +1381,15 @@ selection. The application owner may graduate a partially covered candidate by
 documenting the accepted risk in the pet decision `--notes`; those warnings are
 copied into the immutable decision record for later audit.
 
-The draft records the original filters only as provenance. The reviewed
-`selected_fixture_ids` array is authoritative and may be reordered or edited
-before the paid run. IDs must be unique and present in the pinned manifest; a
-release inventory contains 6-15 pets, while an operator-reviewed run may select
-1-15. Selecting fewer than the recommended six emits a low-coverage warning in
-the draft and evaluation but does not block comparison or graduation. Regenerate
-with `--force` when you intend to replace an existing draft. Use explicit `id=`
-filters when later steps require named fixtures, as in this example.
+The draft records the original filters and prior coverage as provenance. The
+reviewed `selected_fixture_ids` array is authoritative and may be reordered or
+edited before the paid run, but it must remain disjoint from
+`prior_coverage.selected_fixture_ids`. IDs must be unique and present in the
+pinned manifest. Cumulative coverage below the recommended six emits a warning
+in the draft and evaluation but does not block comparison or graduation.
+Regenerate with `--force` when you intend to replace an existing draft. Use
+explicit `id=` filters when later steps require named fixtures, as in this
+example.
 
 Before the first provider call, `benchmark` verifies that the target is a pet
 experiment and that its attempt prefix, fixture set, selection, and protocol
@@ -2551,6 +2560,31 @@ failed hard gate into a pass. A release plan is rejected until the candidates
 approval exists. A plan exceeding `--max-paid-calls` is rejected before an API
 call. Re-running the same plan reconciles exact succeeded attempts; conflicting
 attempt bytes or an unknown `.partial` submission stop before another call.
+
+#### Optional high-confidence franchise path: skip smoke
+
+Add `--skip-smoke` to `workflow init`. Then replace the smoke checkpoint above
+with an art-only checkpoint and approval:
+
+```bash
+PAWMARVEL_ART_PLAN="$($PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author workflow plan \
+  --spec "$PAWMARVEL_WORKFLOW_SPEC" \
+  --checkpoint art-review)"
+cat "$PAWMARVEL_ART_PLAN"
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" workflow run \
+  --plan "$PAWMARVEL_ART_PLAN"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-author" workflow approve \
+  --spec "$PAWMARVEL_WORKFLOW_SPEC" \
+  --gate candidates \
+  --reviewed-by application-owner \
+  --notes "Art accepted; smoke intentionally skipped for this franchise variant"
+```
+
+Continue with the same `release-review` plan and release approval commands.
+The resulting release plan contains six pet calls by default, with no smoke
+tasks or smoke-evidence requirement. Use this explicit shortcut only when the
+inherited franchise style and runtime already have sufficient confidence.
 
 After release approval, record the ordinary art and pet decisions from these
 review packets, then resume sections 7–9 for deterministic layout proposal,

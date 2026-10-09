@@ -94,9 +94,10 @@
     "execution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_paid_calls"],
+      "required": ["max_paid_calls", "smoke_enabled"],
       "properties": {
-        "max_paid_calls": {"type": "integer", "minimum": 1}
+        "max_paid_calls": {"type": "integer", "minimum": 1},
+        "smoke_enabled": {"type": "boolean"}
       }
     },
     "ids": {

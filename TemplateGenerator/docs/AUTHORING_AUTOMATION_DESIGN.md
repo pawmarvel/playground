@@ -198,10 +198,19 @@ approval binds the release evaluation. Evaluation warnings require
 `--accept-warnings`; hard-gate failures cannot be accepted by that option.
 
 Planning performs no provider call. It reports total planned image calls. The
-plan is rejected if the estimate exceeds `execution.max_paid_calls`. A typical
-one-art + two-smoke + fifteen-release plan is eighteen calls. Unknown provider
+plan is rejected if the estimate exceeds `execution.max_paid_calls`. The default
+durable path is one art call, three smoke calls, and three additional release
+calls: seven calls covering six unique pets plus art. The release selection
+pins the smoke selection hash and excludes its fixture IDs. Unknown provider
 outcomes are not silently retried; a `.partial` attempt stops execution for
 operator inspection.
+
+High-confidence franchise development may set `execution.smoke_enabled=false`
+through `workflow init --skip-smoke`. That path retains the art review gate,
+omits smoke tasks and smoke evidence, and defaults to six release fixtures. If
+smoke remains enabled, release defaults to three new fixtures and must pin and
+exclude the smoke selection. An explicit `--release-fixture-count` overrides
+the applicable default in either mode.
 
 ## 8. Restart and mismatch behavior
 

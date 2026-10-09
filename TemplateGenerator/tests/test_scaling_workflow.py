@@ -72,6 +72,7 @@ class ScalingWorkflowTests(unittest.TestCase):
             "evaluation_protocol": self.protocol,
             "smoke_fixture_count": 2,
             "release_fixture_count": 4,
+            "skip_smoke": False,
             "scratch_approved": True,
             "created_by": "test-operator",
             "empty_canvas": False,
@@ -116,6 +117,106 @@ class ScalingWorkflowTests(unittest.TestCase):
             ScalingWorkflowError, "cannot replace a workflow with planned"
         ):
             self._initialize(force=True)
+
+    def test_default_release_selection_adds_three_non_smoke_fixtures(self) -> None:
+        spec_path = self._initialize(
+            smoke_fixture_count=None,
+            release_fixture_count=None,
+        )
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        fixture_sets = spec["inputs"]["fixture_sets"]
+        smoke = json.loads(
+            (spec_path.parent / fixture_sets["smoke"]["selection"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        release = json.loads(
+            (spec_path.parent / fixture_sets["release"]["selection"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(len(smoke["selected_fixture_ids"]), 3)
+        self.assertEqual(len(release["selected_fixture_ids"]), 3)
+        self.assertFalse(
+            set(smoke["selected_fixture_ids"])
+            & set(release["selected_fixture_ids"])
+        )
+        self.assertEqual(release["cumulative_fixture_count"], 6)
+        self.assertEqual(release["warnings"], [])
+
+    def test_skip_smoke_uses_six_release_fixtures_without_prior_coverage(self) -> None:
+        spec_path = self._initialize(
+            smoke_fixture_count=None,
+            release_fixture_count=None,
+            skip_smoke=True,
+        )
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        release_entry = spec["inputs"]["fixture_sets"]["release"]
+        release = json.loads(
+            (spec_path.parent / release_entry["selection"]).read_text(encoding="utf-8")
+        )
+        self.assertFalse(spec["execution"]["smoke_enabled"])
+        self.assertEqual(len(release["selected_fixture_ids"]), 6)
+        self.assertIsNone(release["prior_coverage"])
+        with self.assertRaisesRegex(ScalingWorkflowError, "smoke-review is disabled"):
+            plan_workflow(spec_path=spec_path, checkpoint="smoke-review")
+        art_plan = json.loads(
+            plan_workflow(spec_path=spec_path, checkpoint="art-review").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(art_plan["estimated_paid_calls"], 1)
+
+        product = (
+            spec_path.parent
+            / spec["authoring_root"]
+            / spec["target"]["design_id"]
+            / spec["target"]["product_profile_id"]
+        ).resolve()
+        atomic_json(
+            product
+            / "reviews"
+            / "art"
+            / spec["ids"]["art_review"]
+            / "evaluation.json",
+            {
+                "review_id": spec["ids"]["art_review"],
+                "kind": "art",
+                "design_id": spec["target"]["design_id"],
+                "product_profile_id": spec["target"]["product_profile_id"],
+                "evaluation_protocol_sha256": sha256(
+                    spec_path.parent / spec["inputs"]["evaluation_protocol"]
+                ),
+                "fixture_set_sha256": None,
+                "fixture_selection": None,
+                "attempt_id_prefix": None,
+                "candidates": [
+                    {"experiment_id": spec["ids"]["art_experiment"]}
+                ],
+                "hard_gates": {"status": "passed"},
+                "warnings": [],
+            },
+        )
+        record_workflow_review(
+            spec_path=spec_path,
+            gate="candidates",
+            reviewed_by="application-owner",
+            notes="Art accepted; smoke intentionally skipped",
+        )
+        release_plan = json.loads(
+            plan_workflow(spec_path=spec_path, checkpoint="release-review").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(release_plan["estimated_paid_calls"], 7)
+        self.assertNotIn(
+            "benchmark-pet-smoke",
+            {task["task_id"] for task in release_plan["tasks"]},
+        )
+        self.assertIn(
+            "benchmark-pet-release",
+            {task["task_id"] for task in release_plan["tasks"]},
+        )
 
     def test_release_plan_requires_hash_bound_candidate_review(self) -> None:
         spec_path = self._initialize()

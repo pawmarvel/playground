@@ -164,6 +164,66 @@ class FixtureSetTests(unittest.TestCase):
         selected = load_fixture_selection(load_fixture_set(manifest), selection)
         self.assertEqual([fixture.id for fixture in selected], ["dog-3", "dog-1"])
 
+    def test_release_selection_excludes_and_counts_prior_smoke_coverage(self) -> None:
+        manifest = self._manifest()
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+        value["tier"] = "release"
+        for index in range(4, 7):
+            image = make_image(
+                self.root / f"dog-{index}.png",
+                color=(index * 20, 50, 90, 255),
+            )
+            value["fixtures"].append(
+                {
+                    **value["fixtures"][0],
+                    "id": f"dog-{index}",
+                    "pet_image": image.name,
+                    "sha256": sha256(image),
+                    "breed": {
+                        "id": f"breed-{index}",
+                        "label": f"Breed {index}",
+                        "mixed": False,
+                    },
+                }
+            )
+        manifest.write_text(json.dumps(value), encoding="utf-8")
+        prior = self.root / "smoke-selection.json"
+        prior.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "selected_fixture_ids": ["dog-1", "dog-2", "dog-3"],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        selection = write_fixture_selection(
+            manifest,
+            output=self.root / "incremental-release-selection.json",
+            fixture_count=3,
+            prior_selection=prior,
+        )
+        record = json.loads(selection.read_text(encoding="utf-8"))
+        self.assertEqual(
+            record["selected_fixture_ids"], ["dog-4", "dog-5", "dog-6"]
+        )
+        self.assertEqual(record["cumulative_fixture_count"], 6)
+        self.assertEqual(record["warnings"], [])
+        self.assertEqual(
+            record["prior_coverage"]["selected_fixture_ids"],
+            ["dog-1", "dog-2", "dog-3"],
+        )
+        self.assertEqual(
+            [
+                fixture.id
+                for fixture in load_fixture_selection(
+                    load_fixture_set(manifest), selection
+                )
+            ],
+            ["dog-4", "dog-5", "dog-6"],
+        )
+
     def test_selection_pins_fixture_set_and_requires_force_to_replace(self) -> None:
         manifest = self._manifest()
         selection = write_fixture_selection(

@@ -65,9 +65,12 @@ and provider-specific art and pet-transformation prompts; provider coverage may
 differ by example.
 Reusable non-customer pet QA fixtures live in
 [`examples/pet-inputs`](examples/pet-inputs). Pet-transform QA uses a three-dog
-smoke tier during iteration and an operator-selected release run of at least six
-pets from the fifteen-pet dog-and-cat inventory; both protocols run one attempt
-per pet.
+smoke tier during iteration and three additional, non-overlapping pets selected
+from the fifteen-pet dog-and-cat release inventory. Together they provide at
+least six unique fixtures with one attempt per pet and no duplicate paid calls.
+For a high-confidence franchise variant, the workflow can explicitly skip smoke
+and run the prior six-fixture release screen instead. Skipping smoke is never
+inferred from existing files; it must be recorded in the workflow specification.
 These reference and pet images are development inputs for exercising the
 offline workflow; the repository does not assert production-use rights for
 them. Generated bundles remain outside Git and are shared with FE through the

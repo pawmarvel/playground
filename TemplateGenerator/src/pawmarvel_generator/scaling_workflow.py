@@ -274,6 +274,7 @@ def initialize_workflow(
     evaluation_protocol: Path,
     smoke_fixture_count: int | None,
     release_fixture_count: int | None,
+    skip_smoke: bool,
     scratch_approved: bool,
     created_by: str,
     empty_canvas: bool = False,
@@ -541,9 +542,22 @@ def initialize_workflow(
         release_selection = write_fixture_selection(
             release_manifest,
             output=inputs / "fixture-sets" / "release" / "selection.json",
-            fixture_count=release_fixture_count,
+            fixture_count=(
+                (6 if skip_smoke else 3)
+                if release_fixture_count is None
+                else release_fixture_count
+            ),
+            prior_selection=None if skip_smoke else smoke_selection,
         )
-        for selection in (smoke_selection, release_selection):
+        active_selections = (
+            (release_selection,) if skip_smoke else (smoke_selection, release_selection)
+        )
+        if skip_smoke:
+            warnings.append(
+                "pet smoke benchmark is intentionally disabled; release evidence is the "
+                "first durable multi-fixture pet quality gate"
+            )
+        for selection in active_selections:
             selection_value = _read_object(selection, "fixture selection")
             warnings.extend(str(item) for item in selection_value.get("warnings", []))
 
@@ -617,7 +631,10 @@ def initialize_workflow(
                 "representative_pet_name": pet_name,
             },
             "quality_gates": {"scratch_approved": bool(scratch_approved)},
-            "execution": {"max_paid_calls": max_paid_calls},
+            "execution": {
+                "max_paid_calls": max_paid_calls,
+                "smoke_enabled": not skip_smoke,
+            },
             "ids": {
                 "art_experiment": (
                     f"art-local-{workflow_id}"
@@ -822,12 +839,16 @@ def load_workflow_spec(path: Path) -> tuple[Path, dict[str, Any]]:
     execution = value.get("execution")
     if (
         not isinstance(execution, dict)
-        or set(execution) != {"max_paid_calls"}
+        or set(execution) != {"max_paid_calls", "smoke_enabled"}
         or isinstance(execution.get("max_paid_calls"), bool)
         or not isinstance(execution.get("max_paid_calls"), int)
         or execution["max_paid_calls"] < 1
+        or not isinstance(execution.get("smoke_enabled"), bool)
     ):
-        raise ScalingWorkflowError("workflow execution.max_paid_calls must be a positive integer")
+        raise ScalingWorkflowError(
+            "workflow execution must define a positive max_paid_calls integer and "
+            "boolean smoke_enabled"
+        )
     return root, value
 
 
@@ -908,7 +929,46 @@ def _plan_fingerprint(
 def _selection_count(root: Path, spec: dict[str, Any], tier: str) -> int:
     entry = spec["inputs"]["fixture_sets"][tier]
     value = _read_object(_path(root, entry["selection"], f"{tier} selection"), "fixture selection")
-    return len(value["selected_fixture_ids"])
+    selected_ids = value.get("selected_fixture_ids")
+    if (
+        not isinstance(selected_ids, list)
+        or not selected_ids
+        or not all(isinstance(item, str) for item in selected_ids)
+        or len(selected_ids) != len(set(selected_ids))
+    ):
+        raise ScalingWorkflowError(
+            f"{tier} fixture selection has invalid selected_fixture_ids"
+        )
+    if tier == "release" and spec["execution"]["smoke_enabled"]:
+        smoke_entry = spec["inputs"]["fixture_sets"]["smoke"]
+        smoke_path = _path(root, smoke_entry["selection"], "smoke selection")
+        smoke = _read_object(smoke_path, "smoke fixture selection")
+        smoke_ids = smoke.get("selected_fixture_ids")
+        release_manifest = load_fixture_set(
+            _path(root, entry["manifest"], "release fixture set")
+        )
+        release_inventory_ids = {fixture.id for fixture in release_manifest.fixtures}
+        expected_prior_ids = [
+            item for item in smoke_ids or [] if item in release_inventory_ids
+        ]
+        expected_prior = {
+            "selection_sha256": sha256(smoke_path),
+            "selected_fixture_ids": expected_prior_ids,
+        }
+        actual_prior = value.get("prior_coverage")
+        if actual_prior != expected_prior:
+            raise ScalingWorkflowError(
+                "release selection is not bound to the current smoke selection; "
+                f"expected_prior_coverage={expected_prior!r}; "
+                f"actual_prior_coverage={actual_prior!r}"
+            )
+        overlap = sorted(set(selected_ids) & set(expected_prior_ids))
+        if overlap:
+            raise ScalingWorkflowError(
+                "release selection duplicates paid smoke coverage; "
+                f"duplicate_fixture_ids={overlap}"
+            )
+    return len(selected_ids)
 
 
 def _planned_tasks(
@@ -922,17 +982,28 @@ def _planned_tasks(
         },
         {"task_id": "compare-art", "paid_calls": 0},
     ]
+    smoke_enabled = spec["execution"]["smoke_enabled"]
+    if checkpoint == "smoke-review" and not smoke_enabled:
+        raise ScalingWorkflowError(
+            "smoke-review is disabled for this workflow; plan art-review, approve the "
+            "candidates gate, then plan release-review"
+        )
     if checkpoint in {"smoke-review", "release-review"}:
         tasks.extend(
             [
                 {"task_id": "create-pet-experiment", "paid_calls": 0},
-                {
-                    "task_id": "benchmark-pet-smoke",
-                    "paid_calls": _selection_count(root, spec, "smoke"),
-                },
-                {"task_id": "compare-pet-smoke", "paid_calls": 0},
             ]
         )
+        if smoke_enabled:
+            tasks.extend(
+                [
+                    {
+                        "task_id": "benchmark-pet-smoke",
+                        "paid_calls": _selection_count(root, spec, "smoke"),
+                    },
+                    {"task_id": "compare-pet-smoke", "paid_calls": 0},
+                ]
+            )
     if checkpoint == "release-review":
         tasks.extend(
             [
@@ -1103,8 +1174,11 @@ def record_workflow_review(
     if gate == "candidates":
         review_paths = {
             "art": product / "reviews" / "art" / ids["art_review"] / "evaluation.json",
-            "pet_smoke": product / "reviews" / "pet" / ids["smoke_review"] / "evaluation.json",
         }
+        if spec["execution"]["smoke_enabled"]:
+            review_paths["pet_smoke"] = (
+                product / "reviews" / "pet" / ids["smoke_review"] / "evaluation.json"
+            )
     else:
         review_paths = {
             "pet_release": product
@@ -1194,10 +1268,19 @@ def workflow_status(*, spec_path: Path) -> dict[str, Any]:
         "release_approval": root / "approvals" / "release.json",
     }
     exists = {key: path.exists() for key, path in paths.items()}
-    if not exists["art_review"] or not exists["smoke_review"]:
-        next_action = "plan and run the smoke-review checkpoint"
+    smoke_enabled = spec["execution"]["smoke_enabled"]
+    if not exists["art_review"] or (smoke_enabled and not exists["smoke_review"]):
+        next_action = (
+            "plan and run the smoke-review checkpoint"
+            if smoke_enabled
+            else "plan and run the art-review checkpoint"
+        )
     elif not exists["candidates_approval"]:
-        next_action = "inspect art/smoke evidence and approve the candidates gate"
+        next_action = (
+            "inspect art/smoke evidence and approve the candidates gate"
+            if smoke_enabled
+            else "inspect art evidence and approve the candidates gate"
+        )
     elif not exists["release_review"]:
         next_action = "plan and run the release-review checkpoint"
     elif not exists["release_approval"]:

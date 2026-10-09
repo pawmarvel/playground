@@ -615,7 +615,7 @@ examples/
   pet-inputs/                              # shared non-customer dog and cat images
   authoring/fixture-sets/
     mvp-pets-smoke-v1/fixture-set.json     # 2-3 pets, one attempt each
-    mvp-pets-v1/fixture-set.json           # 6-15-pet inventory; reviewed runs may use 1-15
+    mvp-pets-v1/fixture-set.json           # 15-pet inventory; incremental runs may use 1-12
 ```
 
 The current manifests contain three smoke dogs and fifteen release pets
@@ -628,13 +628,14 @@ than one. Fixture selection is deliberately split from paid generation. A
 no-cost `prepare-benchmark` command applies an explicit count and repeatable
 `FIELD=VALUE` filters, then writes a mutable selection file containing the
 pinned manifest identity/hash and exact fixture IDs. The operator reviews or
-edits that file before `benchmark`; `compare` consumes the same file. A release
-selection must contain at least six pets. Repeated values for one field are OR
-conditions; different fields are AND conditions. Evaluation records the
-selection-file hash and resolved fixture IDs, making the actual run set
-traceable without copying filters between commands. Fixture-set changes create
-a new manifest ID/version and invalidate prior draft selections; they never
-silently alter historical evaluation meaning.
+edits that file before `benchmark`; `compare` consumes the same file. The
+standard release selection pins the prior three-pet smoke selection and adds
+three non-overlapping fixtures, producing six-fixture cumulative evidence with
+only six pet calls. Repeated values for one field are OR conditions; different
+fields are AND conditions. Evaluation records the selection-file hash, prior
+selection hash, new fixture IDs, and cumulative count. Fixture-set changes
+create a new manifest ID/version and invalidate prior draft selections; they
+never silently alter historical evaluation meaning.
 
 This path boundary is an invariant, not a naming preference:
 

@@ -227,7 +227,22 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     workflow_init.add_argument("--smoke-fixture-count", type=int)
-    workflow_init.add_argument("--release-fixture-count", type=int)
+    workflow_init.add_argument(
+        "--skip-smoke",
+        action="store_true",
+        help=(
+            "skip the pet smoke checkpoint; release then defaults to six fixtures "
+            "instead of three additional non-smoke fixtures"
+        ),
+    )
+    workflow_init.add_argument(
+        "--release-fixture-count",
+        type=int,
+        help=(
+            "release fixtures: additional non-smoke fixtures when smoke runs "
+            "(default: 3), or total fixtures with --skip-smoke (default: 6)"
+        ),
+    )
     workflow_init.add_argument(
         "--max-paid-calls",
         type=int,
@@ -296,7 +311,15 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_benchmark.add_argument(
         "--fixture-count",
         type=int,
-        help="select the first N fixtures remaining after filters",
+        help="select the first N fixtures remaining after filters and prior exclusions",
+    )
+    prepare_benchmark.add_argument(
+        "--prior-selection",
+        type=_path_argument,
+        help=(
+            "exclude IDs already covered by an earlier reviewed selection and "
+            "count them toward cumulative coverage"
+        ),
     )
     prepare_benchmark.add_argument(
         "--fixture-filter",
@@ -635,6 +658,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     evaluation_protocol=args.evaluation_protocol,
                     smoke_fixture_count=args.smoke_fixture_count,
                     release_fixture_count=args.release_fixture_count,
+                    skip_smoke=args.skip_smoke,
                     scratch_approved=args.scratch_approved,
                     created_by=_current_user(),
                     empty_canvas=args.empty_canvas,
@@ -692,6 +716,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 output=args.output,
                 fixture_count=args.fixture_count,
                 filters=tuple(args.fixture_filter),
+                prior_selection=args.prior_selection,
                 force=args.force,
             )
             selection = json.loads(result.read_text(encoding="utf-8"))

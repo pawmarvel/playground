@@ -1199,6 +1199,7 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
     expected_fixture_hashes: set[str] = set()
     fixture_inventory = None
     selected_fixtures: tuple[PetFixture, ...] = ()
+    fixture_selection_record: dict[str, Any] | None = None
     fixtures_by_hash: dict[str, PetFixture] = {}
     if fixture_set:
         try:
@@ -1216,6 +1217,7 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
             fixture.image_sha256: fixture for fixture in selected_fixtures
         }
         expected_fixture_hashes = set(fixtures_by_hash)
+        fixture_selection_record = _json(fixture_selection.expanduser().resolve())
     composition_template = None
     composition_pet_name = None
     if kind == "pet" and (art_attempt or layout_attempt):
@@ -1239,8 +1241,20 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
         composition_template = layout_attempt / "outputs"
     candidates: list[dict[str, Any]] = []
     coverage_warnings: list[str] = []
+    prior_coverage_ids = (
+        fixture_selection_record.get("prior_coverage", {}).get(
+            "selected_fixture_ids", []
+        )
+        if fixture_selection_record
+        and isinstance(fixture_selection_record.get("prior_coverage"), dict)
+        else []
+    )
+    cumulative_fixture_count = len(
+        set(prior_coverage_ids)
+        | {fixture.id for fixture in selected_fixtures}
+    )
     selection_warnings = list(
-        fixture_selection_warnings(fixture_inventory, len(selected_fixtures))
+        fixture_selection_warnings(fixture_inventory, cumulative_fixture_count)
         if fixture_inventory and selected_fixtures
         else ()
     )
@@ -1481,6 +1495,12 @@ def compare(*, kind: str, review_id: str, authoring_product: Path,
                 "selected_fixture_ids": [
                     fixture.id for fixture in selected_fixtures
                 ],
+                "prior_coverage": (
+                    fixture_selection_record.get("prior_coverage")
+                    if fixture_selection_record
+                    else None
+                ),
+                "cumulative_fixture_count": cumulative_fixture_count,
             }
             if selected_fixtures
             else None

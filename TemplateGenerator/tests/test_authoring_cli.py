@@ -27,11 +27,13 @@ class AuthoringCliTests(unittest.TestCase):
                 "--pet-prompt", "pet-transform-gpt.md",
                 "--empty-canvas",
                 "--scratch-approved",
+                "--skip-smoke",
             ]
         )
         self.assertEqual(initialized.command, "workflow")
         self.assertEqual(initialized.workflow_command, "init")
         self.assertTrue(initialized.empty_canvas)
+        self.assertTrue(initialized.skip_smoke)
         self.assertEqual(initialized.max_paid_calls, 24)
 
         approval = build_parser().parse_args(
@@ -199,6 +201,7 @@ class AuthoringCliTests(unittest.TestCase):
                 "--fixture-count", "6",
                 "--fixture-filter", "size_class=large",
                 "--fixture-filter", "size_class=giant",
+                "--prior-selection", "smoke-selection.json",
                 "--output", "selection.json",
             ]
         )
@@ -207,6 +210,7 @@ class AuthoringCliTests(unittest.TestCase):
             args.fixture_filter,
             ["size_class=large", "size_class=giant"],
         )
+        self.assertEqual(args.prior_selection, Path("smoke-selection.json"))
         self.assertEqual(args.output, Path("selection.json"))
 
     def test_benchmark_requires_reviewed_fixture_selection(self) -> None:
