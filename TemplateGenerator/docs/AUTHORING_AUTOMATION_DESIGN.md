@@ -1,5 +1,8 @@
 # Config-driven authoring automation proposal
 
+Audience: backend/tooling engineers implementing authoring automation. For
+current runnable procedures, use the [documentation index](README.md).
+
 Status: staged implementation proposal. The local deterministic layout proposal
 stage in section 8 is implemented as `pawmarvel-author propose-layout`; the
 broader workflow coordinator commands remain planned.
@@ -933,8 +936,9 @@ is optional after source/provenance handling is proven.
 
 ## 15. Review and implementation handoff
 
-The [review record](AUTHORING_AUTOMATION_REVIEW.md) records three review/update
-passes and their dispositions. Implement milestones in dependency order. At
+The proposal completed three review/update passes with no unresolved P0, P1,
+or P2 design findings at handoff. Detailed edit history remains in Git rather
+than a separate current document. Implement milestones in dependency order. At
 each release, the operations guide must clearly distinguish available commands
 from planned features; remove superseded planned instructions as their
 implementation lands. No code or production artifacts are changed by this

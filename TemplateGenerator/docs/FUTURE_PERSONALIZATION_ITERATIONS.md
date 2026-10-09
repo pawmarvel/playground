@@ -1,5 +1,9 @@
 # Personalized Product Toolset — Prioritized Future Roadmap
 
+Audience: product and engineering leads. Status: prioritized post-MVP roadmap,
+not an operating guide or an FE runtime contract. Current sources of truth are
+listed in the [documentation index](README.md).
+
 Status: Deferred roadmap
 Depends on: Evidence from the immutable-bundle MVP trial
 Last updated: 2026-10-04
@@ -206,9 +210,9 @@ implementation for post-scratch benchmarks, bounded layout proposals, approved
 design profile expansion and category alternatives. The deterministic bounded
 layout proposer is now available; the broader workflow coordinator remains
 future work. All stages reuse the current bundle/FE contract and manual quality
-decisions. The separate
-[review record](AUTHORING_AUTOMATION_REVIEW.md) captures three design-review
-passes.
+decisions. The proposal records its current review status and implementation
+exit criteria directly; design-review history remains in Git rather than a
+separate documentation artifact.
 
 Its M0–M5 milestones pull forward the necessary reports, renderer metrics and
 service extractions from stages 3 and 5. Keep stage 1 vendor/customer-data work

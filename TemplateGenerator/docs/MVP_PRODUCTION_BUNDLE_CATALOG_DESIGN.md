@@ -1,5 +1,10 @@
 # Template Bundle Catalog — MVP Production Graduation Design
 
+Audience: FE, backend, and template-tooling engineers. Status: public bundle,
+catalog, ownership, and publication contract; private authoring artifacts are
+included only as explanatory context. For operating procedures, use the
+[documentation index](README.md).
+
 ## 1. Purpose
 
 This document proposes the smallest production-ready boundary between the
@@ -1588,7 +1593,7 @@ Implementation planning for profile expansion now lives in
 covers post-scratch new-design benchmarks, layout proposals and category
 alternatives. The proposal includes the private config/plan interface,
 implementation milestones, exit criteria and a
-[three-round review record](AUTHORING_AUTOMATION_REVIEW.md). The workflow
+record of resolved review requirements in the proposal itself. The workflow
 commands are not implemented yet.
 
 Production compatibility and ownership remain governed by this document:

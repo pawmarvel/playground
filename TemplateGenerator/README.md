@@ -46,12 +46,13 @@ The MVP provides:
 
 ## Documentation
 
-- [MVP operations guide](docs/MVP_OPERATIONS_GUIDE.md)
-- [MVP architecture and bundle contract](docs/MVP_PRODUCTION_BUNDLE_CATALOG_DESIGN.md)
-- [Authoring automation proposal and milestones](docs/AUTHORING_AUTOMATION_DESIGN.md) (planned)
-- Patrol Franchise expansion: [current-tool operations](docs/PATROL_FRANCHISE_CURRENT_OPERATIONS.md) and [optimized-workflow proposal](docs/PATROL_FRANCHISE_OPTIMIZED_OPERATIONS.md)
-- Design review: [overview](docs/GALLERY_VOTING_GUIDE.md), [workflow and data design](docs/DESIGN_REVIEW_WORKFLOW_DESIGN.md), [reviewer guide](docs/DESIGN_REVIEW_REVIEWER_GUIDE.md), and [operator guide](docs/DESIGN_REVIEW_OPERATOR_GUIDE.md)
-- [Future iterations](docs/FUTURE_PERSONALIZATION_ITERATIONS.md)
+Start with the [documentation index](docs/README.md), which routes readers by
+role and task and identifies each source of truth. Common entry points are:
+
+- template author/operator: [MVP operations guide](docs/MVP_OPERATIONS_GUIDE.md);
+- reviewer: [design-review reviewer guide](docs/DESIGN_REVIEW_REVIEWER_GUIDE.md);
+- FE/backend engineer: [bundle catalog and FE contract](docs/MVP_PRODUCTION_BUNDLE_CATALOG_DESIGN.md);
+- portfolio/category owner: [design development and scaling guide](docs/DESIGN_SCALING_GUIDE.md).
 
 The three development design folders are
 [`examples/life-is-good`](examples/life-is-good),

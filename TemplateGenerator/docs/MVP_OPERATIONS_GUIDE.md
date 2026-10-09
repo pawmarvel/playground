@@ -1,5 +1,10 @@
 # PawMarvel MVP Template Authoring Operations Guide
 
+Audience: template authors and application operators. Status: canonical
+runnable workflow. Architecture proposals do not override the commands and
+recovery rules in this guide. For other roles, use the
+[documentation index](README.md).
+
 This guide starts with the supported immutable development flow:
 
 ```text

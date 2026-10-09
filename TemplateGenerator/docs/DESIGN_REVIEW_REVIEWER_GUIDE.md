@@ -1,5 +1,8 @@
 # Design review: reviewer guide
 
+Audience: design reviewers. For other roles, use the
+[documentation index](README.md).
+
 ## Open the review
 
 1. Open the reviewer URL supplied by the operator, for example

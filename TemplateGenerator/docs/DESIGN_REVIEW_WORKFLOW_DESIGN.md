@@ -1,5 +1,9 @@
 # Design review workflow and data design
 
+Audience: review-service and operator-tooling engineers. Status: current review
+subsystem contract. Reviewer and operator procedures live in their dedicated
+guides listed in the [documentation index](README.md).
+
 ## Purpose
 
 This workflow turns candidate reference designs into a controlled team review.

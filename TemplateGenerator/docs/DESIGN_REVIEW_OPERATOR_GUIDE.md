@@ -1,5 +1,9 @@
 # Design review: operator guide
 
+Audience: application owners and design-review operators. For template
+authoring commands or engineering contracts, use the
+[documentation index](README.md).
+
 ## Start a shared review
 
 From the TemplateGenerator repository, install the editable command if needed:
