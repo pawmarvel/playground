@@ -211,6 +211,21 @@ it into later commands. The important initialization options are:
 | Online pet transformation | `--pet-provider`, `--pet-model`, `--pet-quality` | OpenAI Sunburst/low |
 | Print upscale | `--upscale-backend` | `deterministic` |
 
+For an `embedded-in-pet` design where the transformed image contains the full
+print pattern (for example, a mug wrap with snowflakes, trees, lettering, and
+the pet), do not use `pet-quality=low` for the selected print source. Use
+`high` or `xhigh`, compare it against the low-latency candidate, and select it
+only after visual review. The image model owns every pixel in this mode; an
+upscaler cannot reconstruct detail omitted by a low-quality generation.
+
+Use `deterministic-sharp` for detailed raster patterns. It performs local
+premultiplied-alpha Lanczos scaling followed by a bounded unsharp mask on the
+color channels while keeping the scaled alpha unchanged. Use plain
+`deterministic` for intentionally soft watercolor or painterly art when the
+sharp candidate introduces edge halos. Both are local and make no paid API
+call. Bria uploads the artwork to a third party and therefore requires an
+explicit privacy/data-processing decision before use.
+
 Provider-specific prompt paths are selected automatically. The model may be
 omitted to use the recommended default for the selected provider. Invalid
 provider/model/quality combinations are rejected before the config is written.
@@ -2270,6 +2285,71 @@ revalidated/imported, the local exchange copy may be reclaimed independently.
 exchange revisions, so allocation remains monotonic after this cleanup;
 do not delete selected authoring lineage with a filesystem command.
 
+### 9.1 Extend one released preview to multiple print targets
+
+Use this additive workflow only when the approved preview, pet runtime, prompt,
+references, and personalization mode remain valid and the vendor needs several
+output canvases. It does not rerun art or pet experiments and makes no image
+API calls. The published source revision remains immutable.
+
+For the released ornament profile, prepare one local review candidate:
+
+```bash
+PAWMARVEL_DESIGN_ID="holiday-ornament-oil-painting-head"
+PAWMARVEL_PROFILE_ID="ornament-992x992"
+PAWMARVEL_SOURCE_BUNDLE="$PAWMARVEL_EXCHANGE/bundles/${PAWMARVEL_DESIGN_ID}--${PAWMARVEL_PROFILE_ID}/v000001"
+PAWMARVEL_AUTHORING_PRODUCT="$PAWMARVEL_AUTHORING_ROOT/$PAWMARVEL_DESIGN_ID/$PAWMARVEL_PROFILE_ID"
+
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-print-targets" prepare \
+  --source-bundle "$PAWMARVEL_SOURCE_BUNDLE" \
+  --authoring-product "$PAWMARVEL_AUTHORING_PRODUCT" \
+  --candidate-id multi-output-v01 \
+  --target 992x992 \
+  --target 1098x1063 \
+  --target 780x1087 \
+  --target 1004x933 \
+  --coverage 0.95
+```
+
+The command creates true transparent canvases locally, derives a centered 95%
+pet box for every target, discovers the pet experiment pinned by the source
+bundle, and reuses every succeeded fixture cutout from that experiment. Review:
+
+```text
+authoring/<design>/<profile>/print-target-candidates/multi-output-v01/
+  candidate.json
+  artifacts/print-target-comparison.png     # every fixture × every target
+  compositions/<target-id>/<attempt-id>.png # private manual-QA evidence
+  print/<target-id>/art.png                  # transparent target canvas
+  print/<target-id>/layout.json              # centered 95% layout
+```
+
+Stop at this checkpoint. In `/operator`, open **Released**, expand the product's
+release evidence, and inspect **Multi-output print extension**. The contact
+sheet must be manually checked for crop, scale, centering, clipping, and the
+effect of each aspect ratio. Do not approve merely because deterministic gates
+passed.
+
+After approval, select **Approve targets and build new local revision**. This
+records the approver and contact-sheet hash, copies the source bundle into the
+next immutable revision, and adds `print-targets.json` plus the four
+`print/<target-id>/` directories. The original primary `print/art.png` and
+`layout-print.json` remain unchanged for backward-compatible consumers. The
+action also creates a new local release catalog; it does not upload anything.
+Use the separate **Publish verified release to S3** action after reviewing the
+new revision and displayed destination.
+
+The CLI equivalent of the approval action is available for recovery or
+automation, but must not be run before the manual contact-sheet review:
+
+```bash
+"$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-print-targets" approve-build \
+  --candidate "$PAWMARVEL_AUTHORING_PRODUCT/print-target-candidates/multi-output-v01" \
+  --output-dir "$PAWMARVEL_EXCHANGE/bundles" \
+  --approved-by application-owner \
+  --notes "Approved every fixture across all four ornament print targets"
+```
+
 This completes the brand-new-design path. Stop here until local review or FE
 trial feedback identifies a concrete reason for another iteration.
 
@@ -2764,7 +2844,7 @@ Scale only the approved customer pet and compose it with bundled print art:
   --print-layout "$PAWMARVEL_BUNDLE/layout-print.json" \
   --transformed-pet "$PAWMARVEL_SECOND_RUN/preview/transformed-pet.png" \
   --output-dir "$PAWMARVEL_SECOND_RUN/print" \
-  --backend deterministic
+  --backend deterministic-sharp
 
 "$PAWMARVEL_PROJECT/.venv/bin/pawmarvel-render" \
   --template-dir "$PAWMARVEL_BUNDLE" \
@@ -2776,8 +2856,19 @@ Scale only the approved customer pet and compose it with bundled print art:
 ```
 
 The preview and print must use the same bundle revision and customer values.
+Inspect the print at 100% pixel scale; do not approve it solely from the
+browser-fit preview. If fixed motifs or fur are already fuzzy in the selected
+preview transformation, create a new `high`/`xhigh` pet experiment first.
 
 ## 13. Clean up losing experiments
+
+In the operator GUI, a finished art or pet stage shows its current winner and
+keeps earlier experiments under **View previous experiments and evidence**.
+**Delete raw experiment files** is the focused cleanup path for one losing
+experiment: it requires confirmation and a reason, retains the immutable review
+packet, writes an `experiment_deleted` event under `operator-iterations/`, and
+refuses any experiment still selected or pinned downstream. Use the CLI flow
+below for scheduled, age-based cleanup across the authoring root.
 
 Mark a losing experiment before cleanup:
 

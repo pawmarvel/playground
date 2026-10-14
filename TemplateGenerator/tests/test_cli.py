@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import tempfile
 import time
 import unittest
@@ -529,6 +530,34 @@ class CliTests(unittest.TestCase):
         )
         generate(args, client=client)
         self.assertEqual(client.images.kwargs["size"], "816x816")
+
+    def test_product_profile_normalizes_full_canvas_transformed_pet(self) -> None:
+        profile_value = create_product_profile(
+            profile_id="coffee-mug-837x1020",
+            print_size=ImageSize(837, 1020),
+            preview_target_long_edge=1020,
+        ).to_dict()
+        profile_value["preview"]["transformed_pet"] = profile_value["preview"]["art"]
+        profile_value["geometry"]["nominal_print_layer_dimensions"][
+            "transformed_pet"
+        ] = profile_value["print"]["canvas"]
+        profile = self.root / "coffee-mug-profile.json"
+        profile.write_text(json.dumps(profile_value), encoding="utf-8")
+        client = FakeClient()
+        diagnostics = io.StringIO()
+        with redirect_stderr(diagnostics):
+            output = generate(
+                self.args(
+                    "--output-dir", str(self.root / "output"),
+                    "--product-profile", str(profile),
+                    "--profile-layer", "transformed-pet",
+                ),
+                client=client,
+            )
+
+        with Image.open(output) as image:
+            self.assertEqual(image.size, (837, 1020))
+        self.assertIn("preview.transformed-pet is not a native", diagnostics.getvalue())
 
     def test_product_profile_rejects_explicit_size_override(self) -> None:
         profile = write_product_profile(

@@ -468,6 +468,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=3,
         help="ranked candidates retained for review, 1-3 (default: 3)",
     )
+    proposal.add_argument(
+        "--centered-pet-fill",
+        type=float,
+        help=(
+            "use one centered pet box that fills this fraction of the allowed "
+            "preview canvas instead of running the bounded layout search"
+        ),
+    )
 
     bench = commands.add_parser("benchmark")
     bench.add_argument("--experiment", type=_path_argument, required=True)
@@ -557,7 +565,9 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     print_candidate.add_argument(
-        "--backend", choices=("deterministic", "bria"), default="deterministic"
+        "--backend",
+        choices=UPSCALE_BACKENDS,
+        default="deterministic",
     )
     print_candidate.add_argument(
         "--reuse-template-from",
@@ -759,6 +769,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 attempt_prefix=args.attempt_prefix,
                 max_candidates=args.max_candidates,
                 finalists=args.finalists,
+                centered_pet_fill=args.centered_pet_fill,
             )
             proposal_record = json.loads(
                 (result / "proposal.json").read_text(encoding="utf-8")

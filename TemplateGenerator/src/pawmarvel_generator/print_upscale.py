@@ -17,7 +17,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageChops, ImageFilter, UnidentifiedImageError
 
 from .artifact_io import mismatch, read_json
 from .cli import _atomic_write_bytes
@@ -38,6 +38,7 @@ PRINT_PROFILE_NAME = "product-profile.json"
 BRIA_ENDPOINT = "https://engine.prod.bria-api.com/v2/image/edit/increase_resolution"
 BRIA_MAX_DIMENSION = 8192
 PROGRESS_INTERVAL_SECONDS = 10.0
+UPSCALE_BACKENDS = ("deterministic", "deterministic-sharp", "bria")
 
 
 class PrintUpscaleError(ValueError):
@@ -188,6 +189,23 @@ def _resize_rgba(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     # Pillow's RGBa mode premultiplies color by alpha and avoids dark fringes
     # when partially transparent edge pixels are filtered.
     return image.convert("RGBa").resize(size, Image.Resampling.LANCZOS).convert("RGBA")
+
+
+def _sharpen_rgba(image: Image.Image) -> Image.Image:
+    """Sharpen premultiplied color without changing transparent-edge geometry."""
+    premultiplied = image.convert("RGBa")
+    red, green, blue, alpha = premultiplied.split()
+    sharpened_channels = []
+    for channel in (red, green, blue):
+        sharpened = channel.filter(
+            ImageFilter.UnsharpMask(radius=1.25, percent=135, threshold=3)
+        )
+        # Premultiplied color must never exceed alpha. Keeping that invariant
+        # avoids bright/dark fringes when converting back to straight RGBA.
+        sharpened_channels.append(ImageChops.darker(sharpened, alpha))
+    return Image.merge(
+        "RGBa", (*sharpened_channels, alpha)
+    ).convert("RGBA")
 
 
 def _normalize_cutout(
@@ -521,9 +539,9 @@ def _verify_split_print_bundle(
 
 def _validated_scale(layout: Layout, target_size: tuple[int, int]) -> float:
     target_width, target_height = target_size
-    if target_width <= layout.canvas_width or target_height <= layout.canvas_height:
+    if target_width < layout.canvas_width or target_height < layout.canvas_height:
         raise PrintUpscaleError(
-            "target dimensions must be larger than the preview art in both axes"
+            "target dimensions must not be smaller than the preview art"
         )
     if target_width * layout.canvas_height != target_height * layout.canvas_width:
         raise PrintUpscaleError(
@@ -545,9 +563,11 @@ def _upscale_provider(
     bria_token_file: Path | None,
     bria_provider: BriaProvider | None,
 ) -> tuple[int | None, BriaProvider | None]:
-    if backend not in {"deterministic", "bria"}:
-        raise PrintUpscaleError("backend must be deterministic or bria")
-    if backend == "deterministic":
+    if backend not in UPSCALE_BACKENDS:
+        raise PrintUpscaleError(
+            f"backend must be one of {', '.join(UPSCALE_BACKENDS)}"
+        )
+    if backend != "bria":
         return None, None
     increase = 2 if scale <= 2 else 4
     if any(
@@ -594,6 +614,8 @@ def _render_upscaled_layer(
             result.putalpha(
                 source.getchannel("A").resize(size, Image.Resampling.LANCZOS)
             )
+    if backend == "deterministic-sharp":
+        result = _sharpen_rgba(result)
     return _png_bytes(result, icc_profile=source.info.get("icc_profile"))
 
 
@@ -907,9 +929,9 @@ def prepare_print_assets(
             raise PrintUpscaleError(str(exc)) from exc
 
     target_width, target_height = target_size
-    if target_width <= layout.canvas_width or target_height <= layout.canvas_height:
+    if target_width < layout.canvas_width or target_height < layout.canvas_height:
         raise PrintUpscaleError(
-            "target dimensions must be larger than the preview art in both axes"
+            "target dimensions must not be smaller than the preview art"
         )
     if target_width * layout.canvas_height != target_height * layout.canvas_width:
         raise PrintUpscaleError(
@@ -956,8 +978,10 @@ def prepare_print_assets(
             max(1, round(pet_source.height * scale)),
         ),
     }
-    if backend not in {"deterministic", "bria"}:
-        raise PrintUpscaleError("backend must be deterministic or bria")
+    if backend not in UPSCALE_BACKENDS:
+        raise PrintUpscaleError(
+            f"backend must be one of {', '.join(UPSCALE_BACKENDS)}"
+        )
     bria_increase: int | None = None
     provider = bria_provider
     if backend == "bria":
@@ -1005,6 +1029,8 @@ def prepare_print_assets(
             result = _resize_rgba(candidate, size)
             if source.getchannel("A").getextrema()[0] < 255:
                 result.putalpha(source.getchannel("A").resize(size, Image.Resampling.LANCZOS))
+        if backend == "deterministic-sharp":
+            result = _sharpen_rgba(result)
         rendered[label] = _png_bytes(result, icc_profile=source.info.get("icc_profile"))
 
     print_layout = _scaled_print_layout(
@@ -1026,10 +1052,14 @@ def prepare_print_assets(
             }
             if backend == "bria"
             else {
-                "provider": "deterministic",
+                "provider": backend,
                 "native_increase": None,
                 "final_exact_scale": scale,
-                "normalization": "premultiplied-alpha Lanczos",
+                "normalization": (
+                    "premultiplied-alpha Lanczos plus bounded unsharp mask"
+                    if backend == "deterministic-sharp"
+                    else "premultiplied-alpha Lanczos"
+                ),
             }
         ),
         "product_profile": str(product_profile) if product_profile else None,

@@ -1864,6 +1864,29 @@ def prepare_print_candidate(
     profile_path = _relative_input(layout_experiment, profile_descriptor)
     profile = load_product_profile(profile_path)
     preview_layout = load_layout(layout_attempt / "outputs")
+    pet_generation = metadata["pet"].get("generation", {})
+    pet_parameters = (
+        pet_generation.get("parameters", {})
+        if isinstance(pet_generation, dict)
+        else {}
+    )
+    pet_quality = (
+        str(pet_parameters.get("quality", "")).strip().lower()
+        if isinstance(pet_parameters, dict)
+        else ""
+    )
+    pet_canvas_coverage = (
+        preview_layout.pet_box.width
+        * preview_layout.pet_box.height
+        / (preview_layout.canvas_width * preview_layout.canvas_height)
+    )
+    if pet_canvas_coverage >= 0.9 and pet_quality == "low":
+        raise AuthoringError(
+            "full-canvas transformed-pet print source uses quality=low; this "
+            "bakes soft fixed patterns and pet detail into the image before "
+            "upscaling. Create and select a high/xhigh pet experiment, rebind "
+            "the layout to one of its attempts, then prepare the print again"
+        )
     layout_fixture_name = str(
         records["layout"].get("layout_fixture", {}).get("pet_name") or ""
     ).strip() or None
@@ -1972,7 +1995,9 @@ def prepare_print_candidate(
                 )
             )
         template_backend = reused_record.get("backends", {}).get("template")
-        if template_backend not in {"deterministic", "bria"}:
+        if template_backend not in {
+            "deterministic", "deterministic-sharp", "bria"
+        }:
             raise AuthoringError(
                 "reused print candidate has no supported template backend"
             )

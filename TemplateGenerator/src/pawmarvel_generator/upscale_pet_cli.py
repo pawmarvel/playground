@@ -27,7 +27,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--transformed-pet", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
-        "--backend", choices=("deterministic", "bria"), default="deterministic"
+        "--backend",
+        choices=("deterministic", "deterministic-sharp", "bria"),
+        default="deterministic",
     )
     parser.add_argument("--bria-api-key-file", type=Path)
     parser.add_argument("--force", action="store_true")

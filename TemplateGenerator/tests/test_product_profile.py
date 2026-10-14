@@ -59,6 +59,27 @@ class ProductProfileTests(unittest.TestCase):
         self.assertEqual(load_product_profile(portrait_path).preview_art_size, ImageSize(800, 1056))
         self.assertEqual(load_product_profile(square_path).preview_art_size, ImageSize(1024, 1024))
 
+    def test_accepts_full_canvas_transformed_pet_layer(self) -> None:
+        profile = create_product_profile(
+            profile_id="coffee-mug-837x1020",
+            print_size=ImageSize(837, 1020),
+            preview_target_long_edge=1020,
+        )
+        path = write_product_profile(self.root / "profile.json", profile)
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["preview"]["transformed_pet"] = value["preview"]["art"]
+        value["geometry"]["nominal_print_layer_dimensions"]["transformed_pet"] = (
+            value["print"]["canvas"]
+        )
+        path.write_text(json.dumps(value), encoding="utf-8")
+
+        loaded = load_product_profile(path)
+
+        self.assertEqual(loaded.preview_art_size, ImageSize(837, 1020))
+        self.assertEqual(loaded.preview_pet_size, ImageSize(837, 1020))
+        self.assertEqual(loaded.print_size, ImageSize(837, 1020))
+        self.assertEqual(loaded.scale, 1.0)
+
 
     def test_rejects_print_ratio_outside_model_limit(self) -> None:
         with self.assertRaisesRegex(ProductProfileError, "3:1"):

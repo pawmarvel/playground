@@ -296,6 +296,84 @@ class BundleContractTests(unittest.TestCase):
         self.assertEqual(manifest["template_id"], "life-is-good--test-blanket")
         self.assertEqual(manifest["runtime"]["input_image_order"][0], "user_pet")
 
+    def test_validates_additive_multi_output_print_targets(self) -> None:
+        successor = self.bundle.parent / "v000002"
+        self.bundle.rename(successor)
+        self.bundle = successor
+        manifest_path = self.bundle / "bundle.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["bundle_revision"] = 2
+        manifest_path.write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+        targets = ((1344, 2016), (1098, 1063), (780, 1087), (1004, 933))
+        entries = []
+        for width, height in targets:
+            target_id = f"{width}x{height}"
+            root = self.bundle / "print" / target_id
+            root.mkdir(parents=True)
+            Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(
+                root / "art.png"
+            )
+            box_width = round(width * 0.95)
+            box_height = round(height * 0.95)
+            layout = {
+                "schema_version": 2,
+                "art": "art.png",
+                "pet": {
+                    "box": {
+                        "x": (width - box_width) // 2,
+                        "y": (height - box_height) // 2,
+                        "width": box_width,
+                        "height": box_height,
+                    }
+                },
+            }
+            (root / "layout.json").write_text(
+                json.dumps(layout) + "\n", encoding="utf-8"
+            )
+            entries.append(
+                {
+                    "target_id": target_id,
+                    "canvas": {"width": width, "height": height},
+                    "art": f"print/{target_id}/art.png",
+                    "layout": f"print/{target_id}/layout.json",
+                    "art_sha256": _sha256(root / "art.png"),
+                    "layout_sha256": _sha256(root / "layout.json"),
+                }
+            )
+        extension = {
+            "schema_version": 1,
+            "primary_target_id": "1344x2016",
+            "source_bundle": {
+                "template_id": "life-is-good--test-blanket",
+                "bundle_revision": 1,
+                "manifest_sha256": "a" * 64,
+            },
+            "layout_policy": {
+                "coverage": 0.95,
+                "horizontal_alignment": "center",
+                "vertical_alignment": "center",
+                "pet_fit": "contain-visible-alpha",
+                "pet_anchor": "center",
+            },
+            "targets": entries,
+            "approval": {
+                "status": "approved",
+                "approved_at": "2026-10-13T20:00:00Z",
+                "approved_by": "operator",
+                "notes": "Reviewed every fixture and target",
+                "candidate_id": "multi-output-v01",
+                "candidate_sha256": "b" * 64,
+                "contact_sheet_sha256": "c" * 64,
+            },
+        }
+        (self.bundle / "print-targets.json").write_text(
+            json.dumps(extension) + "\n", encoding="utf-8"
+        )
+        self._refresh_assets()
+
+        validate_production_bundle(self.bundle)
+        _validate_schema(extension, "print-targets-v1.schema.json")
+
     def test_validates_and_releases_bundle_without_reference_assets(self) -> None:
         (self.bundle / "reference-design.png").unlink()
         Image.new("RGBA", (672, 1008), (0, 0, 0, 0)).save(

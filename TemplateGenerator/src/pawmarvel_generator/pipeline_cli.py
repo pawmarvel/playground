@@ -176,7 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--upscale-backend",
-        choices=("deterministic", "bria"),
+        choices=("deterministic", "deterministic-sharp", "bria"),
         default="deterministic",
         help="print-layer upscale backend (default: deterministic)",
     )

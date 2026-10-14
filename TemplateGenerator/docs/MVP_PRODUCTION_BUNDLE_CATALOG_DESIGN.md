@@ -93,6 +93,10 @@ s3://<bucket>/<environment-prefix>/
     layout.json                          # composition-only preview layout-v2
     print/art.png                        # reusable profile-sized print art
     layout-print.json                    # mechanically scaled print layout-v2
+    print-targets.json                   # optional approved additive multi-output contract
+    print/<width>x<height>/               # present only when print-targets.json declares it
+      art.png                            # target-local reusable art
+      layout.json                        # target-local composition layout-v2
     reference-design.png                 # optional primary runtime reference
     reference-designs/                   # optional ordered references 0002+
       reference-design-0002.png
@@ -114,6 +118,52 @@ s3://<bucket>/<environment-prefix>/
 and media type; PNG entries also contain width and height. FE uses manifest
 fields and canonical paths, never filename scanning or authoring conventions.
 
+#### Optional multi-output print targets
+
+Some physical products share one preview/runtime contract but require several
+vendor output canvases. Such a bundle remains `bundle-v1`: it keeps
+`product-profile.json`, `print/art.png`, and `layout-print.json` as the legacy
+primary target and adds the inventoried `print-targets.json` asset. Existing
+importers that do not implement multi-output printing continue to use the
+primary paths unchanged. The existing published revision is never edited; the
+extension is delivered as a new bundle revision.
+
+`print-targets.json` is the authoritative discriminator for a multi-output
+revision. FE must detect it from `bundle.json.assets`, validate it against
+`print-targets-v1`, and never infer targets by scanning the `print/` directory.
+Its `primary_target_id` identifies the target represented by the legacy paths.
+Each target declares its exact canvas, art/layout paths, and hashes:
+
+```text
+bundle/
+  art.png
+  layout.json
+  print-targets.json
+  print/art.png                         # legacy alias for the primary target
+  layout-print.json                     # legacy primary layout
+  print/
+    992x992/art.png
+    992x992/layout.json
+    1098x1063/art.png
+    1098x1063/layout.json
+    780x1087/art.png
+    780x1087/layout.json
+    1004x933/art.png
+    1004x933/layout.json
+```
+
+Target layouts are self-contained template directories: resolve `art.png`
+relative to the directory containing that target's `layout.json`. For a vendor
+request, FE selects an exact declared `target_id`, uses that target's art and
+layout, and composes the approved customer transformed-pet pixels using
+visible-alpha contain with the target manifest's explicit center anchor. This
+target-local anchor overrides the legacy primary bundle's bottom-center anchor;
+the legacy paths and behavior remain unchanged. It must reject an undeclared size; arbitrary
+resizing or nearest-target selection is not part of this contract. The
+manifest includes operator approval and the source bundle identity/hash. Local
+fixture compositions and the review contact sheet remain private authoring QA
+and are deliberately not shipped in the production bundle.
+
 #### Runtime responsibilities
 
 | Phase | FE/application reads from bundle | FE/application supplies or creates |
@@ -121,7 +171,7 @@ fields and canonical paths, never filename scanning or authoring conventions.
 | Import | `bundle.json`, asset inventory, profile, layouts, prompt, references, and conditional font/license | Verified immutable application copy/cache and draft record |
 | Pet transform | `runtime.provider`, `runtime.model`, `runtime.transport`, closed `runtime.request_parameters`, `runtime.prompt`, ordered `runtime.reference_assets`, output/normalization policy | Customer pet as image 1; zero or more declared references afterward; transformed-pet PNG |
 | Preview | `art.png`, `layout.json`, renderer and optional `personalization.pet_name` semantics; selected OFL font only in `layout-text` mode | Transformed pet and, except for `name_mode: none`, a validated customer name |
-| Approved print | `print/art.png`, `layout-print.json`, profile, renderer semantics, and conditional font | Upscaled approved transformed pet and final print composition |
+| Approved print | Legacy primary: `print/art.png` and `layout-print.json`; when declared, an exact `print-targets.json` target; renderer semantics and conditional font | Upscaled approved transformed pet and final print composition |
 
 Preview and print must use the same bundle revision and customer values. FE
 must not regenerate or upscale template art. Model calls, private asset access,
@@ -208,12 +258,15 @@ glyph width.
    count, media type, and image dimension.
 5. Validate preview/print canvas dimensions against `product-profile.json` and
    verify that `layout-print.json` is the permitted scale of `layout.json`.
-6. Reject unsupported provider/model/transport/request fields, prompt-category
+6. If `print-targets.json` is inventoried, validate its source identity,
+   approval, unique exact targets, hashes, target-local canvases, and layout
+   policy. Keep the legacy primary paths available independently.
+7. Reject unsupported provider/model/transport/request fields, prompt-category
    mismatches, missing ordered references, or a personalization-mode mismatch
    among `renderer.name_mode`, the exact `{{PET_NAME}}` prompt token,
    preview/print layout name objects, `personalization.pet_name`, QA name, and
    conditional OFL font/license assets.
-7. Create or update only an application draft. Activation remains an explicit
+8. Create or update only an application draft. Activation remains an explicit
    application-owner action.
 
 #### Offline artifacts shown for context only
@@ -745,7 +798,11 @@ section 6.5. Draft experiments are never removed automatically. Published
 bundle revisions and the source evidence needed to explain them may not be
 removed by authoring cleanup. After an experiment is referenced by a selection,
 its status is immutable because the selection pins the experiment metadata
-hash; later work uses a successor experiment.
+hash; later work uses a successor experiment. An operator may explicitly delete
+the raw directory of an unselected experiment after a winner is recorded. That
+action retains the comparison/evaluation packet and a deletion audit event, and
+is rejected while any active layout, assembly, print, graduation, or published
+chain still pins the experiment.
 
 ### 6.3 Authoring artifact lifecycle
 
@@ -829,6 +886,9 @@ Cleanup and retirement are separate operations:
 - failed or discarded experiment attempts may be deleted after the configured
   authoring retention period; draft experiments require an explicit operator
   decision and are never age-deleted automatically;
+- the operator UI may explicitly delete the raw prompt/attempt/output directory
+  of an unselected art or pet experiment; comparison/evaluation evidence and a
+  local deletion event remain so the decision can still be explained;
 - a selected experiment is protected until its prompt, source hashes,
   generation configuration, outputs, and decision record are captured by an
   immutable bundle revision;
@@ -1813,7 +1873,10 @@ it.
 - Keep the local curated OFL catalog as the first tier. Permit an explicit,
   bounded Google Fonts OFL lookup when local candidates are inadequate, and
   publish only the selected face with its license and provenance.
-- Keep deterministic upscale for flow testing and optional Bria experiments.
+- Keep plain deterministic upscale for soft artwork and flow testing. Use the
+  local `deterministic-sharp` backend for detailed raster print patterns after
+  100% visual review. Treat Bria as an optional third-party data transfer that
+  requires explicit privacy approval.
 - Do not add a web authoring app, relational catalog database, or shared asset
   service.
 

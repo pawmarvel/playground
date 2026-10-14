@@ -196,13 +196,13 @@ def _scaled_rect(rect: Rect, scale: float) -> Rect:
 
 def validate_layout_pair(preview: Layout, print_layout: Layout) -> None:
     if (
-        print_layout.canvas_width <= preview.canvas_width
-        or print_layout.canvas_height <= preview.canvas_height
+        print_layout.canvas_width < preview.canvas_width
+        or print_layout.canvas_height < preview.canvas_height
     ):
         raise BundleError(
             mismatch(
-                "print canvas must be larger than preview canvas",
-                expected=f"> {preview.canvas_width}x{preview.canvas_height} in both dimensions",
+                "print canvas must not be smaller than preview canvas",
+                expected=f">= {preview.canvas_width}x{preview.canvas_height} in both dimensions",
                 actual=f"{print_layout.canvas_width}x{print_layout.canvas_height}",
             )
         )

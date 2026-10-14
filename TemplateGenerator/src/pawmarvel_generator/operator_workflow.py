@@ -31,6 +31,11 @@ from .authoring import (
 from .fixture_set import load_fixture_set, write_fixture_selection
 from .layout_proposal import propose_layout
 from .production_bundle import build_from_selection
+from .print_targets import (
+    DEFAULT_ORNAMENT_TARGETS,
+    build_multi_output_revision,
+    prepare_print_target_candidate,
+)
 from .release_catalog import build_release
 from .s3_publisher import publish_s3
 
@@ -342,6 +347,167 @@ def _retired_layout_experiments(product: Path) -> set[str]:
     return retired
 
 
+def _invalidated_print_candidates(product: Path) -> set[str]:
+    invalidated: set[str] = set()
+    for event_path in (product / "operator-iterations").glob("*.json"):
+        try:
+            event = _read_json(event_path)
+        except OperatorWorkflowError:
+            continue
+        invalidated.update(
+            str(value)
+            for value in event.get("invalidated_print_candidates", [])
+            if isinstance(value, str)
+        )
+    return invalidated
+
+
+def _latest_active_decision(
+    product: Path,
+    kind: str,
+    *,
+    fixture_tier: str | None = None,
+) -> tuple[Path, dict[str, Any]] | None:
+    decisions: list[tuple[str, str, Path, dict[str, Any]]] = []
+    for path in (product / "reviews" / kind).glob("*/decision.json"):
+        if not path.is_file() or (path.parent / "decision-retired.json").is_file():
+            continue
+        try:
+            value = _read_json(path)
+            if fixture_tier is not None:
+                evaluation = _read_json(path.parent / "evaluation.json")
+                if evaluation.get("fixture_tier") != fixture_tier:
+                    continue
+        except OperatorWorkflowError:
+            continue
+        selected_at = str(value.get("decision", {}).get("selected_at", ""))
+        decisions.append((selected_at, path.parent.name, path, value))
+    if not decisions:
+        return None
+    _, _, path, value = max(decisions, key=lambda item: (item[0], item[1]))
+    return path, value
+
+
+def _references_experiment(value: Any, kind: str, experiment_id: str) -> bool:
+    prefix = f"experiments/{kind}/{experiment_id}"
+    if isinstance(value, str):
+        normalized = value.replace("\\", "/").rstrip("/")
+        return (
+            normalized == prefix
+            or normalized.startswith(f"{prefix}/")
+            or normalized.endswith(f"/{prefix}")
+            or f"/{prefix}/" in normalized
+        )
+    if isinstance(value, dict):
+        return any(
+            _references_experiment(item, kind, experiment_id)
+            for item in value.values()
+        )
+    if isinstance(value, list):
+        return any(
+            _references_experiment(item, kind, experiment_id) for item in value
+        )
+    return False
+
+
+def _experiment_reference_blockers(
+    product: Path,
+    kind: str,
+    experiment_id: str,
+) -> list[str]:
+    """Return active/downstream records that make raw experiment deletion unsafe.
+
+    Review evaluations are intentionally not blockers. They are immutable,
+    self-contained evidence and remain after a losing experiment's larger raw
+    attempt directory is removed.
+    """
+
+    blockers: list[str] = []
+    decision = _latest_active_decision(
+        product,
+        kind,
+        fixture_tier="release" if kind == "pet" else None,
+    )
+    if decision is None:
+        blockers.append(f"no current {kind} winner decision is recorded")
+    else:
+        decision_path, value = decision
+        selected = value.get("selected", {})
+        if isinstance(selected, dict) and selected.get("experiment_id") == experiment_id:
+            blockers.append(
+                f"current {kind} decision {decision_path.parent.name} selects it"
+            )
+
+    assembly = _latest_active_decision(product, "assembly")
+    if assembly is not None:
+        decision_path, value = assembly
+        if _references_experiment(value.get("selected", {}), kind, experiment_id):
+            blockers.append(
+                f"active assembly decision {decision_path.parent.name} references it"
+            )
+
+    retired_layouts = _retired_layout_experiments(product)
+    for path in sorted((product / "experiments/layout").glob("*/experiment.json")):
+        if path.parent.name in retired_layouts:
+            continue
+        try:
+            value = _read_json(path)
+        except OperatorWorkflowError:
+            continue
+        if _references_experiment(value.get("inputs", {}), kind, experiment_id):
+            blockers.append(f"layout experiment {path.parent.name} pins it")
+
+    invalidated_prints = _invalidated_print_candidates(product)
+    for path in sorted((product / "print-candidates").glob("*/print-candidate.json")):
+        if path.parent.name in invalidated_prints:
+            continue
+        try:
+            value = _read_json(path)
+        except OperatorWorkflowError:
+            continue
+        if _references_experiment(value.get("sources", {}), kind, experiment_id):
+            blockers.append(f"print candidate {path.parent.name} references it")
+
+    for path in sorted((product / "graduations").glob("*/selection.json")):
+        try:
+            value = _read_json(path)
+        except OperatorWorkflowError:
+            continue
+        if _references_experiment(
+            {"selected": value.get("selected", {}), "sources": value.get("sources", {})},
+            kind,
+            experiment_id,
+        ):
+            blockers.append(f"graduation {path.parent.name} references it")
+
+    return sorted(set(blockers))
+
+
+def _decorate_experiment_cleanup(
+    product: Path,
+    experiments: dict[str, list[dict[str, Any]]],
+) -> None:
+    for kind, entries in experiments.items():
+        decision = _latest_active_decision(
+            product,
+            kind,
+            fixture_tier="release" if kind == "pet" else None,
+        )
+        selected_id = None
+        if decision is not None:
+            selected = decision[1].get("selected", {})
+            if isinstance(selected, dict):
+                selected_id = selected.get("experiment_id")
+        for entry in entries:
+            experiment_id = str(entry["experiment_id"])
+            blockers = _experiment_reference_blockers(product, kind, experiment_id)
+            entry["selected"] = experiment_id == selected_id
+            entry["cleanup"] = {
+                "deletable": not blockers,
+                "blockers": blockers,
+            }
+
+
 def _proposal_entries(product: Path, assets: dict[str, Path]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     retired_experiments = _retired_layout_experiments(product)
@@ -396,17 +562,7 @@ def _print_candidate_entries(
     product: Path, assets: dict[str, Path]
 ) -> list[dict[str, Any]]:
     """Expose immutable print finalists and their review images to the operator."""
-    invalidated: set[str] = set()
-    for event_path in (product / "operator-iterations").glob("*.json"):
-        try:
-            event = _read_json(event_path)
-        except OperatorWorkflowError:
-            continue
-        invalidated.update(
-            str(value)
-            for value in event.get("invalidated_print_candidates", [])
-            if isinstance(value, str)
-        )
+    invalidated = _invalidated_print_candidates(product)
     result: list[dict[str, Any]] = []
     for candidate in sorted((product / "print-candidates").glob("*")):
         record_path = candidate / "print-candidate.json"
@@ -432,6 +588,53 @@ def _print_candidate_entries(
                 "debug_print_url": (
                     _asset_url(debug_print, assets) if debug_print.is_file() else None
                 ),
+            }
+        )
+    return sorted(
+        result,
+        key=lambda item: (
+            str(item.get("created_at") or ""),
+            str(item.get("candidate_id") or ""),
+        ),
+    )
+
+
+def _print_target_candidate_entries(
+    product: Path, assets: dict[str, Path]
+) -> list[dict[str, Any]]:
+    """Expose additive multi-output candidates without treating them as bundles."""
+    result: list[dict[str, Any]] = []
+    for candidate in sorted((product / "print-target-candidates").glob("*")):
+        record_path = candidate / "candidate.json"
+        if not candidate.is_dir() or not record_path.is_file():
+            continue
+        try:
+            record = _read_json(record_path)
+        except OperatorWorkflowError:
+            continue
+        contact_sheet = candidate / str(record.get("contact_sheet", ""))
+        approval_path = candidate / "approval.json"
+        approval = None
+        if approval_path.is_file():
+            try:
+                approval = _read_json(approval_path)
+            except OperatorWorkflowError:
+                approval = {"error": f"Unreadable approval: {approval_path.resolve()}"}
+        result.append(
+            {
+                "candidate_id": candidate.name,
+                "created_at": record.get("created_at"),
+                "status": "approved" if approval is not None else record.get("status"),
+                "primary_target_id": record.get("primary_target_id"),
+                "targets": record.get("targets", []),
+                "fixture_attempt_ids": record.get("reuse", {}).get(
+                    "fixture_attempt_ids", []
+                ),
+                "layout_policy": record.get("layout_policy", {}),
+                "contact_sheet_url": (
+                    _asset_url(contact_sheet, assets) if contact_sheet.is_file() else None
+                ),
+                "approval": approval,
             }
         )
     return sorted(
@@ -473,6 +676,7 @@ def discover_operator_workflows(
                         for path in sorted((product / "reviews" / kind).glob("*"))
                         if path.is_dir() and (entry := _review_entry(path, assets)) is not None
                     ]
+                _decorate_experiment_cleanup(product, experiments)
                 product_releases = releases.get((design_id, product.name), [])
                 products.append(
                     {
@@ -481,6 +685,9 @@ def discover_operator_workflows(
                         "reviews": reviews,
                         "layout_proposals": _proposal_entries(product, assets),
                         "print_candidates": _print_candidate_entries(product, assets),
+                        "print_target_candidates": _print_target_candidate_entries(
+                            product, assets
+                        ),
                         "graduations": sorted(
                             path.name
                             for path in (product / "graduations").glob("*")
@@ -504,6 +711,7 @@ def discover_operator_workflows(
                         "reviews": {"art": [], "pet": [], "layout": [], "assembly": []},
                         "layout_proposals": [],
                         "print_candidates": [],
+                        "print_target_candidates": [],
                         "graduations": [],
                         "releases": entries,
                         "released": any(
@@ -522,29 +730,18 @@ def _selected_review(
     *,
     fixture_tier: str | None = None,
 ) -> Path:
-    decided: list[tuple[str, Path]] = []
-    for path in (product / "reviews" / kind).glob("*/decision.json"):
-        if not path.is_file():
-            continue
-        if (path.parent / "decision-retired.json").is_file():
-            continue
-        try:
-            value = _read_json(path)
-        except OperatorWorkflowError:
-            continue
-        if fixture_tier is not None:
-            evaluation = _read_json(path.parent / "evaluation.json")
-            if evaluation.get("fixture_tier") != fixture_tier:
-                continue
-        selected_at = value.get("decision", {}).get("selected_at", "")
-        decided.append((str(selected_at), path.parent))
-    if not decided:
+    selected = _latest_active_decision(
+        product,
+        kind,
+        fixture_tier=fixture_tier,
+    )
+    if selected is None:
         raise OperatorWorkflowError(
             f"{kind} decision"
             f"{f' for {fixture_tier} fixtures' if fixture_tier else ''} "
             f"is required before this action; product={product.resolve()}"
         )
-    return max(decided, key=lambda item: (item[0], item[1].name))[1]
+    return selected[0].parent
 
 
 def _decision_selected(review: Path) -> dict[str, Any]:
@@ -637,12 +834,15 @@ class OperatorWorkflowRunner:
         "rerun-experiment",
         "run-pet-benchmark",
         "record-decision",
+        "delete-experiment",
         "generate-layout-proposal",
         "accept-layout-proposal",
         "reopen-stage",
         "generate-composition",
         "prepare-print",
         "build-local-release",
+        "prepare-print-targets",
+        "approve-print-targets",
         "publish-s3",
     )
 
@@ -672,6 +872,8 @@ class OperatorWorkflowRunner:
             return self._run_pet_benchmark(payload, progress)
         if action == "record-decision":
             return self._record_decision(payload, operator_id, progress)
+        if action == "delete-experiment":
+            return self._delete_experiment(payload, operator_id, progress)
         if action == "generate-layout-proposal":
             return self._generate_layout(payload, operator_id, progress)
         if action == "accept-layout-proposal":
@@ -684,6 +886,10 @@ class OperatorWorkflowRunner:
             return self._prepare_print(payload, operator_id, progress)
         if action == "build-local-release":
             return self._build_local_release(payload, operator_id, progress)
+        if action == "prepare-print-targets":
+            return self._prepare_print_targets(payload, progress)
+        if action == "approve-print-targets":
+            return self._approve_print_targets(payload, operator_id, progress)
         if action == "publish-s3":
             return self._publish_s3(payload, progress)
 
@@ -804,7 +1010,7 @@ class OperatorWorkflowRunner:
     def _run_pet_benchmark(
         self, payload: dict[str, Any], progress: Callable[[str], None]
     ) -> dict[str, Any]:
-        _, _, product = self._product(payload)
+        design_id, profile_id, product = self._product(payload)
         experiment_id = _safe_id(payload.get("experiment_id"), "experiment_id")
         experiment = _contained(product / "experiments/pet", experiment_id)
         meta = _read_json(experiment / "experiment.json")
@@ -888,6 +1094,112 @@ class OperatorWorkflowRunner:
             selected_attempt=selected_attempt,
         )
         return {"decision": str(output)}
+
+    def _delete_experiment(
+        self,
+        payload: dict[str, Any],
+        operator_id: str,
+        progress: Callable[[str], None],
+    ) -> dict[str, Any]:
+        """Delete raw files for an unselected experiment, retaining review evidence."""
+
+        design_id, profile_id, product = self._product(payload)
+        kind = str(payload.get("kind", "")).strip()
+        if kind not in {"art", "pet"}:
+            raise OperatorWorkflowError(
+                "operator cleanup kind must be art or pet; "
+                f"actual={kind!r}"
+            )
+        experiment_id = _safe_id(payload.get("experiment_id"), "experiment_id")
+        reason = str(payload.get("reason", "")).strip()
+        if not reason:
+            raise OperatorWorkflowError(
+                "deleting an experiment requires a reason for the audit trail"
+            )
+        experiment = _contained(
+            product / "experiments" / kind,
+            experiment_id,
+        )
+        metadata_path = experiment / "experiment.json"
+        metadata = _read_json(metadata_path)
+        if metadata.get("kind") != kind or metadata.get("experiment_id") != experiment_id:
+            raise OperatorWorkflowError(
+                "experiment identity does not match the cleanup request; "
+                f"requested={{'kind': {kind!r}, 'experiment_id': {experiment_id!r}}}; "
+                f"actual={{'kind': {metadata.get('kind')!r}, "
+                f"'experiment_id': {metadata.get('experiment_id')!r}}}; "
+                f"metadata={metadata_path.resolve()}"
+            )
+        blockers = _experiment_reference_blockers(product, kind, experiment_id)
+        if blockers:
+            raise OperatorWorkflowError(
+                "experiment cannot be deleted because protected downstream records "
+                "still reference it; "
+                f"experiment={experiment.resolve()}; blockers={blockers!r}. "
+                "Select a different winner or reopen the affected stage and rebuild "
+                "its downstream chain before cleanup."
+            )
+
+        retained_reviews: list[str] = []
+        for evaluation_path in sorted((product / "reviews" / kind).glob("*/evaluation.json")):
+            try:
+                evaluation = _read_json(evaluation_path)
+            except OperatorWorkflowError:
+                continue
+            if any(
+                isinstance(candidate, dict)
+                and candidate.get("experiment_id") == experiment_id
+                for candidate in evaluation.get("candidates", [])
+            ):
+                retained_reviews.append(evaluation_path.parent.name)
+
+        event_id = (
+            datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            + "-"
+            + uuid.uuid4().hex[:8]
+        )
+        deleted_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        event_path = product / "operator-iterations" / f"{event_id}.json"
+        event = {
+            "schema_version": 1,
+            "event_id": event_id,
+            "event": "experiment_deleted",
+            "status": "deleting",
+            "design_id": design_id,
+            "product_profile_id": profile_id,
+            "kind": kind,
+            "experiment_id": experiment_id,
+            "experiment_metadata_sha256": sha256(metadata_path),
+            "retained_reviews": retained_reviews,
+            "deleted_by": operator_id,
+            "deleted_at": deleted_at,
+            "reason": reason,
+        }
+        atomic_json(event_path, event)
+        progress(
+            f"Deleting unselected {kind} experiment {experiment_id}; "
+            "immutable comparison reviews are retained"
+        )
+        try:
+            shutil.rmtree(experiment)
+        except OSError as exc:
+            event["status"] = "failed"
+            event["error"] = str(exc)
+            atomic_json(event_path, event)
+            raise OperatorWorkflowError(
+                f"could not delete experiment directory: {experiment.resolve()}: {exc}"
+            ) from exc
+        event["status"] = "deleted"
+        atomic_json(event_path, event)
+        progress(
+            f"Deleted {kind} experiment {experiment_id}; retained reviews: "
+            f"{retained_reviews or 'none'}"
+        )
+        return {
+            "deleted_experiment": str(experiment),
+            "retained_reviews": retained_reviews,
+            "event": str(event_path),
+        }
 
     def _reopen_stage(
         self,
@@ -1393,6 +1705,130 @@ class OperatorWorkflowRunner:
             asset_base_url=None,
         )
         return {"selection": str(selection), "bundle": str(bundle), "release_catalog": str(catalog)}
+
+    def _published_source_bundle(
+        self, design_id: str, profile_id: str
+    ) -> tuple[Path, dict[str, Any]]:
+        releases = discover_releases(
+            self.config.exchange_root, self.config.authoring_root
+        ).get((design_id, profile_id), [])
+        published = [
+            item
+            for item in releases
+            if item.get("active", True) and item.get("published")
+        ]
+        if not published:
+            raise OperatorWorkflowError(
+                "a published source bundle is required before extending print targets; "
+                f"design_id={design_id!r}; product_profile_id={profile_id!r}"
+            )
+        selected = published[-1]
+        manifest_path = selected.get("manifest_path")
+        if not isinstance(manifest_path, str):
+            raise OperatorWorkflowError(
+                f"published release has no manifest path: {selected!r}"
+            )
+        bundle = (self.config.exchange_root / Path(manifest_path).parent).resolve()
+        if not bundle.is_relative_to(self.config.exchange_root.resolve()):
+            raise OperatorWorkflowError(
+                f"published bundle path escapes exchange root: {bundle}"
+            )
+        return bundle, selected
+
+    def _prepare_print_targets(
+        self, payload: dict[str, Any], progress: Callable[[str], None]
+    ) -> dict[str, Any]:
+        design_id, profile_id, product = self._product(payload)
+        source_bundle, _ = self._published_source_bundle(design_id, profile_id)
+        candidate_id = _safe_id(
+            payload.get("candidate_id") or "multi-output-v01", "candidate_id"
+        )
+        raw_targets = payload.get("targets")
+        targets = (
+            raw_targets
+            if isinstance(raw_targets, list) and raw_targets
+            else list(DEFAULT_ORNAMENT_TARGETS)
+        )
+        if not all(isinstance(value, str) for value in targets):
+            raise OperatorWorkflowError("print targets must be an array of WIDTHxHEIGHT strings")
+        progress(
+            "Rendering approved transformed-pet fixtures against transparent local "
+            "canvases; no image API calls are made"
+        )
+        candidate = prepare_print_target_candidate(
+            source_bundle=source_bundle,
+            authoring_product=product,
+            candidate_id=candidate_id,
+            targets=targets,
+            coverage=0.95,
+        )
+        return {"candidate": str(candidate)}
+
+    def _approve_print_targets(
+        self, payload: dict[str, Any], operator_id: str, progress: Callable[[str], None]
+    ) -> dict[str, Any]:
+        design_id, profile_id, product = self._product(payload)
+        candidate_id = _safe_id(payload.get("candidate_id"), "candidate_id")
+        candidate = _contained(product / "print-target-candidates", candidate_id)
+        notes = str(payload.get("notes", "")).strip()
+        if not notes:
+            raise OperatorWorkflowError(
+                "manual print-target approval notes are required"
+            )
+        progress("Building a new immutable bundle revision from the approved targets")
+        bundle = build_multi_output_revision(
+            candidate=candidate,
+            output_dir=self.config.exchange_root / "bundles",
+            approved_by=operator_id,
+            approval_notes=notes,
+        )
+        bundle_manifest = _read_json(bundle / "bundle.json")
+        existing_release = next(
+            (
+                entry
+                for entry in discover_releases(
+                    self.config.exchange_root, self.config.authoring_root
+                ).get((design_id, profile_id), [])
+                if entry.get("bundle_revision")
+                == bundle_manifest.get("bundle_revision")
+            ),
+            None,
+        )
+        if existing_release is not None:
+            progress(
+                "The approved bundle revision already has a local release catalog; "
+                "reusing it"
+            )
+            return {
+                "candidate": str(candidate),
+                "bundle": str(bundle),
+                "release_catalog": str(existing_release["catalog"]),
+            }
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        existing = [
+            path.parent.name
+            for path in (self.config.exchange_root / "releases").glob(
+                f"{date}.*/catalog.json"
+            )
+        ]
+        numbers = [
+            int(value.rsplit(".", 1)[1])
+            for value in existing
+            if value.rsplit(".", 1)[-1].isdigit()
+        ]
+        release_id = f"{date}.{max(numbers, default=0) + 1:03d}"
+        progress(f"Building local release catalog {release_id}")
+        catalog = build_release(
+            release_id=release_id,
+            bundles=[bundle],
+            exchange_root=self.config.exchange_root,
+            asset_base_url=None,
+        )
+        return {
+            "candidate": str(candidate),
+            "bundle": str(bundle),
+            "release_catalog": str(catalog),
+        }
 
     def _publish_s3(
         self, payload: dict[str, Any], progress: Callable[[str], None]

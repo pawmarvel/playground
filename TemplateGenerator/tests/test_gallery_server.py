@@ -242,6 +242,19 @@ class GalleryServerTests(unittest.TestCase):
                 )
             )
 
+    def test_operator_refresh_returns_specific_json_for_partial_design(self) -> None:
+        reference = self.root / "christmas-one/reference-design.png"
+        reference.rename(reference.with_name("reference design.png"))
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(self.base + "/api/operator/designs")
+        try:
+            self.assertEqual(caught.exception.code, 409)
+            payload = json.loads(caught.exception.read())
+            self.assertIn("gallery refresh failed", payload["error"])
+            self.assertIn(str(reference.resolve()), payload["error"])
+        finally:
+            caught.exception.close()
+
     def test_release_pool_and_s3_settings_are_preserved_by_server_factory(self) -> None:
         release_root = self.temp_root / "Release Pool"
         release_root.mkdir(exist_ok=True)
@@ -314,7 +327,11 @@ class GalleryServerTests(unittest.TestCase):
         self.assertIn('Publish verified release to S3', javascript)
         self.assertIn('action:"publish-s3"', javascript)
         self.assertIn('action:"reopen-stage"', javascript)
+        self.assertIn('action:"delete-experiment"', javascript)
         self.assertIn('Redo / improve', javascript)
+        self.assertIn('Winning decision evidence', javascript)
+        self.assertIn('View previous experiments and evidence', javascript)
+        self.assertIn('Delete raw experiment files', javascript)
         self.assertIn('Open supersession record', javascript)
         self.assertIn('move the design to the Release Pool', javascript)
         self.assertIn('Complete release-pool move', javascript)

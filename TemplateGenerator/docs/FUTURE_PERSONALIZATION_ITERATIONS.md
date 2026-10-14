@@ -100,8 +100,8 @@ Define and revision-lock per vendor/product:
 - backend/style/scale-factor combinations approved for upscaling; and
 - measurable edge, detail, color, and alpha thresholds from printed samples.
 
-The current deterministic and Bria backends produce print candidates, not
-vendor-qualified deliverables. An upscaler must preserve canvas origin, aspect
+The current deterministic, deterministic-sharp, and Bria backends produce
+print candidates, not vendor-qualified deliverables. An upscaler must preserve canvas origin, aspect
 ratio, crop, subject placement, and alpha silhouette; it must not regenerate or
 reinterpret approved artwork. For alpha images, evaluate enhancing RGB while
 scaling the approved alpha mask deterministically.

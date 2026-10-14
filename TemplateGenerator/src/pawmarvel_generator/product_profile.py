@@ -114,7 +114,17 @@ def derive_art_preview_size(
         raise ProductProfileError(
             "print canvas aspect ratio exceeds the GPT Image 2/2.5 limit of 3:1"
         )
-    candidates = _valid_candidates_for_ratio(ratio_width, ratio_height)
+    if max(print_size.width, print_size.height) <= target_long_edge:
+        # Small-format products may intentionally use the vendor raster directly
+        # for both interactive preview and print output. The image provider can
+        # still render on its nearest native canvas; the generator normalizes the
+        # response to this exact profile-owned size.
+        return print_size
+    candidates = [
+        candidate
+        for candidate in _valid_candidates_for_ratio(ratio_width, ratio_height)
+        if candidate.width < print_size.width and candidate.height < print_size.height
+    ]
     if candidates:
         return min(
             candidates,
@@ -192,9 +202,9 @@ def create_product_profile(
         raise ProductProfileError("maximum file bytes must be positive")
 
     art = derive_art_preview_size(print_size, preview_target_long_edge)
-    if print_size.width <= art.width or print_size.height <= art.height:
+    if print_size.width < art.width or print_size.height < art.height:
         raise ProductProfileError(
-            "print canvas must be larger than the derived preview canvas in both axes"
+            "print canvas must not be smaller than the derived preview canvas"
         )
     pet = _closest_square(min(art.width, art.height))
     physical_size = (
@@ -328,10 +338,12 @@ def _load_product_profile(path: Path) -> ProductProfile:
     print_size = _size_from_mapping(print_data.get("canvas"), "print.canvas")
     art = _size_from_mapping(preview.get("art"), "preview.art")
     pet = _size_from_mapping(preview.get("transformed_pet"), "preview.transformed_pet")
-    try:
-        validate_gpt_image_2_size(pet, "preview.transformed_pet")
-    except ImageSizeError as exc:
-        raise ProductProfileError(str(exc)) from exc
+    full_canvas_pet = pet == art
+    if not full_canvas_pet:
+        try:
+            validate_gpt_image_2_size(pet, "preview.transformed_pet")
+        except ImageSizeError as exc:
+            raise ProductProfileError(str(exc)) from exc
     if print_size.width * art.height != print_size.height * art.width:
         raise ProductProfileError(
             "preview.art aspect ratio must exactly match print.canvas"
@@ -345,9 +357,10 @@ def _load_product_profile(path: Path) -> ProductProfile:
             "preview.art conflicts with the profile print canvas and target long edge"
         )
     expected_preview_pet = _closest_square(min(art.width, art.height))
-    if pet != expected_preview_pet:
+    if pet not in {expected_preview_pet, art}:
         raise ProductProfileError(
-            "preview.transformed_pet conflicts with the derived preview art size"
+            "preview.transformed_pet must be either the derived square pet canvas "
+            "or the full preview.art canvas"
         )
     print_spec = {key: item for key, item in print_data.items() if key != "canvas"}
     dpi = print_spec.get("dpi")
@@ -416,9 +429,9 @@ def _load_product_profile(path: Path) -> ProductProfile:
         raise ProductProfileError("print.max_file_bytes must be positive or null")
     if print_spec.get("output_format") != "png":
         raise ProductProfileError("MVP product profiles currently require PNG output")
-    if print_size.width <= art.width or print_size.height <= art.height:
+    if print_size.width < art.width or print_size.height < art.height:
         raise ProductProfileError(
-            "print canvas must be larger than preview.art in both axes"
+            "print canvas must not be smaller than preview.art"
         )
 
     ratio_gcd = math.gcd(print_size.width, print_size.height)

@@ -223,6 +223,157 @@ class OperatorWorkflowDiscoveryTests(unittest.TestCase):
                 progress=lambda _: None,
             )
 
+    def test_operator_deletes_only_unselected_experiment_and_retains_review(self) -> None:
+        product = self.authoring / "test-design/test-profile"
+        write_json(product / "product.json", {"design_id": "test-design"})
+        for experiment_id in ("art-gpt-v01", "art-gpt-v02"):
+            experiment = product / "experiments/art" / experiment_id
+            write_json(
+                experiment / "experiment.json",
+                {
+                    "experiment_id": experiment_id,
+                    "kind": "art",
+                    "status": "draft",
+                    "created_at": f"2026-10-0{1 if experiment_id.endswith('01') else 2}T00:00:00Z",
+                    "generation": {"provider": "openai", "model": "gpt-image-2"},
+                    "inputs": {},
+                },
+            )
+            write_json(
+                experiment / "attempts/attempt-0001/run.json",
+                {"status": "succeeded"},
+            )
+        review = product / "reviews/art/art-v01-v02"
+        write_json(
+            review / "evaluation.json",
+            {
+                "kind": "art",
+                "review_id": "art-v01-v02",
+                "hard_gates": {"status": "passed"},
+                "candidates": [
+                    {"experiment_id": "art-gpt-v01"},
+                    {"experiment_id": "art-gpt-v02"},
+                ],
+            },
+        )
+        write_json(
+            review / "decision.json",
+            {
+                "kind": "art",
+                "selected": {
+                    "experiment_id": "art-gpt-v02",
+                    "attempt_id": "attempt-0001",
+                },
+                "decision": {
+                    "selected_by": "owner",
+                    "selected_at": "2026-10-03T00:00:00Z",
+                },
+            },
+        )
+        runner = OperatorWorkflowRunner(
+            OperatorWorkflowConfig(
+                project_root=self.root,
+                authoring_root=self.authoring,
+                exchange_root=self.exchange,
+                jobs_root=self.root / "jobs",
+            )
+        )
+
+        workflows, _ = discover_operator_workflows(runner.config, {"test-design"})
+        discovered = {
+            item["experiment_id"]: item
+            for item in workflows["test-design"][0]["experiments"]["art"]
+        }
+        self.assertTrue(discovered["art-gpt-v02"]["selected"])
+        self.assertFalse(discovered["art-gpt-v02"]["cleanup"]["deletable"])
+        self.assertTrue(discovered["art-gpt-v01"]["cleanup"]["deletable"])
+
+        with self.assertRaisesRegex(
+            OperatorWorkflowError,
+            "current art decision art-v01-v02 selects it",
+        ):
+            runner.execute(
+                {
+                    "action": "delete-experiment",
+                    "design_id": "test-design",
+                    "product_profile_id": "test-profile",
+                    "kind": "art",
+                    "experiment_id": "art-gpt-v02",
+                    "reason": "Must not delete winner",
+                },
+                operator_id="owner",
+                progress=lambda _: None,
+            )
+
+        result = runner.execute(
+            {
+                "action": "delete-experiment",
+                "design_id": "test-design",
+                "product_profile_id": "test-profile",
+                "kind": "art",
+                "experiment_id": "art-gpt-v01",
+                "reason": "Superseded by v02",
+            },
+            operator_id="owner",
+            progress=lambda _: None,
+        )
+        self.assertFalse((product / "experiments/art/art-gpt-v01").exists())
+        self.assertTrue((review / "evaluation.json").is_file())
+        self.assertEqual(result["retained_reviews"], ["art-v01-v02"])
+        event = json.loads(Path(result["event"]).read_text(encoding="utf-8"))
+        self.assertEqual(event["status"], "deleted")
+        self.assertEqual(event["experiment_id"], "art-gpt-v01")
+
+    def test_experiment_cleanup_is_blocked_by_layout_dependency(self) -> None:
+        product = self.authoring / "test-design/test-profile"
+        write_json(product / "product.json", {"design_id": "test-design"})
+        experiment = product / "experiments/art/art-gpt-v01"
+        write_json(
+            experiment / "experiment.json",
+            {
+                "experiment_id": "art-gpt-v01",
+                "kind": "art",
+                "status": "draft",
+            },
+        )
+        write_json(
+            product / "experiments/layout/layout-v01/experiment.json",
+            {
+                "experiment_id": "layout-v01",
+                "kind": "layout",
+                "inputs": {
+                    "art_attempt": {
+                        "path": "experiments/art/art-gpt-v01/attempts/attempt-0001"
+                    }
+                },
+            },
+        )
+        runner = OperatorWorkflowRunner(
+            OperatorWorkflowConfig(
+                project_root=self.root,
+                authoring_root=self.authoring,
+                exchange_root=self.exchange,
+                jobs_root=self.root / "jobs",
+            )
+        )
+        with self.assertRaisesRegex(
+            OperatorWorkflowError,
+            "layout experiment layout-v01 pins it",
+        ):
+            runner.execute(
+                {
+                    "action": "delete-experiment",
+                    "design_id": "test-design",
+                    "product_profile_id": "test-profile",
+                    "kind": "art",
+                    "experiment_id": "art-gpt-v01",
+                    "reason": "Try cleanup",
+                },
+                operator_id="owner",
+                progress=lambda _: None,
+            )
+        self.assertTrue(experiment.is_dir())
+
     def test_reopen_pet_preserves_history_and_retires_downstream_chain(self) -> None:
         product = self.authoring / "test-design/test-profile"
         write_json(product / "product.json", {"design_id": "test-design"})
@@ -497,6 +648,14 @@ class OperatorJobManagerTests(unittest.TestCase):
 
     def test_prepare_print_is_in_runtime_contract(self) -> None:
         self.assertIn("prepare-print", OperatorWorkflowRunner.supported_actions)
+
+    def test_multi_output_print_actions_are_in_runtime_contract(self) -> None:
+        self.assertIn(
+            "prepare-print-targets", OperatorWorkflowRunner.supported_actions
+        )
+        self.assertIn(
+            "approve-print-targets", OperatorWorkflowRunner.supported_actions
+        )
 
     def test_publish_s3_records_success_then_moves_design_to_release_pool(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

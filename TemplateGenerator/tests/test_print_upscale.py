@@ -7,7 +7,7 @@ import unittest
 from io import BytesIO
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from helpers import copy_font, layout_data, make_image, make_transparent_mark
 from pawmarvel_generator.config import load_layout
@@ -86,6 +86,23 @@ class PrintUpscaleTests(unittest.TestCase):
             {"width": 160, "height": 120},
         )
 
+    def test_prepares_one_to_one_print_bundle(self) -> None:
+        outputs = prepare_print_assets(
+            template_dir=self.template,
+            transformed_pet=self.pet,
+            target_size=(200, 300),
+            output_dir=self.output,
+        )
+
+        with Image.open(outputs.art) as image:
+            self.assertEqual(image.size, (200, 300))
+        with Image.open(outputs.pet) as image:
+            self.assertEqual(image.size, (80, 60))
+        layout = load_layout(self.output, layout_path=outputs.layout)
+        self.assertEqual(layout.pet_box.to_dict(), layout_data()["pet"]["box"])
+        manifest = json.loads(outputs.manifest.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["print"]["scale"], 1.0)
+
     def test_template_and_pet_can_be_upscaled_independently(self) -> None:
         template_outputs = prepare_print_template(
             template_dir=self.template,
@@ -116,6 +133,44 @@ class PrintUpscaleTests(unittest.TestCase):
         self.assertEqual(
             manifest["template_binding"]["print_layout_sha256"],
             hashlib.sha256(template_outputs.layout.read_bytes()).hexdigest(),
+        )
+
+    def test_deterministic_sharp_preserves_alpha_and_records_backend(self) -> None:
+        with Image.open(self.pet) as source:
+            detailed = source.convert("RGBA")
+        draw = ImageDraw.Draw(detailed)
+        for x in range(16, 64, 4):
+            draw.line((x, 12, x, 48), fill=(255, 255, 255, 255), width=1)
+        detailed.save(self.pet)
+        baseline = prepare_print_assets(
+            template_dir=self.template,
+            transformed_pet=self.pet,
+            target_size=(400, 600),
+            output_dir=self.root / "baseline",
+        )
+        sharpened = prepare_print_assets(
+            template_dir=self.template,
+            transformed_pet=self.pet,
+            target_size=(400, 600),
+            output_dir=self.root / "sharpened",
+            backend="deterministic-sharp",
+        )
+
+        with Image.open(baseline.pet) as baseline_image, Image.open(
+            sharpened.pet
+        ) as sharpened_image:
+            self.assertEqual(
+                baseline_image.getchannel("A").tobytes(),
+                sharpened_image.getchannel("A").tobytes(),
+            )
+            self.assertNotEqual(
+                baseline_image.convert("RGB").tobytes(),
+                sharpened_image.convert("RGB").tobytes(),
+            )
+        manifest = json.loads(sharpened.manifest.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["backend"], "deterministic-sharp")
+        self.assertEqual(
+            manifest["detail_upscale"]["provider"], "deterministic-sharp"
         )
 
     def test_prepares_scaled_assets_without_separate_name_or_font(self) -> None:

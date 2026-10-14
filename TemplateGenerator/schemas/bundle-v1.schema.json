@@ -318,8 +318,8 @@
           "additionalProperties": false,
           "required": ["template", "pet"],
           "properties": {
-            "template": {"enum": ["deterministic", "bria"]},
-            "pet": {"enum": ["deterministic", "bria"]}
+            "template": {"enum": ["deterministic", "deterministic-sharp", "bria"]},
+            "pet": {"enum": ["deterministic", "deterministic-sharp", "bria"]}
           }
         },
         "template_source": {

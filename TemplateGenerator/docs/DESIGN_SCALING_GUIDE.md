@@ -154,8 +154,10 @@ Process each chosen concept as an independent new design:
 3. scratch-test the fixed-art split and personalized pet behavior;
 4. run durable art and pet evidence only after scratch acceptance;
 5. review layout, composition, print, graduation, bundle, and publication;
-6. retire losing experiments without deleting source pools, selected evidence,
-   exchange releases, or S3 artifacts.
+6. retire losing experiments; optionally use the operator's guarded cleanup to
+   remove an unselected raw experiment directory while retaining its review
+   packet and deletion event. Never delete design-input source pools, selected
+   evidence, exchange releases, or S3 artifacts.
 
 Batch actions may queue designs at the same workflow stage, but every design
 keeps independent experiments, decisions, warnings, and publication results.
@@ -206,10 +208,12 @@ bundle and release catalog described by the
 [production contract](MVP_PRODUCTION_BUNDLE_CATALOG_DESIGN.md). FE owns product
 mapping, activation, rollback, customer interaction, and order behavior.
 
-Use dry-run cleanup and remove only failed/discarded local experiments that are
-not selected or otherwise protected. Published revisions are immutable;
-retirement is a catalog/application decision, not deletion of production
-objects.
+Use dry-run cleanup for broad maintenance. For one recorded loser, the operator
+UI may delete its raw files after the dependency preflight passes; review
+evidence remains. Remove only failed/discarded/unselected local experiments
+that are not selected or otherwise protected. Published revisions are
+immutable; retirement is a catalog/application decision, not deletion of
+production objects.
 
 ## Workflow automation boundary
 

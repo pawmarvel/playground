@@ -46,9 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
         "--backend",
-        choices=("deterministic", "bria"),
+        choices=("deterministic", "deterministic-sharp", "bria"),
         default="deterministic",
-        help="upscale backend (default: deterministic Lanczos)",
+        help=(
+            "upscale backend (deterministic-sharp adds alpha-safe print "
+            "sharpening after local Lanczos scaling)"
+        ),
     )
     parser.add_argument(
         "--bria-api-key-file",

@@ -57,7 +57,7 @@
       "required": ["aspect_ratio", "preview_to_print_scale", "nominal_print_layer_dimensions"],
       "properties": {
         "aspect_ratio": {"$ref": "#/$defs/size"},
-        "preview_to_print_scale": {"type": "number", "exclusiveMinimum": 1},
+        "preview_to_print_scale": {"type": "number", "minimum": 1},
         "nominal_print_layer_dimensions": {
           "type": "object",
           "additionalProperties": false,

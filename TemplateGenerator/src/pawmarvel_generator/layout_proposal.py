@@ -663,6 +663,24 @@ def _pet_boxes(seed: SearchSeed, canvas_size: tuple[int, int]) -> list[PetBoxCan
     return result
 
 
+def _centered_pet_box(
+    canvas_size: tuple[int, int], fill_ratio: float
+) -> PetBoxCandidate:
+    """Return an exact centered box occupying ``fill_ratio`` of each canvas axis."""
+    width, height = canvas_size
+    box_width = max(1, min(width, round(width * fill_ratio)))
+    box_height = max(1, min(height, round(height * fill_ratio)))
+    return PetBoxCandidate(
+        size_tier="operator-specified",
+        box=Rect(
+            x=(width - box_width) // 2,
+            y=(height - box_height) // 2,
+            width=box_width,
+            height=box_height,
+        ),
+    )
+
+
 def _shifted_name_box(seed: Rect, dy: float, canvas_size: tuple[int, int]) -> Rect:
     width, height = canvas_size
     y = max(0, min(height - seed.height, seed.y + round(dy * height)))
@@ -1104,6 +1122,7 @@ def propose_layout(
     attempt_prefix: str | None = None,
     max_candidates: int = MAX_SEARCH_CANDIDATES,
     finalists: int = MAX_FINALISTS,
+    centered_pet_fill: float | None = None,
 ) -> Path:
     """Write an immutable local layout proposal and return its directory."""
     started = time.monotonic()
@@ -1114,6 +1133,14 @@ def propose_layout(
         )
     if not 1 <= finalists <= MAX_FINALISTS:
         raise LayoutProposalError(f"finalists must be between 1 and {MAX_FINALISTS}")
+    if centered_pet_fill is not None and not 0.05 <= centered_pet_fill <= 1.0:
+        raise LayoutProposalError(
+            "centered pet fill must be between 0.05 and 1.0 inclusive"
+        )
+    if centered_pet_fill is not None and finalists != 1:
+        raise LayoutProposalError(
+            "centered pet fill defines one exact candidate; use finalists=1"
+        )
     if attempt_prefix is not None and (
         not attempt_prefix
         or attempt_prefix.strip() != attempt_prefix
@@ -1153,6 +1180,15 @@ def propose_layout(
     seed = _seed_boxes(
         experiment=experiment, meta=meta, art_alpha=art_alpha
     )
+    proposal_warnings = (
+        [
+            "The centered pet fill was explicitly specified by the operator at "
+            f"{centered_pet_fill:.1%} of the preview canvas; manually confirm "
+            "edge clearance across the fixture matrix."
+        ]
+        if centered_pet_fill is not None
+        else list(seed.warnings)
+    )
     reference_evidence = None
     reference_descriptor = inputs.get("reference")
     if isinstance(reference_descriptor, Mapping):
@@ -1185,7 +1221,12 @@ def propose_layout(
             int | None,
         ]
     ] = []
-    for pet_candidate in _pet_boxes(seed, canvas_size):
+    pet_candidates = (
+        [_centered_pet_box(canvas_size, centered_pet_fill)]
+        if centered_pet_fill is not None
+        else _pet_boxes(seed, canvas_size)
+    )
+    for pet_candidate in pet_candidates:
         pet_box = pet_candidate.box
         if resolved_mode != "layout-text":
             search.append(
@@ -1419,7 +1460,7 @@ def propose_layout(
             "created_at": utc_now(),
             "duration_seconds": round(time.monotonic() - started, 3),
             "name_mode": resolved_mode,
-            "warnings": list(seed.warnings),
+            "warnings": proposal_warnings,
             "seed": {
                 "source": seed.source,
                 "authoritative": seed.authoritative,
@@ -1439,7 +1480,12 @@ def propose_layout(
             ),
             "reference_evidence": reference_evidence,
             "search": {
-                "method": "bounded-alpha-clearance-grid-v3",
+                "method": (
+                    "operator-centered-fill-v1"
+                    if centered_pet_fill is not None
+                    else "bounded-alpha-clearance-grid-v3"
+                ),
+                "centered_pet_fill": centered_pet_fill,
                 "candidate_limit": max_candidates,
                 "evaluated_candidates": len(search),
                 "valid_candidates": len(scored),

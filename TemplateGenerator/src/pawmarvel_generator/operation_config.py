@@ -20,7 +20,7 @@ _ID_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
 ART_TEMPLATE_MODES = ("generated", "empty-canvas")
 NAME_MODES = ("layout-text", "embedded-in-pet", "none")
 IMAGE_PROVIDERS = ("openai", "gemini")
-UPSCALE_BACKENDS = ("deterministic", "bria")
+UPSCALE_BACKENDS = ("deterministic", "deterministic-sharp", "bria")
 DEFAULT_MODELS = {
     "openai": "gpt-image-2.5-sunburst",
     "gemini": "gemini-3.1-flash-image",

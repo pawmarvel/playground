@@ -1078,16 +1078,14 @@ def generate(args: argparse.Namespace, client: Any | None = None) -> Path:
             ),
         )
     except ImageSizeError as exc:
-        if (
-            product_profile_path is None
-            or profile_layer != "art"
-            or not is_gpt_image_2(model)
-        ):
+        if product_profile_path is None or not is_gpt_image_2(model):
             raise UserInputError(str(exc)) from exc
-        target_size = parse_image_size(requested_size, "product profile preview.art")
+        target_size = parse_image_size(
+            requested_size, f"product profile preview.{profile_layer}"
+        )
         request_size = closest_gpt_image_2_size(target_size).api_value()
         print(
-            "Warning: product profile preview.art is not a native GPT Image "
+            f"Warning: product profile preview.{profile_layer} is not a native GPT Image "
             f"2/2.5 request size; requesting {request_size} and normalizing the "
             f"result to the exact profile canvas {postprocess_size}.",
             file=sys.stderr,

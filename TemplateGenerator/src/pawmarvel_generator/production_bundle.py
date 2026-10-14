@@ -88,7 +88,10 @@ def _asset(path: Path, root: Path) -> dict[str, Any]:
     }
     if path.suffix.lower() == ".png":
         with warnings.catch_warnings():
-            if path.relative_to(root).as_posix() == "print/art.png":
+            if path.relative_to(root).as_posix() == "print/art.png" or (
+                path.relative_to(root).as_posix().startswith("print/")
+                and path.name == "art.png"
+            ):
                 warnings.simplefilter("ignore", Image.DecompressionBombWarning)
             with Image.open(path) as image:
                 value["width"], value["height"] = image.size
@@ -259,7 +262,10 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
                 resolved,
                 relative_text,
                 require_png=True,
-                allow_large=relative_text == "print/art.png",
+                allow_large=(
+                    relative_text == "print/art.png"
+                    or (relative_text.startswith("print/") and relative.name == "art.png")
+                ),
             )
             if (item.get("width"), item.get("height")) != size:
                 raise BundleError(
@@ -652,7 +658,10 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
     if (
         not isinstance(backends, dict)
         or set(backends) != {"template", "pet"}
-        or any(value not in {"deterministic", "bria"} for value in backends.values())
+        or any(
+            value not in {"deterministic", "deterministic-sharp", "bria"}
+            for value in backends.values()
+        )
     ):
         raise BundleError("provenance.print_derivation.backends is unsupported")
     template_source = print_derivation.get("template_source")
@@ -719,6 +728,21 @@ def _validate_production_bundle(root: Path) -> dict[str, Any]:
     }
     if art_prompt_name is not None:
         required_assets.add(art_prompt_name)
+    # Multi-output print support is additive.  The legacy product profile,
+    # print/art.png, and layout-print.json remain the primary bundle-v1
+    # contract; newer consumers discover these extra targets through the
+    # separately validated manifest.
+    if (root / "print-targets.json").is_file():
+        from .print_targets import PrintTargetsError, validate_print_targets
+
+        try:
+            print_targets = validate_print_targets(root)
+        except PrintTargetsError as exc:
+            raise BundleError(str(exc)) from exc
+        assert print_targets is not None
+        required_assets.add("print-targets.json")
+        for target in print_targets["targets"]:
+            required_assets.update({target["art"], target["layout"]})
     if preview.has_name:
         assert preview.font_relative is not None
         required_assets.update(

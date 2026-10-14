@@ -1777,8 +1777,20 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     )
                     return
                 if parsed.path == "/api/operator/designs":
-                    with self.server.lifecycle_lock:
-                        self.server.refresh()
+                    try:
+                        with self.server.lifecycle_lock:
+                            self.server.refresh()
+                    except GalleryError as exc:
+                        self._json(
+                            HTTPStatus.CONFLICT,
+                            {
+                                "error": (
+                                    "gallery refresh failed; correct the reported "
+                                    f"design-pool artifact and retry: {exc}"
+                                )
+                            },
+                        )
+                        return
                     self._json(HTTPStatus.OK, _operator_payload(self.server))
                     return
                 if parsed.path == "/api/operator/jobs":

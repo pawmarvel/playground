@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "profile_id": "coffee-mug-837x1020",
+  "print": {
+    "canvas": {
+      "width": 837,
+      "height": 1020
+    },
+    "dpi": null,
+    "physical_size": null,
+    "bleed_px": 0,
+    "safe_margin_px": 0,
+    "color_space": "sRGB",
+    "icc_profile": null,
+    "background": "transparent",
+    "output_format": "png",
+    "max_file_bytes": null,
+    "vendor_requirements_confirmed": false,
+    "delivery_status": "print-candidate"
+  },
+  "preview": {
+    "target_long_edge_px": 1020,
+    "art": {
+      "width": 837,
+      "height": 1020
+    },
+    "transformed_pet": {
+      "width": 837,
+      "height": 1020
+    }
+  },
+  "geometry": {
+    "aspect_ratio": {
+      "width": 279,
+      "height": 340
+    },
+    "preview_to_print_scale": 1.0,
+    "nominal_print_layer_dimensions": {
+      "art": {
+        "width": 837,
+        "height": 1020
+      },
+      "transformed_pet": {
+        "width": 837,
+        "height": 1020
+      }
+    }
+  }
+}

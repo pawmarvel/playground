@@ -246,7 +246,19 @@ bundle format or edit an existing experiment in place. Work is grouped by
 `<design-id>/<product-profile-id>` and shown in six stages. Each product shows
 one **Next** badge. A stage with an immutable decision is rendered as a closed
 `finished` disclosure by default; expand it to inspect its prompt, comparison,
-and decision evidence without losing context around the outstanding step.
+and decision evidence without losing context around the outstanding step. The
+expanded finished stage shows the winning review first. Earlier experiments
+and comparison packets stay inside a second closed disclosure so a large
+iteration history does not obscure the selected result.
+
+The previous-experiment disclosure also offers **Delete raw experiment files**
+for an unselected art or pet experiment. This is an explicit, permanent local
+storage cleanup: the immutable comparison/evaluation packet and a deletion
+audit event remain, but the experiment prompt snapshots, attempts, and outputs
+are removed. The action is disabled when the experiment is the current winner
+or is pinned by active layout, assembly, print, graduation, or publication
+provenance. Read the displayed blocker and rebuild or supersede that dependency
+instead of deleting around it.
 
 Every finished art, pet, and layout disclosure also offers **Redo / improve**.
 Use it when later composed QA exposes a problem. Supply an audit reason, then
@@ -278,12 +290,16 @@ layout authoring is the offline fallback when no ranked proposal is acceptable.
 
 The stages are:
 
-1. **Art template.** Inspect every available comparison. To iterate, edit the
+1. **Art template.** Before a decision, inspect every available comparison.
+   After a decision, the winning comparison is shown first and the rest is
+   collapsed under **View previous experiments and evidence**. To iterate, edit the
    copied prompt, enter a new experiment/review ID, and select **Run art +
    comparison**. This starts one background paid call and compares the source
    and new experiment side by side. Select a passing candidate and record its
    immutable winner decision.
-2. **Pet transformation.** Edit the copied prompt and give the iteration a new
+2. **Pet transformation.** The recorded release-tier winner is shown first;
+   smoke and losing comparison evidence is collapsed with prior experiments.
+   Edit the copied prompt and give the iteration a new
    ID. Use **Run smoke as new experiment** while tuning. After that experiment
    passes, refresh and use **Run release on current experiment** so smoke and
    release evidence stay on the same immutable runtime. **Run release as new
@@ -441,12 +457,17 @@ graduation pool to the release pool and the design moves from **Graduated** to
 **Released** in the operator view. A local catalog without that receipt remains
 **pending S3 publication** and stays in the graduation pool. The immutable
 authoring, bundle, catalog, and receipt artifacts remain in their established
-roots. The **Released** tab is a read-only trace of every local revision and its
-publication state. Its default card shows the reference design without
+roots. The **Released** tab keeps the immutable evidence collapsed and also
+hosts explicit post-release print-target extensions. Its default card shows the reference design without
 expanding generated artifacts. Select
 **View release evidence** for a product profile to inspect its art comparison,
 pet comparison, pet release composition, layout evidence, print finalist, and
-publication record. Published designs present only in the release
+publication record. When **Multi-output print extension** is present, inspect
+its every-fixture-by-every-target contact sheet before selecting **Approve
+targets and build new local revision**. Approval creates a local immutable
+revision only. The release section then exposes the newer unpublished revision
+and requires the separate S3 publication action; an older published revision
+never hides that pending release. Published designs present only in the release
 catalog/authoring records are also listed,
 using the bundle reference image (or `art.png` for a no-reference bundle).
 

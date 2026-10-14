@@ -69,12 +69,13 @@ class AuthoringLifecycleTests(unittest.TestCase):
         *,
         pet_name: str | None = None,
         references: list[Path] | None = None,
+        quality: str = "high",
     ) -> Path:
         return create_experiment(kind=kind, experiment_id=name, design_id="life-is-good",
             product_profile=self.profile, authoring_root=self.authoring,
             references=[self.reference] if references is None else references,
             prompt_file=prompt, provider="openai", model="gpt-image-2",
-            quality="high",
+            quality=quality,
             art_attempt=None, pet_attempt=None, font_catalogs=[],
             parent_experiment_id=None, base_bundle_revision=None, created_by="test",
             pet_name=pet_name)
@@ -852,6 +853,69 @@ class AuthoringLifecycleTests(unittest.TestCase):
         self._validate_schema(
             candidate / "print-candidate.json", "print-candidate-v1.schema.json"
         )
+
+    def test_print_candidate_rejects_low_quality_full_canvas_pet_source(self) -> None:
+        art_exp = self._experiment("art", "art-full-v01", self.art_prompt)
+        pet_exp = self._experiment(
+            "pet", "pet-full-low-v01", self.pet_prompt, quality="low"
+        )
+        art_attempt = self._fake_attempt(
+            art_exp, "attempt-0001", "art.png", (672, 1008)
+        )
+        pet_attempt = self._fake_attempt(
+            pet_exp, "attempt-0001", "transformed-pet.png", (816, 816)
+        )
+        layout_source = self.root / "full-canvas-layout"
+        make_transparent_mark(layout_source / "art.png", size=(672, 1008))
+        layout = layout_data()
+        del layout["name"]
+        layout["pet"]["box"] = {
+            "x": 0,
+            "y": 0,
+            "width": 672,
+            "height": 1008,
+        }
+        (layout_source / "layout.json").write_text(
+            json.dumps(layout), encoding="utf-8"
+        )
+        layout_exp = create_experiment(
+            kind="layout",
+            experiment_id="layout-full-low-v01",
+            design_id="life-is-good",
+            product_profile=self.profile,
+            authoring_root=self.authoring,
+            references=[],
+            prompt_file=None,
+            provider=None,
+            model=None,
+            quality="high",
+            art_attempt=art_attempt,
+            pet_attempt=pet_attempt,
+            font_catalogs=[],
+            parent_experiment_id=None,
+            base_bundle_revision=None,
+            created_by="test",
+        )
+        layout_attempt = run_attempt(
+            experiment=layout_exp,
+            attempt_id="attempt-0001",
+            pet_image=None,
+            no_pet_name=True,
+            layout_file=layout_source / "layout.json",
+        )
+
+        with self.assertRaisesRegex(
+            AuthoringError, "full-canvas transformed-pet print source uses quality=low"
+        ):
+            prepare_print_candidate(
+                candidate_id="print-full-low-v01",
+                authoring_product=self.authoring / "life-is-good" / "test-blanket",
+                art_attempt=art_attempt,
+                pet_attempt=pet_attempt,
+                layout_attempt=layout_attempt,
+                pet_name=None,
+                backend="deterministic-sharp",
+            )
 
     def test_attempt_ids_are_immutable(self) -> None:
         art_exp = self._experiment("art", "art-gpt-v01", self.art_prompt)

@@ -27,6 +27,7 @@ pawmarvel-bundle = "pawmarvel_generator.bundle_cli:main"
 pawmarvel-author = "pawmarvel_generator.authoring_cli:main"
 pawmarvel-catalog = "pawmarvel_generator.catalog_cli:main"
 pawmarvel-gallery = "pawmarvel_generator.gallery_cli:main"
+pawmarvel-print-targets = "pawmarvel_generator.print_targets_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

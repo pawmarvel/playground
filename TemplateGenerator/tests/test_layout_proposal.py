@@ -251,6 +251,27 @@ class LayoutProposalTest(unittest.TestCase):
                 max_candidates=61,
             )
 
+    def test_centered_pet_fill_creates_one_exact_candidate(self) -> None:
+        self._layout_record(embedded_name="MILO")
+        result = propose_layout(
+            experiment=self.layout_experiment,
+            proposal_id="proposal-centered-v01",
+            name_mode="embedded-in-pet",
+            finalists=1,
+            centered_pet_fill=0.95,
+        )
+        proposal = json.loads((result / "proposal.json").read_text(encoding="utf-8"))
+        self.assertEqual(proposal["search"]["method"], "operator-centered-fill-v1")
+        self.assertEqual(proposal["search"]["centered_pet_fill"], 0.95)
+        self.assertEqual(len(proposal["candidates"]), 1)
+        self.assertIn("95.0%", proposal["warnings"][0])
+        layout_path = result / proposal["candidates"][0]["layout"]
+        layout = load_layout(layout_path.parent)
+        self.assertEqual(layout.pet_box.width, round(layout.canvas_width * 0.95))
+        self.assertEqual(layout.pet_box.height, round(layout.canvas_height * 0.95))
+        self.assertEqual(layout.pet_box.x, (layout.canvas_width - layout.pet_box.width) // 2)
+        self.assertEqual(layout.pet_box.y, (layout.canvas_height - layout.pet_box.height) // 2)
+
     def test_requires_literal_prefix_with_matching_attempts(self) -> None:
         self._layout_record(embedded_name="MILO")
         with self.assertRaisesRegex(LayoutProposalError, "without whitespace"):
