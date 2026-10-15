@@ -34,6 +34,26 @@ OPAQUE_FULL_BLEED = "opaque-full-bleed"
 PRESERVE_TRANSPARENCY = "preserve-transparency"
 
 
+def _discovery_png_info(path: Path) -> tuple[int, int, str]:
+    """Read PNG metadata without decoding every pixel during gallery refresh."""
+
+    resolved = path.expanduser().resolve()
+    try:
+        with Image.open(resolved) as image:
+            if image.format != "PNG":
+                raise StaticPrintError(
+                    f"source design must contain PNG data: {resolved}; "
+                    f"actual_format={image.format!r}"
+                )
+            return image.width, image.height, image.mode
+    except StaticPrintError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise StaticPrintError(
+            f"source design is not a readable PNG: {resolved}; error={exc}"
+        ) from exc
+
+
 def initialize_workspace(root: Path) -> dict[str, str]:
     paths = {
         "inputs": root / "static-design-inputs",
@@ -67,7 +87,7 @@ def discover_designs(inputs_root: Path, authoring_root: Path) -> list[dict[str, 
                 f"ambiguous design ID {design_id!r}; both source paths exist: "
                 f"{existing['source']} and {source.resolve()}"
             )
-        width, height, mode = require_png(source, "source design")
+        width, height, mode = _discovery_png_info(source)
         source_digest = sha256_file(source)
         intake = read_json(intake_path) if intake_path.is_file() else None
         source_transparency: dict[str, Any] | None = None

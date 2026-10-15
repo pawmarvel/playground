@@ -21,9 +21,10 @@ values, and optional `export KEY=value` syntax, but never evaluates shell code
 or prints secret values.
 
 The default subject model is `gpt-image-2.5-sunburst`; subject generation is a
-paid image-edit operation. New design intake also makes one low-detail vision
-request per new PNG to generate a descriptive design ID. It defaults to
-`gpt-5.4-mini` through `STATIC_PRINT_DESIGN_ID_MODEL`. Product rendering,
+paid image-edit operation. New design intake uses a filename locally when it is
+meaningful. Only an obvious machine/export filename makes one low-detail vision
+request for a descriptive design ID, using `gpt-5.4-mini` by default through
+`STATIC_PRINT_DESIGN_ID_MODEL`. Product rendering, meaningful-name intake,
 re-importing an already assigned source, and preview background switching are
 local and have no API cost. To use `$AWS_PROFILE` in a separate manual AWS CLI
 command, source the file into that shell first:
@@ -36,9 +37,11 @@ set +a
 
 ## 2. Load a design collection for active review
 
-The quickest intake is a flat local collection. Source filenames can be camera
-or export names; the tool analyzes each new PNG and proposes a 3-8 word
-lowercase kebab-case ID that describes its visible theme:
+The quickest intake is a flat local collection. The default `auto` naming mode
+uses a meaningful source filename directly as a lowercase kebab-case ID, so it
+does not incur an image-analysis API call. Obvious machine/export names such as
+`ChatGPT Image ...`, `IMG_1234`, screenshots, UUIDs, hashes, and timestamped
+filenames receive one low-detail vision call and a readable 3-8 word theme ID:
 
 ```text
 /path/to/Design-Collection-1/
@@ -58,9 +61,12 @@ Start the GUI with one or more collections:
 Alternatively, open the operator page, enter the absolute collection path in
 **Load local design collection**, and choose **Load PNG collection**. Only PNG
 files directly inside the selected folder are imported. The import validates
-the images, makes each generated ID unique across every lifecycle pool (`-2`,
-`-3`, and so on when themes collide), and copies them into the private
-active-review pool:
+the images and makes IDs unique across every lifecycle pool. A meaningful
+filename wins when unused. On collision, the tool first prefixes the collection
+ID (for example `holiday-collection-merry-pawlidays`), then appends `-1`, `-2`,
+and so on only if that qualified ID also exists. Theme IDs produced from
+machine-generated filenames use deterministic numeric suffixes when needed.
+The source is then copied into the private active-review pool:
 
 ```text
 work/static-design-inputs/<design-id>/
@@ -81,12 +87,13 @@ and are refreshed without another naming call, and designs already graduated
 or abandoned are skipped. The original collection is never renamed or
 modified. Moving a source to a different path is treated as a new candidate.
 
-Semantic naming is the default and fails clearly when the API key or request is
-unavailable; it never silently falls back to an opaque export filename. For an
-intentional offline import only, set `STATIC_PRINT_DESIGN_ID_MODE=filename` in
-`work/static-print.env` and restart the server. Filename mode is an explicit
-escape hatch and should be used only when filenames already satisfy the catalog
-naming standard.
+Automatic hybrid naming is the default. It requires `OPENAI_API_KEY` only when
+a new source has an obvious machine-generated filename; such a source fails
+clearly when image interpretation is unavailable and never silently receives
+an opaque export ID. Set `STATIC_PRINT_DESIGN_ID_MODE=semantic` to analyze every
+new image, or `STATIC_PRINT_DESIGN_ID_MODE=filename` to analyze none, then
+restart the server. Filename mode should be used only when all filenames already
+satisfy the catalog naming standard.
 
 For a single design, the same active structure can still be created manually:
 
@@ -121,6 +128,10 @@ operator page repeats that absolute workspace path so an accidental
 seed pools use separate tabs. **Graduated workflow** is a checkpoint table for
 unfinished work, and **Released** contains subject designs whose current pixels
 have been published successfully.
+
+The local gallery renders immediately after sign-in. S3 publication status is
+refreshed in the background and the publication panel reports that progress;
+an expired SSO session or slow network must not hide local review designs.
 
 For trusted-LAN review, bind to `0.0.0.0`. Non-loopback serving requires
 different reviewer and operator access codes. Do not expose the plain-HTTP

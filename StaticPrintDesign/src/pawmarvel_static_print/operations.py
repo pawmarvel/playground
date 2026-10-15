@@ -260,6 +260,15 @@ def mark_running_operations_interrupted(database: Path) -> list[str]:
 def mark_operation_cleaned(database: Path, operation_id: str) -> None:
     initialize_operations(database)
     with closing(sqlite3.connect(database)) as connection, connection:
+        # Cleanup is terminal. Leaving unfinished work units as pending makes a
+        # dismissed batch look resumable in the progress UI and prevents a
+        # genuinely clean restart. Preserve successful work, but close every
+        # unfinished/failed unit as skipped when the operator discards the run.
+        connection.execute(
+            "UPDATE operation_items SET status = 'skipped', error = NULL "
+            "WHERE operation_id = ? AND status IN ('pending', 'running', 'failed')",
+            (operation_id,),
+        )
         connection.execute(
             "UPDATE operations SET status = 'cleaned', updated_at = ?, error = NULL "
             "WHERE operation_id = ?",

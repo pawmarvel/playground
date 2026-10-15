@@ -18,6 +18,7 @@ const observedOperationIds = new Set();
 const operationCompletedCounts = new Map();
 let operationPollTimer = null;
 let operationPollRunning = false;
+let publicationRefreshTimer = null;
 
 const $ = (id) => document.getElementById(id);
 const node = (tag, className, text) => {
@@ -1760,7 +1761,7 @@ function render() {
     const collectionRoot = importInput.value.trim();
     if (!collectionRoot) return showStatus("Enter the local design collection folder.", true);
     importButton.disabled = true;
-    showStatus(`Analyzing themes and loading design collection from ${collectionRoot}… New images may take up to a minute each.`);
+    showStatus(`Loading design collection from ${collectionRoot}… Only machine-generated filenames require image-theme analysis.`);
     try {
       const result = await request("/api/operator/import-collection", {
         method: "POST",
@@ -1818,6 +1819,18 @@ function render() {
   if (!publication.enabled) {
     publicationConfig.textContent = "S3 is disabled. Set STATIC_PRINT_S3_BUCKET and restart the server.";
     publicationConfig.classList.add("warning");
+  } else if (publication.status?.refreshing) {
+    const known = publication.status?.available
+      ? ` Showing the last catalog checked ${publication.status.checked_at}.`
+      : " Local designs are available now; release status will appear automatically.";
+    publicationConfig.textContent = `Refreshing S3 release status in the background.${known}`;
+    publicationConfig.classList.add("warning");
+    if (!publicationRefreshTimer) {
+      publicationRefreshTimer = setTimeout(async () => {
+        publicationRefreshTimer = null;
+        await loadState();
+      }, 3000);
+    }
   } else if (publication.status?.available) {
     publicationConfig.textContent = `Destination: s3://${publication.bucket}/${publication.prefix}/ · FE discovery: s3://${publication.bucket}/${publication.prefix}/catalog.json · source: ${publication.status.source} · ${publication.status.bundle_count} product(s) · checked ${publication.status.checked_at}${publication.status.catalog_rebuild_required ? " · Recovery required: rebuild the FE discovery catalog" : ""}`;
     publicationConfig.classList.remove("warning");

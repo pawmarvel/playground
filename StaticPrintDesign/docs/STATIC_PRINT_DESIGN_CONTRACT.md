@@ -61,6 +61,11 @@ independent. FE owns whether an active catalog entry is actually offered in the
 store. Operator `retired` status removes it from default discovery but does not
 delete immutable bytes or forcibly disable an already pinned FE mapping.
 
+The operator GUI renders local lifecycle and authoring evidence independently
+of S3 availability. It refreshes authoritative publication status in the
+background and marks it refreshing, stale, or unavailable; remote latency and
+expired AWS credentials must not block local review work.
+
 ## 3. Identity and automatic versions
 
 ```text
@@ -70,12 +75,15 @@ bundle key = (bundle_id, version_id)
 version_id = vNNNNNN
 ```
 
-At first intake, the operator tool uses a low-detail vision request to propose a
-theme-descriptive `seed-design-id`, then resolves collisions locally with a
-numeric suffix. `intake.json` pins the resolved source path to that selected ID,
-so a refresh of the same candidate never changes its identity or incurs another
-naming request. The ID becomes immutable once review begins; the vision model is
-not an FE dependency and its output is never used as a display label.
+At first intake, the operator tool derives `seed-design-id` from a meaningful
+filename without a paid API call. Obvious machine/export filenames—such as
+ChatGPT, IMG, screenshot, UUID/hash, or timestamp names—receive a low-detail
+vision request for a theme-descriptive ID. A filename collision is resolved by
+prefixing the collection ID before adding `-1`, `-2`, and later suffixes.
+`intake.json` pins the resolved source path to that selected ID, so a refresh of
+the same candidate never changes its identity or incurs another naming request.
+The ID becomes immutable once review begins; the naming model is not an FE
+dependency and its output is never used as a display label.
 
 Splitting a bundle ID on `--` produces exactly three fields: seed design ID,
 `subject-<subject-id>`, and product profile ID. FE should still prefer the

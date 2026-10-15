@@ -56,6 +56,23 @@ class DesignIdProposal:
 DesignIdGenerator = Callable[[Path], DesignIdProposal | str]
 
 
+_MACHINE_FILENAME_PATTERNS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"(?:^|-)(?:chatgpt|openai|gpt-image|dall-e|dalle|midjourney|"
+        r"stable-diffusion|gemini|flux|ai-generated)(?:-|$)",
+        r"^(?:img|dsc|dscn|pxl|screenshot|screen-shot|image|photo|download|"
+        r"untitled|output|generated|generated-image)(?:-|$)",
+        r"(?:^|-)(?:19|20)\d{2}-(?:0?[1-9]|1[0-2])-"
+        r"(?:0?[1-9]|[12]\d|3[01])(?:-at)?-(?:[01]?\d|2[0-3])-"
+        r"[0-5]\d(?:-[0-5]\d)?(?:-am|-pm)?(?:-|$)",
+        r"(?:^|-)(?:19|20)\d{6}-(?:[01]\d|2[0-3])[0-5]\d[0-5]\d(?:-|$)",
+        r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
+        r"^[0-9a-f]{16,}$",
+    )
+)
+
+
 def _collection_id(value: str, label: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)
     ascii_value = normalized.encode("ascii", "ignore").decode("ascii").lower()
@@ -87,6 +104,13 @@ def _theme_design_id(value: str) -> str:
             f"actual={design_id!r}"
         )
     return design_id
+
+
+def _has_machine_generated_filename(source: Path) -> bool:
+    """Return whether a source stem is clearly an export/generated identifier."""
+
+    normalized = _collection_id(source.stem, "source filename")
+    return any(pattern.search(normalized) for pattern in _MACHINE_FILENAME_PATTERNS)
 
 
 def openai_design_id_generator(source: Path) -> DesignIdProposal:
@@ -177,7 +201,14 @@ def openai_design_id_generator(source: Path) -> DesignIdProposal:
 def configured_design_id_generator(source: Path) -> DesignIdProposal:
     """Resolve the explicit intake naming mode from private environment config."""
 
-    mode = os.environ.get("STATIC_PRINT_DESIGN_ID_MODE", "semantic").strip().lower()
+    mode = os.environ.get("STATIC_PRINT_DESIGN_ID_MODE", "auto").strip().lower()
+    if mode == "auto":
+        if not _has_machine_generated_filename(source):
+            return DesignIdProposal(
+                design_id=_collection_id(source.stem, "design ID"),
+                method="filename",
+            )
+        return openai_design_id_generator(source)
     if mode == "semantic":
         return openai_design_id_generator(source)
     if mode == "filename":
@@ -186,7 +217,7 @@ def configured_design_id_generator(source: Path) -> DesignIdProposal:
             method="filename",
         )
     raise StaticPrintError(
-        "STATIC_PRINT_DESIGN_ID_MODE must be 'semantic' or 'filename'; "
+        "STATIC_PRINT_DESIGN_ID_MODE must be 'auto', 'semantic', or 'filename'; "
         f"actual={mode!r}"
     )
 
@@ -224,13 +255,33 @@ def _intake_assignments(
     return assignments
 
 
-def _unique_design_id(base_design_id: str, occupied: set[str]) -> str:
+def _unique_design_id(
+    base_design_id: str,
+    occupied: set[str],
+    *,
+    collection_id: str,
+    filename_derived: bool,
+) -> str:
     if base_design_id not in occupied:
         return base_design_id
+
+    # A meaningful filename is the preferred stable identity. If it collides,
+    # qualify it with the collection before using an arbitrary number. This
+    # keeps independently curated collections readable without paid image
+    # interpretation. Semantic/model proposals already describe their theme,
+    # so a collision goes directly to a numeric suffix.
+    collision_base = base_design_id
     suffix = 2
-    while f"{base_design_id}-{suffix}" in occupied:
+    if filename_derived:
+        collision_base = validate_id(
+            f"{collection_id}-{base_design_id}", "collection-qualified design ID"
+        )
+        if collision_base not in occupied:
+            return collision_base
+        suffix = 1
+    while f"{collision_base}-{suffix}" in occupied:
         suffix += 1
-    return validate_id(f"{base_design_id}-{suffix}", "design ID")
+    return validate_id(f"{collision_base}-{suffix}", "design ID")
 
 
 def import_review_collection(
@@ -320,7 +371,12 @@ def import_review_collection(
                 method = "injected"
                 model = None
                 request_id = None
-            design_id = _unique_design_id(base_design_id, occupied)
+            design_id = _unique_design_id(
+                base_design_id,
+                occupied,
+                collection_id=collection_id,
+                filename_derived=method == "filename",
+            )
             pool = "active"
             proposal = {
                 "method": method,

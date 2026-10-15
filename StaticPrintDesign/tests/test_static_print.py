@@ -6,8 +6,11 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from threading import Event, Lock, Thread
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
@@ -52,6 +55,7 @@ from pawmarvel_static_print.lifecycle import (
 from pawmarvel_static_print.operations import (
     append_operation_event,
     finish_operation,
+    mark_operation_cleaned,
     mark_running_operations_interrupted,
     operation_snapshot,
     operation_snapshots,
@@ -82,6 +86,7 @@ from pawmarvel_static_print.reviews import (
     save_operator_decisions,
 )
 from pawmarvel_static_print.server import (
+    StaticPrintHTTPServer,
     _generation_plans,
     _next_release_id,
     _product_coverage_records,
@@ -141,6 +146,63 @@ class StaticPrintWorkflowTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_operator_state_schedules_s3_refresh_without_blocking(self) -> None:
+        server = object.__new__(StaticPrintHTTPServer)
+        server.config = SimpleNamespace(s3_bucket="test-bucket")
+        server.s3_status_lock = Lock()
+        server.s3_published_cache = None
+        server.s3_status_cache = None
+        server.s3_checked_at = 0.0
+        server.s3_refresh_thread = None
+
+        with patch("pawmarvel_static_print.server.Thread") as thread_type:
+            published, status = server.cached_s3_publications()
+
+        self.assertEqual(published, {})
+        self.assertFalse(status["available"])
+        self.assertTrue(status["refreshing"])
+        thread_type.return_value.start.assert_called_once_with()
+        self.assertIs(server.s3_refresh_thread, thread_type.return_value)
+
+    def test_s3_network_refresh_does_not_hold_status_cache_lock(self) -> None:
+        server = object.__new__(StaticPrintHTTPServer)
+        server.config = SimpleNamespace(
+            s3_bucket="test-bucket",
+            s3_prefix="templates/static_design",
+            aws_profile="test-profile",
+            aws_region="us-east-1",
+        )
+        server.s3_status_lock = Lock()
+        server.s3_published_cache = None
+        server.s3_status_cache = None
+        server.s3_catalog_cache = {}
+        server.s3_checked_at = 0.0
+        entered = Event()
+        release = Event()
+
+        def slow_remote(**_: object) -> tuple[dict[str, object], dict[str, object]]:
+            entered.set()
+            release.wait(2)
+            return {}, {"bundle_count": 0, "version_count": 0}
+
+        worker = Thread(target=lambda: server.s3_publications(force=True))
+        server.s3_refresh_thread = worker
+        with patch(
+            "pawmarvel_static_print.server.load_s3_release_entries",
+            side_effect=slow_remote,
+        ):
+            worker.start()
+            self.assertTrue(entered.wait(1))
+            started = time.monotonic()
+            _, status = server.cached_s3_publications()
+            elapsed = time.monotonic() - started
+            release.set()
+            worker.join(2)
+
+        self.assertLess(elapsed, 0.2)
+        self.assertTrue(status["refreshing"])
+        self.assertFalse(worker.is_alive())
 
     def _subject_design(self) -> str:
         design_id = "sample-design--subject-cat"
@@ -327,6 +389,34 @@ class StaticPrintWorkflowTest(unittest.TestCase):
             operation["recent_output"][-1]["message"],
             "print output requires visual inspection",
         )
+
+    def test_cleaned_operation_has_no_pending_work_units(self) -> None:
+        database = self.root / "cleaned-operations.sqlite3"
+        start_operation(
+            database,
+            operation_id="discarded-batch",
+            kind="subject-generation",
+            label="Subject generation",
+            request={"design_ids": ["example"]},
+            items=[("one", "one"), ("two", "two")],
+        )
+        update_operation_item(
+            database,
+            operation_id="discarded-batch",
+            item_key="one",
+            status="failed",
+            error="generation failed",
+        )
+
+        mark_operation_cleaned(database, "discarded-batch")
+
+        operation = operation_snapshot(database, "discarded-batch")
+        self.assertEqual(operation["status"], "cleaned")
+        self.assertEqual(operation["status_counts"]["pending"], 0)
+        self.assertEqual(operation["status_counts"]["failed"], 0)
+        self.assertEqual(operation["status_counts"]["skipped"], 2)
+        self.assertEqual(operation["completed_count"], 2)
+        self.assertEqual(operation["error_count"], 0)
 
     def test_operation_feed_is_bounded_but_exact_history_remains_loadable(self) -> None:
         database = self.root / "bounded-operations.sqlite3"
@@ -1446,6 +1536,81 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         self.assertEqual(imported["imported"][0]["design_id"], "merry-pawlidays")
         intake = read_json(self.inputs / "merry-pawlidays/intake.json")
         self.assertEqual(intake["design_id_generation"]["method"], "filename")
+
+    def test_auto_intake_uses_meaningful_filename_without_vision_call(self) -> None:
+        collection = self.root / "Holiday Collection"
+        collection.mkdir()
+        Image.new("RGB", (40, 40), (20, 30, 40)).save(
+            collection / "Merry Pawlidays.png"
+        )
+        with (
+            patch.dict(
+                os.environ, {"STATIC_PRINT_DESIGN_ID_MODE": "auto"}, clear=False
+            ),
+            patch(
+                "pawmarvel_static_print.lifecycle.openai_design_id_generator"
+            ) as semantic_generator,
+        ):
+            imported = import_review_collection(self.root, collection)
+
+        semantic_generator.assert_not_called()
+        self.assertEqual(imported["semantic_id_calls"], 0)
+        self.assertEqual(imported["imported"][0]["design_id"], "merry-pawlidays")
+        intake = read_json(self.inputs / "merry-pawlidays/intake.json")
+        self.assertEqual(intake["design_id_generation"]["method"], "filename")
+
+    def test_auto_intake_analyzes_obvious_generated_filename(self) -> None:
+        collection = self.root / "Holiday Collection"
+        collection.mkdir()
+        source = collection / "ChatGPT Image Oct 15 2026.png"
+        Image.new("RGB", (40, 40), (20, 30, 40)).save(source)
+        proposal = DesignIdProposal(
+            "vintage-cat-santa-chimney", "openai-vision", "test-model"
+        )
+        with (
+            patch.dict(
+                os.environ, {"STATIC_PRINT_DESIGN_ID_MODE": "auto"}, clear=False
+            ),
+            patch(
+                "pawmarvel_static_print.lifecycle.openai_design_id_generator",
+                return_value=proposal,
+            ) as semantic_generator,
+        ):
+            imported = import_review_collection(self.root, collection)
+
+        semantic_generator.assert_called_once_with(source.resolve())
+        self.assertEqual(imported["semantic_id_calls"], 1)
+        self.assertEqual(
+            imported["imported"][0]["design_id"], "vintage-cat-santa-chimney"
+        )
+
+    def test_filename_collision_prefers_collection_then_one_based_suffix(self) -> None:
+        collection = self.root / "Holiday Collection"
+        collection.mkdir()
+        Image.new("RGB", (40, 40), (20, 30, 40)).save(
+            collection / "Merry Pawlidays.png"
+        )
+        for occupied in (
+            "merry-pawlidays",
+            "holiday-collection-merry-pawlidays",
+        ):
+            (self.inputs / occupied).mkdir()
+
+        with (
+            patch.dict(
+                os.environ, {"STATIC_PRINT_DESIGN_ID_MODE": "auto"}, clear=False
+            ),
+            patch(
+                "pawmarvel_static_print.lifecycle.openai_design_id_generator"
+            ) as semantic_generator,
+        ):
+            imported = import_review_collection(self.root, collection)
+
+        semantic_generator.assert_not_called()
+        self.assertEqual(
+            imported["imported"][0]["design_id"],
+            "holiday-collection-merry-pawlidays-1",
+        )
 
     def test_openai_design_id_generator_uses_low_detail_vision(self) -> None:
         source = self.root / "candidate.png"

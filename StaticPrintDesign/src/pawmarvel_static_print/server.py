@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
 from time import monotonic
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -37,6 +37,9 @@ from .core import (
     validate_version,
 )
 from .lifecycle import (
+    OPAQUE_FULL_BLEED,
+    PRESERVE_TRANSPARENCY,
+    canvas_policy_for_report,
     generate_subject_variants,
     import_review_collection,
     load_subject_catalog,
@@ -397,6 +400,7 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
         self.s3_published_cache: dict[str, list[dict[str, str]]] | None = None
         self.s3_status_cache: dict[str, Any] | None = None
         self.s3_checked_at = 0.0
+        self.s3_refresh_thread: Thread | None = None
         self.workspace_lock = None
         super().__init__(address, StaticPrintHandler)
         try:
@@ -528,24 +532,27 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
             raise StaticPrintError(
                 "S3 release status is not configured; set STATIC_PRINT_S3_BUCKET"
             )
+        now = monotonic()
         with self.s3_status_lock:
-            now = monotonic()
             if (
                 not force
                 and self.s3_published_cache is not None
                 and now - self.s3_checked_at < 15
             ):
                 return self.s3_published_cache, dict(self.s3_status_cache or {})
-            try:
-                published, inventory = load_s3_release_entries(
-                    bucket=config.s3_bucket,
-                    prefix=config.s3_prefix,
-                    profile=config.aws_profile,
-                    region=config.aws_region,
-                    catalog_cache=self.s3_catalog_cache,
-                    include_source_sha256=True,
-                )
-            except StaticPrintError as exc:
+        # Never hold the cache mutex across AWS CLI/network I/O. Operator-state
+        # requests must be able to return local evidence while this runs.
+        try:
+            published, inventory = load_s3_release_entries(
+                bucket=config.s3_bucket,
+                prefix=config.s3_prefix,
+                profile=config.aws_profile,
+                region=config.aws_region,
+                catalog_cache=self.s3_catalog_cache,
+                include_source_sha256=True,
+            )
+        except StaticPrintError as exc:
+            with self.s3_status_lock:
                 if allow_stale and self.s3_published_cache is not None:
                     status = {
                         **(self.s3_status_cache or {}),
@@ -554,9 +561,10 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
                         "error": str(exc),
                     }
                     return self.s3_published_cache, status
-                raise
+            raise
+        with self.s3_status_lock:
             self.s3_published_cache = published
-            self.s3_checked_at = now
+            self.s3_checked_at = monotonic()
             self.s3_status_cache = {
                 "source": "s3-catalog-index",
                 "available": True,
@@ -566,6 +574,75 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
                 **inventory,
             }
             return published, dict(self.s3_status_cache)
+
+    def cached_s3_publications(
+        self,
+    ) -> tuple[dict[str, list[dict[str, str]]], dict[str, Any]]:
+        """Return immediately and refresh remote publication state in background."""
+
+        config = self.config
+        if not config.s3_bucket:
+            raise StaticPrintError(
+                "S3 release status is not configured; set STATIC_PRINT_S3_BUCKET"
+            )
+        thread_to_start: Thread | None = None
+        with self.s3_status_lock:
+            now = monotonic()
+            refreshing = self.s3_refresh_thread is not None
+            refresh_due = self.s3_checked_at == 0 or now - self.s3_checked_at >= 15
+            if refresh_due and not refreshing:
+                thread_to_start = Thread(
+                    target=self._refresh_s3_publications,
+                    daemon=True,
+                    name="static-print-s3-status",
+                )
+                self.s3_refresh_thread = thread_to_start
+                refreshing = True
+            published = {
+                design_id: [dict(entry) for entry in entries]
+                for design_id, entries in (self.s3_published_cache or {}).items()
+            }
+            status = {
+                "source": "s3-catalog-index",
+                "available": self.s3_published_cache is not None,
+                "stale": False,
+                "checked_at": None,
+                "error": None,
+                **(self.s3_status_cache or {}),
+                "refreshing": refreshing,
+            }
+        if thread_to_start is not None:
+            try:
+                thread_to_start.start()
+            except Exception:
+                with self.s3_status_lock:
+                    if self.s3_refresh_thread is thread_to_start:
+                        self.s3_refresh_thread = None
+                raise
+        return published, status
+
+    def _refresh_s3_publications(self) -> None:
+        try:
+            _, status = self.s3_publications(force=True)
+            with self.s3_status_lock:
+                # Failed refreshes can return the last known inventory as stale.
+                # Persist that status so the GUI explains the degraded state.
+                if status.get("stale"):
+                    self.s3_status_cache = dict(status)
+                    self.s3_checked_at = monotonic()
+        except StaticPrintError as exc:
+            with self.s3_status_lock:
+                self.s3_checked_at = monotonic()
+                self.s3_status_cache = {
+                    "source": "s3-catalog-index",
+                    "available": False,
+                    "stale": self.s3_published_cache is not None,
+                    "checked_at": utc_now(),
+                    "error": str(exc),
+                }
+        finally:
+            with self.s3_status_lock:
+                self.s3_refresh_thread = None
 
     def invalidate_s3_publications(self) -> None:
         with self.s3_status_lock:
@@ -709,12 +786,19 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
         profiles = discover_profiles(config.profiles_root)
         for design in designs:
             design_id = design["design_id"]
-            design_root = dict(roots)[design["pool"]]
             design["source_url"] = f"/asset/source/{design['pool']}/{design_id}"
             design["transparency"] = design.get(
                 "source_transparency"
             ) or transparency_report(Path(design["source"]))
-            design["canvas_policy"] = design_canvas_policy(design_root, design_id)
+            recorded_canvas_policy = (design.get("intake") or {}).get(
+                "canvas_policy"
+            )
+            design["canvas_policy"] = (
+                recorded_canvas_policy
+                if recorded_canvas_policy
+                in {OPAQUE_FULL_BLEED, PRESERVE_TRANSPARENCY}
+                else canvas_policy_for_report(design["transparency"])
+            )
             reviews = [
                 item
                 for item in feedback.get(design_id, [])
@@ -858,7 +942,9 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
         }
         if operator:
             try:
-                remote_entries, publication_status = self.server.s3_publications()
+                remote_entries, publication_status = (
+                    self.server.cached_s3_publications()
+                )
             except StaticPrintError as exc:
                 remote_entries = {}
                 publication_status["error"] = str(exc)
