@@ -1,0 +1,11 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "ornament",
+  "preview": {"width": 1080, "height": 1080},
+  "print_targets": [
+    {"target_id": "992x992", "width": 992, "height": 992, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "1098x1063", "width": 1098, "height": 1063, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "780x1087", "width": 780, "height": 1087, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "1004x933", "width": 1004, "height": 933, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}

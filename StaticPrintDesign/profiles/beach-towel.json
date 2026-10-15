@@ -1,0 +1,8 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "beach-towel",
+  "preview": {"width": 1080, "height": 2188},
+  "print_targets": [
+    {"target_id": "5551x11250", "width": 5551, "height": 11250, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}

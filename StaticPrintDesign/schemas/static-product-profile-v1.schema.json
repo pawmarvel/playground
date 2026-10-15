@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pawmarvel.com/schemas/static-product-profile-v1.schema.json",
+  "title": "PawMarvel static print product profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "product_profile_id", "preview", "print_targets"],
+  "properties": {
+    "schema": {"const": "pawmarvel-static-product-profile-v1"},
+    "product_profile_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      }
+    },
+    "print_targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_id", "width", "height", "dpi", "color_space", "background"],
+        "properties": {
+          "target_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "width": {"type": "integer", "minimum": 1},
+          "height": {"type": "integer", "minimum": 1},
+          "dpi": {"type": "integer", "minimum": 1},
+          "color_space": {"const": "sRGB"},
+          "background": {"type": "string", "pattern": "^(transparent|#[0-9A-Fa-f]{6})$"},
+          "physical_width_inches": {"type": "number", "exclusiveMinimum": 0},
+          "physical_height_inches": {"type": "number", "exclusiveMinimum": 0}
+        }
+      }
+    }
+  }
+}

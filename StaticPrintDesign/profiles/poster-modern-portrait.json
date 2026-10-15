@@ -1,0 +1,11 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "poster-modern-portrait",
+  "preview": {"width": 1080, "height": 1350},
+  "print_targets": [
+    {"target_id": "2400x3000", "width": 2400, "height": 3000, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "3600x3600", "width": 3600, "height": 3600, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "4800x6000", "width": 4800, "height": 6000, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "7200x10800", "width": 7200, "height": 10800, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}

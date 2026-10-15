@@ -1,0 +1,605 @@
+from __future__ import annotations
+
+import os
+import secrets
+import shutil
+import tempfile
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
+
+from PIL import Image, ImageColor, ImageOps
+
+from .core import (
+    DesignIdentity,
+    ProductProfile,
+    StaticPrintError,
+    design_authoring_path,
+    design_identity,
+    design_source_path,
+    image_info,
+    load_profile,
+    product_profile_sha256,
+    read_json,
+    require_png,
+    resolve_design_identity,
+    sha256_file,
+    validate_id,
+    validate_version,
+    write_json,
+)
+
+PREVIEW_MAX_EDGE = 1080
+OPAQUE_FULL_BLEED = "opaque-full-bleed"
+PRESERVE_TRANSPARENCY = "preserve-transparency"
+
+
+def initialize_workspace(root: Path) -> dict[str, str]:
+    paths = {
+        "inputs": root / "static-design-inputs",
+        "graduated": root / "static-graduated-designs",
+        "abandoned": root / "static-abandoned-designs",
+        "authoring": root / "static-authoring",
+        "exchange_releases": root / "static-exchange/releases",
+        "exchange_publications": root / "static-exchange/publications",
+    }
+    for path in paths.values():
+        path.mkdir(parents=True, exist_ok=True)
+    return {key: str(path.resolve()) for key, path in paths.items()}
+
+
+def discover_designs(inputs_root: Path, authoring_root: Path) -> list[dict[str, Any]]:
+    designs: list[dict[str, Any]] = []
+    if not inputs_root.is_dir():
+        return designs
+
+    def add(identity: DesignIdentity) -> None:
+        design_id = identity.design_id
+        source = inputs_root / identity.relative_directory / "source-design.png"
+        intake_path = inputs_root / identity.seed_design_id / "intake.json"
+        if not source.is_file():
+            return
+        existing = next(
+            (item for item in designs if item["design_id"] == design_id), None
+        )
+        if existing is not None:
+            raise StaticPrintError(
+                f"ambiguous design ID {design_id!r}; both source paths exist: "
+                f"{existing['source']} and {source.resolve()}"
+            )
+        width, height, mode = require_png(source, "source design")
+        source_digest = sha256_file(source)
+        intake = read_json(intake_path) if intake_path.is_file() else None
+        source_transparency: dict[str, Any] | None = None
+        if identity.subject_id is None:
+            if (
+                isinstance(intake, dict)
+                and intake.get("source_sha256") == source_digest
+                and isinstance(intake.get("source_transparency"), dict)
+            ):
+                source_transparency = intake["source_transparency"]
+        else:
+            provenance_path = (
+                inputs_root / identity.relative_directory / "subject-generation.json"
+            )
+            if provenance_path.is_file():
+                provenance = read_json(provenance_path)
+                if provenance.get("output_sha256") == source_digest and isinstance(
+                    provenance.get("output_transparency"), dict
+                ):
+                    source_transparency = provenance["output_transparency"]
+        versions: list[dict[str, Any]] = []
+        profile_root = authoring_root / identity.relative_directory
+        if profile_root.is_dir():
+            for product_dir in sorted(profile_root.iterdir()):
+                if not product_dir.is_dir():
+                    continue
+                try:
+                    product_profile_id = validate_id(
+                        product_dir.name, "product profile ID"
+                    )
+                except StaticPrintError:
+                    continue
+                for version_dir in sorted(product_dir.iterdir(), reverse=True):
+                    if not version_dir.is_dir():
+                        continue
+                    try:
+                        validate_version(version_dir.name)
+                    except StaticPrintError:
+                        continue
+                    preview = version_dir / f"{design_id}-preview.png"
+                    generation_path = version_dir / "generation.json"
+                    generation = (
+                        read_json(generation_path)
+                        if generation_path.is_file()
+                        else None
+                    )
+                    prints = sorted(
+                        path.name
+                        for path in version_dir.glob(f"{design_id}--*.png")
+                        if path.is_file()
+                    )
+                    profile_previews = sorted(
+                        path.name
+                        for path in (version_dir / "profile-previews").glob("*.png")
+                        if path.is_file()
+                    )
+                    authoring_relative = str(
+                        (
+                            identity.relative_directory
+                            / product_profile_id
+                            / version_dir.name
+                        ).as_posix()
+                    )
+                    versions.append(
+                        {
+                            "version_id": version_dir.name,
+                            "product_profile_id": product_profile_id,
+                            "authoring_relative": authoring_relative,
+                            "preview": preview.name if preview.is_file() else None,
+                            "prints": prints,
+                            "profile_previews": profile_previews,
+                            "generation": generation,
+                        }
+                    )
+        designs.append(
+            {
+                "design_id": design_id,
+                "seed_design_id": identity.seed_design_id,
+                "subject_id": identity.subject_id,
+                "source": str(source.resolve()),
+                "source_width": width,
+                "source_height": height,
+                "source_mode": mode,
+                "source_sha256": source_digest,
+                "source_transparency": source_transparency,
+                "intake": intake,
+                "versions": versions,
+            }
+        )
+
+    for seed_directory in sorted(inputs_root.iterdir()):
+        if not seed_directory.is_dir():
+            continue
+        try:
+            seed_design_id = validate_id(seed_directory.name, "seed design ID")
+            seed_identity = DesignIdentity(seed_design_id)
+        except StaticPrintError:
+            continue
+        add(seed_identity)
+        for subject_directory in sorted(seed_directory.iterdir()):
+            if not subject_directory.is_dir():
+                continue
+            try:
+                subject_id = validate_id(subject_directory.name, "subject ID")
+                subject_identity = DesignIdentity(seed_design_id, subject_id)
+            except StaticPrintError:
+                continue
+            add(subject_identity)
+    return sorted(designs, key=lambda item: item["design_id"])
+
+
+def save_png(image: Image.Image, path: Path, *, dpi: int | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    os.close(descriptor)
+    temporary_path = Path(temporary)
+    try:
+        options: dict[str, Any] = {"format": "PNG", "optimize": True}
+        if dpi is not None:
+            options["dpi"] = (dpi, dpi)
+        image.save(temporary_path, **options)
+        with temporary_path.open("rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, path)
+        try:
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError:
+            pass
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def _background(size: tuple[int, int], value: str) -> Image.Image:
+    if value == "transparent":
+        return Image.new("RGBA", size, (0, 0, 0, 0))
+    rgb = ImageColor.getrgb(value)
+    return Image.new("RGBA", size, (*rgb, 255))
+
+
+def _is_fully_opaque(image: Image.Image) -> bool:
+    if "A" not in image.getbands():
+        return True
+    return image.getchannel("A").getextrema() == (255, 255)
+
+
+def _image_transparency_report(image: Image.Image) -> dict[str, Any]:
+    rgba = image.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    minimum, maximum = alpha.getextrema()
+    histogram = alpha.histogram()
+    total = rgba.width * rgba.height
+    non_opaque = total - histogram[255]
+    pixels = alpha.load()
+    border_values = [pixels[x, 0] for x in range(rgba.width)]
+    if rgba.height > 1:
+        border_values.extend(pixels[x, rgba.height - 1] for x in range(rgba.width))
+    if rgba.width > 1 and rgba.height > 2:
+        border_values.extend(pixels[0, y] for y in range(1, rgba.height - 1))
+        border_values.extend(
+            pixels[rgba.width - 1, y] for y in range(1, rgba.height - 1)
+        )
+    transparent_border = sum(value < 255 for value in border_values)
+    border_percent = (
+        (transparent_border / len(border_values)) * 100 if border_values else 0.0
+    )
+    corners = {
+        pixels[0, 0],
+        pixels[rgba.width - 1, 0],
+        pixels[0, rgba.height - 1],
+        pixels[rgba.width - 1, rgba.height - 1],
+    }
+    has_transparent_background = non_opaque > 0 and (
+        border_percent >= 5 or any(value < 255 for value in corners)
+    )
+    return {
+        "has_alpha_channel": "A" in image.getbands(),
+        "has_transparent_pixels": non_opaque > 0,
+        "has_transparent_background": has_transparent_background,
+        "transparent_pixel_percent": round((non_opaque / total) * 100, 3),
+        "transparent_border_percent": round(border_percent, 3),
+        "alpha_min": int(minimum),
+        "alpha_max": int(maximum),
+        "result": (
+            "transparent-background"
+            if has_transparent_background
+            else "partial-alpha"
+            if non_opaque > 0
+            else "opaque"
+        ),
+    }
+
+
+def _canvas_policy(image: Image.Image) -> str:
+    return OPAQUE_FULL_BLEED if _is_fully_opaque(image) else PRESERVE_TRANSPARENCY
+
+
+def _design_canvas_policy(
+    inputs_root: Path, design_id: str, source: Image.Image
+) -> str:
+    identity = resolve_design_identity(inputs_root, design_id)
+    intake_path = inputs_root / identity.seed_design_id / "intake.json"
+    if intake_path.is_file():
+        recorded = read_json(intake_path).get("canvas_policy")
+        if recorded in {OPAQUE_FULL_BLEED, PRESERVE_TRANSPARENCY}:
+            return str(recorded)
+    return _canvas_policy(source)
+
+
+def design_canvas_policy(inputs_root: Path, design_id: str) -> str:
+    """Resolve the seed-level canvas contract for a seed or subject design."""
+
+    resolved_design_id = resolve_design_identity(inputs_root, design_id).design_id
+    source_path = design_source_path(inputs_root, resolved_design_id).resolve()
+    require_png(source_path, "source design")
+    with Image.open(source_path) as opened:
+        opened.load()
+        return _design_canvas_policy(
+            inputs_root, resolved_design_id, opened.convert("RGBA")
+        )
+
+
+def _require_opaque_full_bleed(
+    image: Image.Image, *, design_id: str, artifact: Path
+) -> None:
+    if not _is_fully_opaque(image):
+        raise StaticPrintError(
+            "opaque full-bleed source produced transparent output; "
+            f"design_id={design_id!r}; artifact={artifact.resolve()}"
+        )
+
+
+def render_target(
+    source: Image.Image,
+    *,
+    size: tuple[int, int],
+    fit: str,
+    background: str,
+) -> Image.Image:
+    rgba = source.convert("RGBA")
+    if fit == "cover":
+        return ImageOps.fit(
+            rgba,
+            size,
+            method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.5),
+        )
+    if fit != "contain":
+        raise StaticPrintError(f"fit must be contain or cover; actual={fit!r}")
+    resized = ImageOps.contain(rgba, size, method=Image.Resampling.LANCZOS)
+    canvas = _background(size, background)
+    canvas.alpha_composite(
+        resized,
+        ((size[0] - resized.width) // 2, (size[1] - resized.height) // 2),
+    )
+    return canvas
+
+
+def _preview(source: Image.Image) -> Image.Image:
+    preview = source.convert("RGBA")
+    if max(preview.size) > PREVIEW_MAX_EDGE:
+        preview.thumbnail(
+            (PREVIEW_MAX_EDGE, PREVIEW_MAX_EDGE), Image.Resampling.LANCZOS
+        )
+    return preview
+
+
+def generate_design(
+    *,
+    inputs_root: Path,
+    authoring_root: Path,
+    design_id: str,
+    version_id: str,
+    profiles: Iterable[Path | ProductProfile],
+    fit: str = "cover",
+    operation_id: str | None = None,
+) -> dict[str, Any]:
+    design_id = design_identity(design_id).design_id
+    version_id = validate_version(version_id)
+    if fit not in {"contain", "cover"}:
+        raise StaticPrintError(f"fit must be contain or cover; actual={fit!r}")
+    source_path = design_source_path(inputs_root, design_id).resolve()
+    source_width, source_height, _ = require_png(source_path, "source design")
+    loaded_profiles = [
+        item if isinstance(item, ProductProfile) else load_profile(item)
+        for item in profiles
+    ]
+    if len(loaded_profiles) != 1:
+        raise StaticPrintError(
+            "product generation requires exactly one product profile per call; "
+            f"actual={[profile.profile_id for profile in loaded_profiles]}"
+        )
+    profile = loaded_profiles[0]
+    profile_digest = product_profile_sha256(profile)
+    profile_root = (
+        design_authoring_path(authoring_root, design_id, inputs_root=inputs_root)
+        / profile.profile_id
+    )
+    profile_root.mkdir(parents=True, exist_ok=True)
+    final_dir = profile_root / version_id
+    source_digest = sha256_file(source_path)
+    generation_path = final_dir / "generation.json"
+    existing_generation = (
+        read_json(generation_path) if generation_path.is_file() else None
+    )
+    if existing_generation is not None:
+        if (
+            existing_generation.get("schema") != "pawmarvel-static-generation-v3"
+            or existing_generation.get("design_id") != design_id
+            or existing_generation.get("product_profile_id") != profile.profile_id
+            or existing_generation.get("version_id") != version_id
+            or existing_generation.get("product_profile_sha256") != profile_digest
+        ):
+            raise StaticPrintError(
+                f"existing generation record is invalid: {generation_path.resolve()}"
+            )
+        if existing_generation.get("source_sha256") != source_digest:
+            raise StaticPrintError(
+                f"version {version_id!r} was generated from a different subject preview; "
+                f"use a new version ID; record={generation_path.resolve()}"
+            )
+        if existing_generation.get("fit") != fit:
+            raise StaticPrintError(
+                f"version {version_id!r} already uses fit={existing_generation.get('fit')!r}; "
+                f"use a new version ID for fit={fit!r}"
+            )
+        outputs: list[dict[str, Any]] = []
+        multiple = len(profile.targets) > 1
+        for target in profile.targets:
+            filename = (
+                f"{design_id}--{profile.profile_id}--{target.target_id}.png"
+                if multiple
+                else f"{design_id}--{profile.profile_id}.png"
+            )
+            path = final_dir / filename
+            width, height, mode = image_info(path)
+            if (width, height) != (target.width, target.height):
+                raise StaticPrintError(
+                    "existing product artifact has incorrect dimensions: "
+                    f"path={path.resolve()}; expected={target.width}x{target.height}; "
+                    f"actual={width}x{height}"
+                )
+            outputs.append(
+                {
+                    "profile_id": profile.profile_id,
+                    "target_id": target.target_id,
+                    "path": str(path.resolve()),
+                    "filename": filename,
+                    "width": width,
+                    "height": height,
+                    "mode": mode,
+                    "transparency": existing_generation.get("transparency", {})
+                    .get("prints", {})
+                    .get(target.target_id, {}),
+                }
+            )
+        preview_path = final_dir / f"{design_id}-preview.png"
+        preview_width, preview_height, preview_mode = image_info(preview_path)
+        profile_preview_path = (
+            final_dir / "profile-previews" / f"{profile.profile_id}.png"
+        )
+        profile_preview_width, profile_preview_height, _ = image_info(
+            profile_preview_path
+        )
+        return {
+            "design_id": design_id,
+            "product_profile_id": profile.profile_id,
+            "version_id": version_id,
+            "fit": fit,
+            "canvas_policy": existing_generation.get("canvas_policy"),
+            "preview": {
+                "path": str(preview_path.resolve()),
+                "width": preview_width,
+                "height": preview_height,
+                "mode": preview_mode,
+            },
+            "outputs": outputs,
+            "profile_previews": [
+                {
+                    "profile_id": profile.profile_id,
+                    "path": str(profile_preview_path.resolve()),
+                    "width": profile_preview_width,
+                    "height": profile_preview_height,
+                    "transparency": existing_generation.get("transparency", {}).get(
+                        "profile_preview", {}
+                    ),
+                }
+            ],
+            "warnings": list(existing_generation.get("warnings", [])),
+            "reused": True,
+        }
+    if final_dir.exists():
+        raise StaticPrintError(
+            "product candidate directory exists without a valid generation record; "
+            f"restart the server to quarantine it or remove it after inspection: {final_dir.resolve()}"
+        )
+    token = (
+        validate_id(operation_id, "operation ID")
+        if operation_id
+        else secrets.token_hex(8)
+    )
+    output_dir = profile_root / f".{version_id}.partial-{token}"
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True)
+    generation_path = output_dir / "generation.json"
+    preview_path = output_dir / f"{design_id}-preview.png"
+    warnings: list[str] = []
+    outputs: list[dict[str, Any]] = []
+    profile_previews: list[dict[str, Any]] = []
+    with Image.open(source_path) as opened:
+        opened.load()
+        source = opened.convert("RGBA")
+        canvas_policy = _design_canvas_policy(inputs_root, design_id, source)
+        if canvas_policy == OPAQUE_FULL_BLEED:
+            source = source.convert("RGB").convert("RGBA")
+        operator_preview = _preview(source)
+        save_png(operator_preview, preview_path)
+        operator_preview_transparency = _image_transparency_report(operator_preview)
+        multiple = len(profile.targets) > 1
+        first_target_image: Image.Image | None = None
+        for target in profile.targets:
+            scale = max(target.width / source_width, target.height / source_height)
+            if scale > 1:
+                warnings.append(
+                    f"{design_id}/{profile.profile_id}/{target.target_id} upscales "
+                    f"the source by {scale:.2f}x; manually inspect print sharpness"
+                )
+            filename = (
+                f"{design_id}--{profile.profile_id}--{target.target_id}.png"
+                if multiple
+                else f"{design_id}--{profile.profile_id}.png"
+            )
+            path = output_dir / filename
+            rendered = render_target(
+                source,
+                size=(target.width, target.height),
+                fit=fit,
+                background=target.background,
+            )
+            if canvas_policy == OPAQUE_FULL_BLEED:
+                _require_opaque_full_bleed(rendered, design_id=design_id, artifact=path)
+            save_png(rendered, path, dpi=target.dpi)
+            if first_target_image is None:
+                first_target_image = rendered.copy()
+            width, height, mode = image_info(path)
+            outputs.append(
+                {
+                    "profile_id": profile.profile_id,
+                    "target_id": target.target_id,
+                    "path": str(path.resolve()),
+                    "filename": filename,
+                    "width": width,
+                    "height": height,
+                    "mode": mode,
+                    "transparency": _image_transparency_report(rendered),
+                }
+            )
+        if first_target_image is None:  # ProductProfile validation prevents this.
+            raise StaticPrintError(
+                f"product profile has no print targets: {profile.profile_id!r}"
+            )
+        profile_preview_path = (
+            output_dir / "profile-previews" / f"{profile.profile_id}.png"
+        )
+        profile_preview = render_target(
+            first_target_image,
+            size=(profile.preview_width, profile.preview_height),
+            fit="cover",
+            background=profile.targets[0].background,
+        )
+        if canvas_policy == OPAQUE_FULL_BLEED:
+            _require_opaque_full_bleed(
+                profile_preview,
+                design_id=design_id,
+                artifact=profile_preview_path,
+            )
+        save_png(profile_preview, profile_preview_path)
+        profile_previews.append(
+            {
+                "profile_id": profile.profile_id,
+                "path": str(profile_preview_path.resolve()),
+                "width": profile.preview_width,
+                "height": profile.preview_height,
+                "transparency": _image_transparency_report(profile_preview),
+            }
+        )
+        generation_transparency = {
+            "operator_preview": operator_preview_transparency,
+            "profile_preview": profile_previews[0]["transparency"],
+            "prints": {item["target_id"]: item["transparency"] for item in outputs},
+        }
+    write_json(
+        generation_path,
+        {
+            "schema": "pawmarvel-static-generation-v3",
+            "design_id": design_id,
+            "product_profile_id": profile.profile_id,
+            "product_profile_sha256": profile_digest,
+            "version_id": version_id,
+            "source_sha256": source_digest,
+            "fit": fit,
+            "canvas_policy": canvas_policy,
+            "transparency": generation_transparency,
+            "warnings": sorted(set(warnings)),
+        },
+    )
+    os.replace(output_dir, final_dir)
+    preview_path = final_dir / f"{design_id}-preview.png"
+    for item in outputs:
+        item["path"] = str((final_dir / item["filename"]).resolve())
+    for item in profile_previews:
+        item["path"] = str(
+            (final_dir / "profile-previews" / f"{profile.profile_id}.png").resolve()
+        )
+    preview_width, preview_height, preview_mode = image_info(preview_path)
+    return {
+        "design_id": design_id,
+        "product_profile_id": profile.profile_id,
+        "version_id": version_id,
+        "fit": fit,
+        "canvas_policy": canvas_policy,
+        "preview": {
+            "path": str(preview_path.resolve()),
+            "width": preview_width,
+            "height": preview_height,
+            "mode": preview_mode,
+        },
+        "outputs": outputs,
+        "profile_previews": profile_previews,
+        "warnings": sorted(set(warnings)),
+    }

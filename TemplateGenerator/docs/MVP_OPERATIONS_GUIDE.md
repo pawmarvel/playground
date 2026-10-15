@@ -2183,12 +2183,12 @@ aws sts get-caller-identity --profile "$AWS_PROFILE" --region "$AWS_REGION"
 ```
 
 After a successful publication, the immutable S3 objects follow the same
-relative paths as `work/exchange/`. For example, with bucket
-`alphapaw-pod-designer-prod`, prefix `Template/MVP-test`, release
+relative paths as `work/exchange/`. For example, with the configured bucket,
+prefix `Template/MVP-test`, release
 `2026-09-13.001`, and one Cooper blanket bundle, S3 contains:
 
 ```text
-s3://alphapaw-pod-designer-prod/Template/MVP-test/
+s3://<configured-bucket>/Template/MVP-test/
   bundles/
     cooper--blanket-king-9375x12375/
       v000001/

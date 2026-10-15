@@ -1,0 +1,8 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "mousepad",
+  "preview": {"width": 1080, "height": 900},
+  "print_targets": [
+    {"target_id": "2700x2250", "width": 2700, "height": 2250, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}

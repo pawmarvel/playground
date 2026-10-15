@@ -1,0 +1,9 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "fleece-sherpa-blankets",
+  "preview": {"width": 1080, "height": 1296},
+  "print_targets": [
+    {"target_id": "7875x9375", "width": 7875, "height": 9375, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "9375x12375", "width": 9375, "height": 12375, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}

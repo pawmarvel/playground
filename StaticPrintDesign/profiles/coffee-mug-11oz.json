@@ -1,0 +1,8 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "coffee-mug-11oz",
+  "preview": {"width": 837, "height": 1020},
+  "print_targets": [
+    {"target_id": "837x1020", "width": 837, "height": 1020, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}

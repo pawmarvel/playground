@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PawMarvel Static Print Design</title>
+    <link rel="stylesheet" href="/static/app.css">
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">PawMarvel</p>
+        <h1 id="page-title">Static design review</h1>
+        <p id="page-subtitle">Review proposed static print designs and leave actionable feedback.</p>
+      </div>
+      <a id="mode-link" href="/operator">Operator workspace</a>
+    </header>
+
+    <main>
+      <section id="login" class="panel hidden">
+        <h2>Sign in</h2>
+        <p>Enter the access code shared for this workspace.</p>
+        <form id="login-form">
+          <input id="access-code" type="password" autocomplete="current-password" required>
+          <button type="submit">Continue</button>
+        </form>
+        <p id="login-error" class="error"></p>
+      </section>
+
+      <section id="reviewer-identity" class="panel reviewer-identity hidden">
+        <label>Reviewer name or email
+          <input id="reviewer" autocomplete="name" placeholder="reviewer@example.com">
+        </label>
+        <p>Review several designs, then save once. A saved response replaces your prior response for the same design pixels.</p>
+      </section>
+
+      <aside id="reviewer-sticky-controls" class="reviewer-sticky-controls hidden" aria-label="Review display and batch-save controls">
+        <section id="preview-controls" class="panel hidden">
+          <h2>Transparency preview</h2>
+          <div class="button-row preview-options">
+            <button type="button" class="secondary preview-background" data-preview="checker">Raw transparency</button>
+            <button type="button" class="secondary preview-background" data-preview="#2563eb">Solid blue</button>
+            <button type="button" class="secondary preview-background" data-preview="#ffffff">White</button>
+            <label>Custom color<input id="custom-preview-color" type="color" value="#f4b942"></label>
+          </div>
+          <p class="hint">This changes only the browser preview; source pixels remain unchanged.</p>
+        </section>
+
+        <section id="reviewer-controls" class="panel hidden">
+          <div class="button-row">
+            <button id="save-review-feedback" type="button">Save all changed feedback</button>
+            <span id="pending-review-count" class="hint">0 changed</span>
+          </div>
+        </section>
+      </aside>
+
+      <section id="filter-controls" class="panel filters hidden" aria-label="Design filters">
+        <label>Collection
+          <select id="collection-filter"><option value="">All collections</option></select>
+        </label>
+        <label>Design
+          <input id="design-filter" type="search" placeholder="Search design ID or subject">
+        </label>
+        <label>Transparency
+          <select id="transparency-filter">
+            <option value="">All transparency</option>
+            <option value="transparent-background">Transparent background</option>
+            <option value="partial-alpha">Partial alpha</option>
+            <option value="opaque">Opaque</option>
+          </select>
+        </label>
+        <label>Review status
+          <select id="review-filter">
+            <option value="">All review states</option>
+            <option value="no-feedback">No reviewer feedback</option>
+            <option value="has-feedback">Has reviewer feedback</option>
+            <option value="approve">Has approve vote</option>
+            <option value="changes">Has needs-changes vote</option>
+            <option value="reject">Has reject vote</option>
+            <option value="subject-approved">Subject approved</option>
+            <option value="subject-rework">Subject needs rework</option>
+            <option value="subject-abandoned">Subject abandoned</option>
+            <option value="subject-pending">Subject decision pending</option>
+            <option value="released">Released</option>
+            <option value="unreleased">Not released</option>
+          </select>
+        </label>
+        <label id="selection-filter-control" class="hidden">Current selection
+          <select id="selection-filter">
+            <option value="">All designs</option>
+            <option value="selected">Selected</option>
+            <option value="unselected">Not selected</option>
+          </select>
+        </label>
+        <button id="clear-filters" type="button" class="secondary">Clear filters</button>
+        <strong id="filter-count" aria-live="polite"></strong>
+      </section>
+
+      <section id="operator-workspace" class="panel workspace-summary hidden"></section>
+
+      <nav id="operator-tabs" class="workflow-tabs hidden" aria-label="Static design workflow pools">
+        <button type="button" class="workflow-tab active" data-tab="active">Active review <span id="active-tab-count">0</span></button>
+        <button type="button" class="workflow-tab" data-tab="graduated">Graduated workflow <span id="graduated-tab-count">0</span></button>
+        <button type="button" class="workflow-tab" data-tab="released">Released <span id="released-tab-count">0</span></button>
+        <button type="button" class="workflow-tab" data-tab="abandoned">Abandoned <span id="abandoned-tab-count">0</span></button>
+      </nav>
+
+      <aside id="operator-actions" class="operator-actions hidden" aria-label="Sticky batch workflow actions">
+        <details id="operator-status" class="status hidden" aria-live="polite">
+          <summary id="operator-status-summary"></summary>
+          <div id="operator-status-detail" class="operation-status-detail"></div>
+        </details>
+        <details id="batch-toolbar" class="panel batch-toolbar" open>
+          <summary><h2>Batch review actions · <span id="batch-selection-count">0 selected</span></h2></summary>
+          <p id="review-batch-selection" class="hint">No designs selected.</p>
+          <div class="button-row">
+            <button id="select-visible" type="button" class="secondary">Select all filtered</button>
+            <button id="clear-selection" type="button" class="secondary">Clear selection</button>
+            <button id="graduate-selected" type="button">Approve and graduate selected</button>
+            <button id="abandon-selected" type="button" class="danger">Abandon selected</button>
+            <button id="approve-subjects-selected" type="button">Approve selected subjects</button>
+            <button id="approve-queue-subjects-selected" type="button">Approve + queue products</button>
+            <button id="rework-subjects-selected" type="button" class="danger">Needs work for selected subjects</button>
+            <button id="abandon-subjects-selected" type="button" class="danger">Abandon selected subjects</button>
+            <button id="restore-selected" type="button">Restore selected</button>
+          </div>
+        </details>
+
+        <details id="subject-batch-controls" class="panel subject-production-control hidden">
+          <summary><h2>Batch subject-preview generation · <span id="subject-batch-stat">0 references × 0 subjects = 0 calls</span></h2></summary>
+          <p id="subject-batch-selection" class="hint">No references or subjects selected.</p>
+          <fieldset><legend>Subjects to generate</legend><div id="batch-subject-options" class="checks"></div></fieldset>
+          <label>Optional regeneration instruction
+            <textarea id="batch-subject-instruction" placeholder="Example: preserve the scarf exactly; make the corgi ears upright."></textarea>
+          </label>
+          <label class="inline-check"><input id="batch-subject-force" type="checkbox">Replace existing selected subject previews</label>
+          <div class="button-row">
+            <button id="select-reference-visible" type="button" class="secondary">Select all filtered references</button>
+            <button id="clear-reference-selection" type="button" class="secondary">Clear references</button>
+            <button id="select-all-subjects" type="button" class="secondary">Select all subjects</button>
+            <button id="clear-subjects" type="button" class="secondary">Clear subjects</button>
+            <button id="generate-subjects-batch" type="button">Generate selected references × subjects</button>
+          </div>
+          <p class="hint">Subject generation uses paid image calls. Existing previews are protected unless replacement is explicitly enabled.</p>
+        </details>
+
+        <details id="operator-controls" class="panel production-control hidden">
+          <summary><h2>Batch product generation · <span id="product-batch-stat">0 subjects × 0 profiles = 0 candidates</span></h2></summary>
+          <p id="product-batch-selection" class="hint">No subjects or profiles selected.</p>
+          <p class="hint">Select approved subject rows and product profiles, then generate them directly. The server assigns the next version independently for every subject/profile pair.</p>
+          <fieldset><legend>Product profiles for this batch</legend><div id="profile-options" class="checks"></div></fieldset>
+          <div class="button-row">
+            <button id="select-all-profiles" type="button" class="secondary">Select all profiles</button>
+            <button id="clear-profiles" type="button" class="secondary">Clear profiles</button>
+            <button id="select-product-visible" type="button" class="secondary">Select all filtered approved subjects</button>
+            <button id="generate" type="button">Generate selected subjects × profiles</button>
+            <button id="clear-product-plans" type="button" class="secondary">Clear product selection</button>
+            <button id="retire-selected-products" type="button" class="danger">Retire selected published products</button>
+            <button id="reactivate-selected-products" type="button" class="secondary">Reactivate selected retired products</button>
+          </div>
+          <p class="hint">Fill-canvas cover fitting is enforced at exact preview and print dimensions. Product rendering is deterministic and performs no paid API calls.</p>
+        </details>
+
+        <details id="publication-controls" class="panel production-control hidden">
+          <summary><h2>Validate and publish release · <span id="release-batch-stat">0 candidates selected</span></h2></summary>
+          <p id="release-batch-selection" class="hint">No release candidates selected.</p>
+          <label>Release ID<input id="release-id" placeholder="Automatic when blank"></label>
+          <div class="button-row">
+            <button id="select-release-visible" type="button" class="secondary">Select all filtered release-ready candidates</button>
+            <button id="clear-release-selection" type="button" class="secondary">Clear release selection</button>
+            <button id="validate-release" class="secondary">Validate selected release</button>
+            <button id="publish-release">Validate and publish to S3</button>
+            <button id="rebuild-discovery-catalog" type="button" class="secondary">Rebuild FE discovery catalog</button>
+          </div>
+          <p id="publication-config" class="hint"></p>
+        </details>
+      </aside>
+
+      <section id="reviewer-status" class="status hidden" aria-live="polite"></section>
+      <section id="designs" class="cards"></section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

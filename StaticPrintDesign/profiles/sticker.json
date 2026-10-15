@@ -1,0 +1,12 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "sticker",
+  "preview": {"width": 1080, "height": 1080},
+  "print_targets": [
+    {"target_id": "600x600", "width": 600, "height": 600, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "900x900", "width": 900, "height": 900, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "1200x1200", "width": 1200, "height": 1200, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "1500x1500", "width": 1500, "height": 1500, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "1800x1800", "width": 1800, "height": 1800, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}

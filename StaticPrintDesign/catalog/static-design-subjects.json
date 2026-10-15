@@ -1,0 +1,117 @@
+{
+  "schema": "pawmarvel-static-subject-catalog-v1",
+  "design_id_pattern": "<seed-design-id>--subject-<subject-id>",
+  "workspace_pattern": "<seed-design-id>/<subject-id>",
+  "subject_id_contract": {
+    "authority": "explicit-subject-id",
+    "format": "lowercase-kebab-case",
+    "immutable": true
+  },
+  "expansion_policy": {
+    "seed_approval_required": true,
+    "allow_partial_subject_coverage": true,
+    "preserve_seed_canvas_dimensions": true,
+    "product_generation_requires_subject_approval": true
+  },
+  "subjects": [
+    {
+      "priority": 1,
+      "subject_id": "dog-dachshund",
+      "display_name": "Dachshund",
+      "subject_kind": "dog-breed",
+      "collection_handle": "dachshund-gifts",
+      "collection_path": "/collections/dachshund-gifts",
+      "hero_strategy": "breed-specific"
+    },
+    {
+      "priority": 2,
+      "subject_id": "cat",
+      "display_name": "Cat",
+      "subject_kind": "cat-general",
+      "collection_handle": "cat-gifts",
+      "collection_path": "/collections/cat-gifts",
+      "hero_strategy": "mixed-coat-heroes"
+    },
+    {
+      "priority": 3,
+      "subject_id": "dog-mixed-breed",
+      "display_name": "Dog lover",
+      "subject_kind": "dog-general",
+      "collection_handle": "gifts-for-dog-lovers",
+      "collection_path": "/collections/gifts-for-dog-lovers",
+      "hero_strategy": "mixed-breed-heroes"
+    },
+    {
+      "priority": 4,
+      "subject_id": "dog-golden-retriever",
+      "display_name": "Golden retriever",
+      "subject_kind": "dog-breed",
+      "collection_handle": "golden-retriever-gifts",
+      "collection_path": "/collections/golden-retriever-gifts",
+      "hero_strategy": "breed-specific"
+    },
+    {
+      "priority": 5,
+      "subject_id": "dog-french-bulldog",
+      "display_name": "French bulldog",
+      "subject_kind": "dog-breed",
+      "collection_handle": "french-bulldog-gifts",
+      "collection_path": "/collections/french-bulldog-gifts",
+      "hero_strategy": "breed-specific"
+    },
+    {
+      "priority": 6,
+      "subject_id": "dog-labrador",
+      "display_name": "Labrador",
+      "subject_kind": "dog-breed",
+      "collection_handle": "labrador-gifts",
+      "collection_path": "/collections/labrador-gifts",
+      "hero_strategy": "breed-specific"
+    },
+    {
+      "priority": 7,
+      "subject_id": "dog-corgi",
+      "display_name": "Corgi",
+      "subject_kind": "dog-breed",
+      "collection_handle": "corgi-gifts",
+      "collection_path": "/collections/corgi-gifts",
+      "hero_strategy": "breed-specific"
+    },
+    {
+      "priority": 8,
+      "subject_id": "dog-goldendoodle",
+      "display_name": "Goldendoodle",
+      "subject_kind": "dog-breed",
+      "collection_handle": "goldendoodle-gifts",
+      "collection_path": "/collections/goldendoodle-gifts",
+      "hero_strategy": "breed-specific"
+    },
+    {
+      "priority": 9,
+      "subject_id": "dog-pug",
+      "display_name": "Pug",
+      "subject_kind": "dog-breed",
+      "collection_handle": "pug-gifts",
+      "collection_path": "/collections/pug-gifts",
+      "hero_strategy": "breed-specific"
+    },
+    {
+      "priority": 10,
+      "subject_id": "cat-black",
+      "display_name": "Black cat",
+      "subject_kind": "cat-coat",
+      "collection_handle": "black-cat-gifts",
+      "collection_path": "/collections/black-cat-gifts",
+      "hero_strategy": "black-coat-heroes"
+    },
+    {
+      "priority": 11,
+      "subject_id": "dog-german-shepherd",
+      "display_name": "German shepherd",
+      "subject_kind": "dog-breed",
+      "collection_handle": "german-shepherd-gifts",
+      "collection_path": "/collections/german-shepherd-gifts",
+      "hero_strategy": "breed-specific"
+    }
+  ]
+}

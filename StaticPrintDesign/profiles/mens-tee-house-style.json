@@ -1,0 +1,8 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "mens-tee-house-style",
+  "preview": {"width": 1080, "height": 1234},
+  "print_targets": [
+    {"target_id": "4200x4800", "width": 4200, "height": 4800, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}

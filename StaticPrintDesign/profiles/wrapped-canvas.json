@@ -1,0 +1,9 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "wrapped-canvas",
+  "preview": {"width": 1080, "height": 1350},
+  "print_targets": [
+    {"target_id": "2400x3000", "width": 2400, "height": 3000, "dpi": 300, "color_space": "sRGB", "background": "transparent"},
+    {"target_id": "9000x12000", "width": 9000, "height": 12000, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "pillow",
+  "preview": {"width": 1080, "height": 1080},
+  "print_targets": [
+    {"target_id": "2850x2850", "width": 2850, "height": 2850, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}

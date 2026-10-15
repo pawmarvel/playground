@@ -1,0 +1,8 @@
+{
+  "schema": "pawmarvel-static-product-profile-v1",
+  "product_profile_id": "womens-tee-bella-6400",
+  "preview": {"width": 1080, "height": 1431},
+  "print_targets": [
+    {"target_id": "2812x3725", "width": 2812, "height": 3725, "dpi": 300, "color_space": "sRGB", "background": "transparent"}
+  ]
+}
