@@ -43,6 +43,19 @@ class Subject:
     collection_path: str
 
 
+@dataclass(frozen=True)
+class DesignIdProposal:
+    """A theme-derived seed ID before local uniqueness is applied."""
+
+    design_id: str
+    method: str
+    model: str | None = None
+    request_id: str | None = None
+
+
+DesignIdGenerator = Callable[[Path], DesignIdProposal | str]
+
+
 def _collection_id(value: str, label: str) -> str:
     normalized = unicodedata.normalize("NFKD", value)
     ascii_value = normalized.encode("ascii", "ignore").decode("ascii").lower()
@@ -54,7 +67,178 @@ def _collection_id(value: str, label: str) -> str:
     return validate_id(identifier, label)
 
 
-def import_review_collection(work_root: Path, collection_root: Path) -> dict[str, Any]:
+def _theme_design_id(value: str) -> str:
+    """Normalize and constrain a model-proposed theme identifier."""
+
+    candidate = value.strip().strip("`\"'")
+    if "\n" in candidate:
+        candidate = candidate.splitlines()[0].strip().strip("`\"'")
+    design_id = _collection_id(candidate, "generated design ID")
+    tokens = design_id.split("-")
+    if not 3 <= len(tokens) <= 8 or len(design_id) > 80:
+        raise StaticPrintError(
+            "generated design ID must contain 3-8 descriptive kebab-case words "
+            f"and be at most 80 characters; actual={design_id!r}; raw={value!r}"
+        )
+    generic = {"art", "design", "image", "picture", "photo", "chatgpt", "generated"}
+    if all(token in generic or token.isdigit() for token in tokens):
+        raise StaticPrintError(
+            "generated design ID does not describe the image theme; "
+            f"actual={design_id!r}"
+        )
+    return design_id
+
+
+def openai_design_id_generator(source: Path) -> DesignIdProposal:
+    """Use a low-detail vision request to propose a descriptive design ID."""
+
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise StaticPrintError(
+            "semantic design-ID generation requires OPENAI_API_KEY in "
+            "work/static-print.env; add the key, restart the server, and retry. "
+            "To opt out explicitly, set STATIC_PRINT_DESIGN_ID_MODE=filename."
+        )
+    model = os.environ.get("STATIC_PRINT_DESIGN_ID_MODEL", "gpt-5.4-mini").strip()
+    if not model:
+        raise StaticPrintError("STATIC_PRINT_DESIGN_ID_MODEL cannot be empty")
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise StaticPrintError(
+            "the OpenAI SDK is not installed; run .venv/bin/python -m pip install -e ."
+        ) from exc
+
+    prompt = (
+        "Create a stable catalog identifier for this print-design image. Return only "
+        "one lowercase kebab-case slug containing 3 to 8 meaningful words. Describe "
+        "the visible theme using the main animal or character, occasion or setting, "
+        "action, and distinctive slogan concept when readable. Do not use the source "
+        "filename, dates, timestamps, IDs, or generic words such as image, design, art, "
+        "generated, or chatgpt. Do not invent text that is not visible. Example output: "
+        "vintage-cat-santa-chimney"
+    )
+    try:
+        with Image.open(source) as opened:
+            opened.load()
+            preview = ImageOps.exif_transpose(opened).convert("RGBA")
+            preview.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+            buffer = io.BytesIO()
+            preview.save(buffer, format="PNG", optimize=True)
+    except (OSError, ValueError) as exc:
+        raise StaticPrintError(
+            f"could not prepare review image for semantic ID generation: "
+            f"{source.resolve()}; error={exc}"
+        ) from exc
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    try:
+        response = OpenAI(api_key=api_key).responses.create(
+            model=model,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{encoded}",
+                            "detail": "low",
+                        },
+                    ],
+                }
+            ],
+            max_output_tokens=128,
+            store=False,
+            timeout=60,
+        )
+    except Exception as exc:
+        request_id = getattr(exc, "request_id", None) or getattr(exc, "requestID", None)
+        code = getattr(exc, "code", None)
+        raise StaticPrintError(
+            "semantic design-ID generation failed; "
+            f"source={source.resolve()}; provider=openai; model={model!r}; "
+            f"code={code!r}; request_id={request_id!r}; error={exc}"
+        ) from exc
+    raw = str(getattr(response, "output_text", "") or "").strip()
+    if not raw:
+        raise StaticPrintError(
+            "semantic design-ID generation returned no text; "
+            f"source={source.resolve()}; provider=openai; model={model!r}; "
+            f"request_id={getattr(response, '_request_id', None)!r}"
+        )
+    return DesignIdProposal(
+        design_id=_theme_design_id(raw),
+        method="openai-vision",
+        model=model,
+        request_id=getattr(response, "_request_id", None),
+    )
+
+
+def configured_design_id_generator(source: Path) -> DesignIdProposal:
+    """Resolve the explicit intake naming mode from private environment config."""
+
+    mode = os.environ.get("STATIC_PRINT_DESIGN_ID_MODE", "semantic").strip().lower()
+    if mode == "semantic":
+        return openai_design_id_generator(source)
+    if mode == "filename":
+        return DesignIdProposal(
+            design_id=_collection_id(source.stem, "design ID"),
+            method="filename",
+        )
+    raise StaticPrintError(
+        "STATIC_PRINT_DESIGN_ID_MODE must be 'semantic' or 'filename'; "
+        f"actual={mode!r}"
+    )
+
+
+def _intake_assignments(
+    roots: Iterable[tuple[str, Path]], collection: Path
+) -> dict[str, tuple[str, str, dict[str, Any]]]:
+    """Index prior source-path assignments across all lifecycle pools."""
+
+    assignments: dict[str, tuple[str, str, dict[str, Any]]] = {}
+    collection_value = str(collection)
+    for pool, root in roots:
+        if not root.is_dir():
+            continue
+        for candidate in sorted(path for path in root.iterdir() if path.is_dir()):
+            intake_path = candidate / "intake.json"
+            if not intake_path.is_file():
+                continue
+            intake = read_json(intake_path)
+            if intake.get("collection_root") != collection_value:
+                continue
+            source_file = intake.get("source_file")
+            if not isinstance(source_file, str) or not source_file:
+                continue
+            key = str(Path(source_file).expanduser().resolve())
+            previous = assignments.get(key)
+            if previous is not None and previous[:2] != (pool, candidate.name):
+                raise StaticPrintError(
+                    "review source is assigned to multiple design IDs; repair the "
+                    f"duplicate intake records before retrying: source={key}; "
+                    f"first_pool={previous[0]!r}; first_design_id={previous[1]!r}; "
+                    f"second_pool={pool!r}; second_design_id={candidate.name!r}"
+                )
+            assignments[key] = (pool, candidate.name, intake)
+    return assignments
+
+
+def _unique_design_id(base_design_id: str, occupied: set[str]) -> str:
+    if base_design_id not in occupied:
+        return base_design_id
+    suffix = 2
+    while f"{base_design_id}-{suffix}" in occupied:
+        suffix += 1
+    return validate_id(f"{base_design_id}-{suffix}", "design ID")
+
+
+def import_review_collection(
+    work_root: Path,
+    collection_root: Path,
+    *,
+    design_id_generator: DesignIdGenerator | None = None,
+) -> dict[str, Any]:
     """Copy a flat folder of PNG candidates into the private active-review pool."""
 
     collection = collection_root.expanduser().resolve()
@@ -74,48 +258,83 @@ def import_review_collection(work_root: Path, collection_root: Path) -> dict[str
             f"review collection contains no PNG files directly inside it: {collection}"
         )
     collection_id = _collection_id(collection.name, "collection ID")
-    candidates: list[tuple[str, Path]] = []
-    seen: dict[str, Path] = {}
     for source in sources:
-        design_id = _collection_id(source.stem, "design ID")
-        previous = seen.get(design_id)
-        if previous is not None:
-            raise StaticPrintError(
-                f"review collection has colliding design filenames after normalization: "
-                f"design_id={design_id!r}; first={previous}; second={source}"
-            )
-        seen[design_id] = source
         require_png(source, "review candidate")
-        candidates.append((design_id, source))
 
     active_root = pool_root(work_root, "active")
     graduated_root = pool_root(work_root, "graduated")
     abandoned_root = pool_root(work_root, "abandoned")
     active_root.mkdir(parents=True, exist_ok=True)
+    roots = (
+        ("active", active_root),
+        ("graduated", graduated_root),
+        ("abandoned", abandoned_root),
+    )
+    assignments = _intake_assignments(roots, collection)
+    occupied = {
+        path.name
+        for _, root in roots
+        if root.is_dir()
+        for path in root.iterdir()
+        if path.is_dir()
+    }
+    generator = design_id_generator or configured_design_id_generator
     result: dict[str, Any] = {
         "collection_id": collection_id,
         "collection_root": str(collection),
         "active_root": str(active_root.resolve()),
-        "discovered": len(candidates),
+        "discovered": len(sources),
+        "semantic_id_calls": 0,
         "imported": [],
         "updated": [],
         "unchanged": [],
         "skipped": [],
     }
-    for design_id, source in candidates:
-        existing_pool = next(
-            (
-                (pool, root / design_id)
-                for pool, root in (
-                    ("graduated", graduated_root),
-                    ("abandoned", abandoned_root),
+    for source in sources:
+        source_key = str(source)
+        assignment = assignments.get(source_key)
+        existing_intake: dict[str, Any] | None = None
+        if assignment is not None:
+            pool, design_id, existing_intake = assignment
+            directory = pool_root(work_root, pool) / design_id
+            proposal = existing_intake.get("design_id_generation")
+            if not isinstance(proposal, dict):
+                proposal = {
+                    "method": "legacy-intake",
+                    "base_design_id": design_id,
+                    "selected_design_id": design_id,
+                }
+        else:
+            generated = generator(source)
+            if isinstance(generated, DesignIdProposal):
+                method = generated.method
+                model = generated.model
+                request_id = generated.request_id
+                base_design_id = (
+                    _collection_id(generated.design_id, "design ID")
+                    if method == "filename"
+                    else _theme_design_id(generated.design_id)
                 )
-                if (root / design_id / "source-design.png").is_file()
-            ),
-            None,
-        )
-        if existing_pool is not None:
-            pool, directory = existing_pool
+            else:
+                base_design_id = _theme_design_id(str(generated))
+                method = "injected"
+                model = None
+                request_id = None
+            design_id = _unique_design_id(base_design_id, occupied)
+            pool = "active"
+            proposal = {
+                "method": method,
+                "base_design_id": base_design_id,
+                "selected_design_id": design_id,
+            }
+            if model:
+                proposal["model"] = model
+            if request_id:
+                proposal["request_id"] = request_id
+            occupied.add(design_id)
+            result["semantic_id_calls"] += int(method == "openai-vision")
+
+        if pool in {"graduated", "abandoned"}:
             result["skipped"].append(
                 {
                     "design_id": design_id,
@@ -132,7 +351,6 @@ def import_review_collection(work_root: Path, collection_root: Path) -> dict[str
         source_transparency = transparency_report(source)
         inferred_canvas_policy = canvas_policy_for_report(source_transparency)
         intake_path = destination_dir / "intake.json"
-        existing_intake: dict[str, Any] | None = None
         if intake_path.is_file():
             existing_intake = read_json(intake_path)
             existing_collection = existing_intake.get("collection_root")
@@ -203,6 +421,8 @@ def import_review_collection(work_root: Path, collection_root: Path) -> dict[str
                 "collection_root": str(collection),
                 "source_file": str(source),
                 "source_sha256": source_digest,
+                "design_id": design_id,
+                "design_id_generation": proposal,
                 "canvas_policy": canvas_policy,
                 "source_transparency": source_transparency,
                 "imported_at": utc_now(),

@@ -21,9 +21,12 @@ values, and optional `export KEY=value` syntax, but never evaluates shell code
 or prints secret values.
 
 The default subject model is `gpt-image-2.5-sunburst`; subject generation is a
-paid image-edit operation. Product rendering and preview background switching
-are local and have no API cost. To use `$AWS_PROFILE` in a separate manual AWS
-CLI command, source the file into that shell first:
+paid image-edit operation. New design intake also makes one low-detail vision
+request per new PNG to generate a descriptive design ID. It defaults to
+`gpt-5.4-mini` through `STATIC_PRINT_DESIGN_ID_MODEL`. Product rendering,
+re-importing an already assigned source, and preview background switching are
+local and have no API cost. To use `$AWS_PROFILE` in a separate manual AWS CLI
+command, source the file into that shell first:
 
 ```bash
 set -a
@@ -33,8 +36,9 @@ set +a
 
 ## 2. Load a design collection for active review
 
-The quickest intake is a flat local collection. PNG filenames become design
-IDs after lowercase kebab-case normalization:
+The quickest intake is a flat local collection. Source filenames can be camera
+or export names; the tool analyzes each new PNG and proposes a 3-8 word
+lowercase kebab-case ID that describes its visible theme:
 
 ```text
 /path/to/Design-Collection-1/
@@ -54,7 +58,9 @@ Start the GUI with one or more collections:
 Alternatively, open the operator page, enter the absolute collection path in
 **Load local design collection**, and choose **Load PNG collection**. Only PNG
 files directly inside the selected folder are imported. The import validates
-the images and copies them into the private active-review pool:
+the images, makes each generated ID unique across every lifecycle pool (`-2`,
+`-3`, and so on when themes collide), and copies them into the private
+active-review pool:
 
 ```text
 work/static-design-inputs/<design-id>/
@@ -62,13 +68,25 @@ work/static-design-inputs/<design-id>/
   intake.json
 ```
 
-`intake.json` records the collection, original local path, source digest,
-transparency evidence, and inferred canvas policy. A source with no transparent
-pixels is classified as `opaque-full-bleed`; a source containing any alpha
-transparency is classified as `preserve-transparency`.
-Reloading a collection is idempotent: unchanged designs remain unchanged,
-modified active candidates are refreshed, and designs already graduated or
-abandoned are skipped. The original collection is never modified.
+`intake.json` records the selected design ID, naming method/model, collection,
+original local path, source digest, transparency evidence, and inferred canvas
+policy. A source with no transparent pixels is classified as
+`opaque-full-bleed`; a source containing any alpha transparency is classified
+as `preserve-transparency`. Review the assigned IDs shown in the completion
+message before collecting votes.
+
+The source's resolved path pins its ID. Reloading a collection is idempotent:
+unchanged designs remain unchanged, modified active candidates retain their ID
+and are refreshed without another naming call, and designs already graduated
+or abandoned are skipped. The original collection is never renamed or
+modified. Moving a source to a different path is treated as a new candidate.
+
+Semantic naming is the default and fails clearly when the API key or request is
+unavailable; it never silently falls back to an opaque export filename. For an
+intentional offline import only, set `STATIC_PRINT_DESIGN_ID_MODE=filename` in
+`work/static-print.env` and restart the server. Filename mode is an explicit
+escape hatch and should be used only when filenames already satisfy the catalog
+naming standard.
 
 For a single design, the same active structure can still be created manually:
 

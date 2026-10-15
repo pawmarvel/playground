@@ -5,8 +5,8 @@ not depend on `TemplateGenerator` or its personalized bundle contract.
 
 The operator can:
 
-- load a flat local PNG collection into active review without reorganizing the
-  source collection by hand;
+- load a flat local PNG collection into active review, automatically assigning
+  stable theme-based design IDs without reorganizing or renaming source files;
 - iterate and approve one product-independent seed design;
 - move rejected seeds to an abandoned pool or approved seeds to a graduated
   pool;

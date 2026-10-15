@@ -1760,7 +1760,7 @@ function render() {
     const collectionRoot = importInput.value.trim();
     if (!collectionRoot) return showStatus("Enter the local design collection folder.", true);
     importButton.disabled = true;
-    showStatus(`Loading design collection from ${collectionRoot}…`);
+    showStatus(`Analyzing themes and loading design collection from ${collectionRoot}… New images may take up to a minute each.`);
     try {
       const result = await request("/api/operator/import-collection", {
         method: "POST",
@@ -1768,8 +1768,10 @@ function render() {
       });
       activeOperatorTab = "active";
       const skipped = result.skipped.map(item => `${item.design_id}: ${item.reason}`);
+      const assigned = [...result.imported, ...result.updated]
+        .map(item => `${item.source.split(/[\\/]/).pop()} → ${item.design_id}`);
       showStatus(
-        `Loaded ${result.collection_id}: ${result.imported.length} new, ${result.updated.length} updated, ${result.unchanged.length} unchanged, ${result.skipped.length} skipped.${skipped.length ? `\nSkipped:\n- ${skipped.join("\n- ")}` : ""}`,
+        `Loaded ${result.collection_id}: ${result.imported.length} new, ${result.updated.length} updated, ${result.unchanged.length} unchanged, ${result.skipped.length} skipped; ${result.semantic_id_calls || 0} semantic naming call(s).${assigned.length ? `\nAssigned IDs:\n- ${assigned.join("\n- ")}` : ""}${skipped.length ? `\nSkipped:\n- ${skipped.join("\n- ")}` : ""}`,
       );
       await loadState();
     } catch (error) { showStatus(error.message, true); }

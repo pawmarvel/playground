@@ -39,12 +39,14 @@ from pawmarvel_static_print.core import (
     read_json,
 )
 from pawmarvel_static_print.lifecycle import (
+    DesignIdProposal,
     Subject,
     generate_subject_variants,
     import_review_collection,
     load_subject_catalog,
     move_seed,
     move_seeds,
+    openai_design_id_generator,
     transparency_report,
 )
 from pawmarvel_static_print.operations import (
@@ -1307,24 +1309,42 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         original = collection / "Merry Pawlidays!.PNG"
         Image.new("RGBA", (80, 90), (20, 100, 180, 0)).save(original)
 
-        imported = import_review_collection(self.root, collection)
+        imported = import_review_collection(
+            self.root,
+            collection,
+            design_id_generator=lambda _: DesignIdProposal(
+                "holiday-dog-merry-pawlidays", "test-vision", "test-model"
+            ),
+        )
         self.assertEqual(imported["collection_id"], "holiday-design-collection")
         self.assertEqual(
             [item["design_id"] for item in imported["imported"]],
-            ["merry-pawlidays"],
+            ["holiday-dog-merry-pawlidays"],
         )
-        active = self.inputs / "merry-pawlidays"
+        active = self.inputs / "holiday-dog-merry-pawlidays"
         self.assertTrue((active / "source-design.png").is_file())
         intake = read_json(active / "intake.json")
         self.assertEqual(intake["schema"], "pawmarvel-static-review-intake-v1")
         self.assertEqual(intake["source_file"], str(original.resolve()))
         self.assertEqual(intake["canvas_policy"], "preserve-transparency")
+        self.assertEqual(intake["design_id"], "holiday-dog-merry-pawlidays")
+        self.assertEqual(
+            intake["design_id_generation"],
+            {
+                "method": "test-vision",
+                "model": "test-model",
+                "base_design_id": "holiday-dog-merry-pawlidays",
+                "selected_design_id": "holiday-dog-merry-pawlidays",
+            },
+        )
         self.assertEqual(
             intake["source_transparency"]["result"], "transparent-background"
         )
         discovered = discover_designs(self.inputs, self.authoring)
         imported_design = next(
-            item for item in discovered if item["design_id"] == "merry-pawlidays"
+            item
+            for item in discovered
+            if item["design_id"] == "holiday-dog-merry-pawlidays"
         )
         self.assertEqual(
             imported_design["intake"]["collection_id"],
@@ -1337,12 +1357,18 @@ class StaticPrintWorkflowTest(unittest.TestCase):
 
         move_seed(
             self.root,
-            seed_design_id="merry-pawlidays",
+            seed_design_id="holiday-dog-merry-pawlidays",
             source="active",
             target="graduated",
         )
         self.assertTrue(original.is_file())
-        retried = import_review_collection(self.root, collection)
+        retried = import_review_collection(
+            self.root,
+            collection,
+            design_id_generator=lambda _: self.fail(
+                "a pinned intake source must not invoke design-ID generation again"
+            ),
+        )
         self.assertEqual(retried["imported"], [])
         self.assertEqual(
             retried["skipped"][0]["reason"], "already exists in graduated pool"
@@ -1353,15 +1379,109 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         collection.mkdir()
         original = collection / "Full Bleed.png"
         Image.new("RGB", (40, 40), (20, 30, 40)).save(original)
-        import_review_collection(self.root, collection)
-        intake = read_json(self.inputs / "full-bleed/intake.json")
+        generator = lambda _: DesignIdProposal("full-bleed-dog-portrait", "test")
+        import_review_collection(
+            self.root, collection, design_id_generator=generator
+        )
+        intake = read_json(self.inputs / "full-bleed-dog-portrait/intake.json")
         self.assertEqual(intake["canvas_policy"], "opaque-full-bleed")
 
         Image.new("RGBA", (40, 40), (20, 30, 40, 0)).save(original)
         with self.assertRaisesRegex(
             StaticPrintError, "violates its recorded opaque full-bleed canvas policy"
         ):
-            import_review_collection(self.root, collection)
+            import_review_collection(
+                self.root, collection, design_id_generator=generator
+            )
+
+    def test_collection_import_adds_stable_suffixes_for_theme_collisions(self) -> None:
+        collection = self.root / "Winter Cats"
+        collection.mkdir()
+        Image.new("RGB", (40, 40), (20, 30, 40)).save(collection / "one.png")
+        Image.new("RGB", (40, 40), (40, 30, 20)).save(collection / "two.png")
+        calls: list[str] = []
+
+        def same_theme(source: Path) -> DesignIdProposal:
+            calls.append(source.name)
+            return DesignIdProposal("vintage-cat-winter-patrol", "test-vision")
+
+        imported = import_review_collection(
+            self.root, collection, design_id_generator=same_theme
+        )
+        self.assertEqual(calls, ["one.png", "two.png"])
+        self.assertEqual(
+            [item["design_id"] for item in imported["imported"]],
+            ["vintage-cat-winter-patrol", "vintage-cat-winter-patrol-2"],
+        )
+        retried = import_review_collection(
+            self.root,
+            collection,
+            design_id_generator=lambda _: self.fail(
+                "re-import must use each source's pinned design ID"
+            ),
+        )
+        self.assertEqual(len(retried["unchanged"]), 2)
+
+    def test_collection_import_rejects_unhelpful_generated_id(self) -> None:
+        collection = self.root / "Unhelpful"
+        collection.mkdir()
+        Image.new("RGB", (40, 40), (20, 30, 40)).save(collection / "one.png")
+        with self.assertRaisesRegex(StaticPrintError, "3-8 descriptive"):
+            import_review_collection(
+                self.root,
+                collection,
+                design_id_generator=lambda _: "image",
+            )
+
+    def test_collection_import_supports_explicit_filename_mode(self) -> None:
+        collection = self.root / "Offline"
+        collection.mkdir()
+        Image.new("RGB", (40, 40), (20, 30, 40)).save(
+            collection / "Merry Pawlidays.png"
+        )
+        with patch.dict(
+            os.environ, {"STATIC_PRINT_DESIGN_ID_MODE": "filename"}, clear=False
+        ):
+            imported = import_review_collection(self.root, collection)
+        self.assertEqual(imported["imported"][0]["design_id"], "merry-pawlidays")
+        intake = read_json(self.inputs / "merry-pawlidays/intake.json")
+        self.assertEqual(intake["design_id_generation"]["method"], "filename")
+
+    def test_openai_design_id_generator_uses_low_detail_vision(self) -> None:
+        source = self.root / "candidate.png"
+        Image.new("RGB", (40, 40), (20, 30, 40)).save(source)
+        response = type(
+            "Response",
+            (),
+            {
+                "output_text": "vintage-cat-santa-chimney",
+                "_request_id": "req-test",
+            },
+        )()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "test-key",
+                    "STATIC_PRINT_DESIGN_ID_MODEL": "test-vision-model",
+                },
+                clear=False,
+            ),
+            patch("openai.OpenAI") as client_type,
+        ):
+            client_type.return_value.responses.create.return_value = response
+            proposal = openai_design_id_generator(source)
+
+        self.assertEqual(proposal.design_id, "vintage-cat-santa-chimney")
+        self.assertEqual(proposal.method, "openai-vision")
+        self.assertEqual(proposal.model, "test-vision-model")
+        self.assertEqual(proposal.request_id, "req-test")
+        request = client_type.return_value.responses.create.call_args.kwargs
+        self.assertEqual(request["model"], "test-vision-model")
+        self.assertFalse(request["store"])
+        image_input = request["input"][0]["content"][1]
+        self.assertEqual(image_input["detail"], "low")
+        self.assertTrue(image_input["image_url"].startswith("data:image/png;base64,"))
 
     def test_batch_seed_move_preflights_and_moves_complete_selection(self) -> None:
         second = self.inputs / "second-design"

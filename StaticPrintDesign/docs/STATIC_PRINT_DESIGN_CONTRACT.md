@@ -70,6 +70,13 @@ bundle key = (bundle_id, version_id)
 version_id = vNNNNNN
 ```
 
+At first intake, the operator tool uses a low-detail vision request to propose a
+theme-descriptive `seed-design-id`, then resolves collisions locally with a
+numeric suffix. `intake.json` pins the resolved source path to that selected ID,
+so a refresh of the same candidate never changes its identity or incurs another
+naming request. The ID becomes immutable once review begins; the vision model is
+not an FE dependency and its output is never used as a display label.
+
 Splitting a bundle ID on `--` produces exactly three fields: seed design ID,
 `subject-<subject-id>`, and product profile ID. FE should still prefer the
 explicit `design_id` and `product_profile_id` manifest/catalog fields and use
@@ -238,7 +245,7 @@ reactivates that bundle. Physical S3 deletion is outside the MVP GUI.
 work/
   static-design-inputs/<seed-design-id>/
     source-design.png
-    intake.json
+    intake.json              # pins source path -> unique semantic seed ID
   static-graduated-designs/<seed-design-id>/
     source-design.png
     <subject-id>/

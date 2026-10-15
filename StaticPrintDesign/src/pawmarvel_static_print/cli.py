@@ -396,7 +396,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"{len(import_result['imported'])} new, "
                     f"{len(import_result['updated'])} updated, "
                     f"{len(import_result['unchanged'])} unchanged, "
-                    f"{len(import_result['skipped'])} skipped"
+                    f"{len(import_result['skipped'])} skipped, "
+                    f"{import_result['semantic_id_calls']} semantic naming calls"
                 )
             config = ServerConfig(
                 project_root=PROJECT_ROOT,

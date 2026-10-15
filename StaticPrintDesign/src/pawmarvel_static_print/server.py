@@ -388,6 +388,7 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], config: ServerConfig):
         self.config = config
         self.sessions: dict[str, str] = {}
+        self.intake_lock = Lock()
         self.generation_lock = Lock()
         self.subject_generation_lock = Lock()
         self.release_lock = Lock()
@@ -1145,10 +1146,14 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
             raise StaticPrintError(
                 "collection_root must be a non-empty local directory path"
             )
-        result = import_review_collection(
-            self.server.config.work_root,
-            Path(raw_path.strip()),
-        )
+        # ID allocation scans all lifecycle pools before assigning a collision
+        # suffix. Serialize intake requests so concurrent operators cannot claim
+        # the same identifier between that scan and the atomic source copy.
+        with self.server.intake_lock:
+            result = import_review_collection(
+                self.server.config.work_root,
+                Path(raw_path.strip()),
+            )
         self._json(HTTPStatus.OK, result)
 
     def _transition_batch(self, body: dict[str, Any]) -> None:
