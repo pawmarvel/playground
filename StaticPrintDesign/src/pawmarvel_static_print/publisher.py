@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from time import sleep
 from typing import Any
 
 from .bundles import ReleasePlan, validate_release
@@ -21,6 +24,123 @@ from .core import (
     validate_version,
     write_json,
 )
+
+DEFAULT_S3_UPLOAD_MAX_CONCURRENCY = 16
+DEFAULT_S3_MAX_ATTEMPTS = 4
+DEFAULT_S3_RETRY_BASE_SECONDS = 1.0
+MAX_S3_CONCURRENCY = 128
+
+
+def _positive_environment_int(name: str, default: int, *, maximum: int) -> int:
+    raw = os.environ.get(name, str(default))
+    try:
+        value = int(raw.strip())
+    except (AttributeError, ValueError) as exc:
+        raise StaticPrintError(
+            f"{name} must be a positive integer; actual={raw!r}"
+        ) from exc
+    if not 1 <= value <= maximum:
+        raise StaticPrintError(
+            f"{name} must be between 1 and {maximum}; actual={value}"
+        )
+    return value
+
+
+def _positive_environment_float(name: str, default: float) -> float:
+    raw = os.environ.get(name, str(default))
+    try:
+        value = float(raw.strip())
+    except (AttributeError, ValueError) as exc:
+        raise StaticPrintError(
+            f"{name} must be a positive number; actual={raw!r}"
+        ) from exc
+    if not 0 < value <= 300:
+        raise StaticPrintError(
+            f"{name} must be greater than 0 and at most 300; actual={value}"
+        )
+    return value
+
+
+def _s3_retry_settings() -> tuple[int, int, float]:
+    return (
+        _positive_environment_int(
+            "STATIC_PRINT_S3_UPLOAD_MAX_CONCURRENCY",
+            DEFAULT_S3_UPLOAD_MAX_CONCURRENCY,
+            maximum=MAX_S3_CONCURRENCY,
+        ),
+        _positive_environment_int(
+            "STATIC_PRINT_S3_MAX_ATTEMPTS",
+            DEFAULT_S3_MAX_ATTEMPTS,
+            maximum=20,
+        ),
+        _positive_environment_float(
+            "STATIC_PRINT_S3_RETRY_BASE_SECONDS",
+            DEFAULT_S3_RETRY_BASE_SECONDS,
+        ),
+    )
+
+
+def _retryable_s3_error(error: BaseException) -> bool:
+    message = f"{type(error).__name__}: {error}".lower()
+    terminal_tokens = (
+        "accessdenied",
+        "access denied",
+        "expiredtoken",
+        "token has expired",
+        "config profile",
+        "could not be found",
+        "invalidaccesskeyid",
+        "signaturedoesnotmatch",
+        "immutable s3 object conflict",
+        "preconditionfailed",
+    )
+    if any(token in message for token in terminal_tokens):
+        return False
+    return any(
+        token in message
+        for token in (
+            "slowdown",
+            "throttl",
+            "toomanyrequests",
+            "too many requests",
+            "http 429",
+            "requesttimeout",
+            "timeout",
+            "timed out",
+            "connection reset",
+            "connection aborted",
+            "could not connect",
+            "endpointconnectionerror",
+            "temporarily unavailable",
+            "serviceunavailable",
+            "internalerror",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+        )
+    )
+
+
+def _retry_s3_call(
+    operation: Callable[[], Any],
+    *,
+    label: str,
+    max_attempts: int,
+    retry_base_seconds: float,
+) -> Any:
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return operation()
+        except StaticPrintError as exc:
+            if not _retryable_s3_error(exc) or attempt >= max_attempts:
+                if attempt <= 1:
+                    raise
+                raise StaticPrintError(
+                    f"{label} failed after {attempt} attempt(s); last_error={exc}"
+                ) from exc
+            sleep(retry_base_seconds * (2 ** (attempt - 1)))
+    raise AssertionError("unreachable S3 retry loop")
 
 
 def validate_prefix(prefix: str) -> str:
@@ -306,37 +426,109 @@ def _entries_from_catalog(
     region: str | None = None,
     catalog_cache: dict[str, dict[str, Any]] | None = None,
     include_source_sha256: bool = False,
+    fetch_missing_source_sha256: bool = True,
 ) -> dict[str, list[dict[str, str]]]:
+    """Project the FE catalog into operator publication entries.
+
+    Source provenance lives in immutable bundle manifests rather than the FE
+    catalog. Resolve cache misses concurrently because a mature catalog can
+    contain hundreds of versions. Callers rendering a last-known local catalog
+    may disable fetching and use whatever verified provenance is already cached.
+    """
+
     published: dict[str, list[dict[str, str]]] = {}
-    for product in catalog["products"]:
-        for version in product["versions"]:
-            source_sha256: str | None = None
-            if include_source_sha256:
-                if not bucket:
-                    raise StaticPrintError(
-                        "S3 bucket is required to load bundle source provenance"
-                    )
-                source_sha256 = _manifest_source_sha256(
-                    bucket=bucket,
-                    prefix=prefix,
-                    profile=profile,
-                    region=region,
-                    design_id=str(product["design_id"]),
-                    product_profile_id=str(product["product_profile_id"]),
-                    version=version,
-                    catalog_cache=catalog_cache,
-                )
-            entry = {
-                "release_id": version["release_id"],
-                "product_profile_id": product["product_profile_id"],
-                "version_id": version["version_id"],
-                "lifecycle_status": product["status"],
-                "latest_version_id": product["latest_version_id"],
-            }
-            if source_sha256 is not None:
-                entry["source_sha256"] = source_sha256
-            published.setdefault(product["design_id"], []).append(entry)
+    versions: list[tuple[dict[str, Any], dict[str, Any]]] = [
+        (product, version)
+        for product in catalog["products"]
+        for version in product["versions"]
+    ]
+    source_digests: dict[tuple[str, str, str], str] = {}
+    if include_source_sha256:
+        if not bucket:
+            raise StaticPrintError(
+                "S3 bucket is required to load bundle source provenance"
+            )
+
+        def resolve_source(
+            item: tuple[dict[str, Any], dict[str, Any]],
+        ) -> tuple[tuple[str, str, str], str | None]:
+            product, version = item
+            identity = (
+                str(product["design_id"]),
+                str(product["product_profile_id"]),
+                str(version["version_id"]),
+            )
+            manifest_path = str(version["manifest_path"])
+            key = (
+                f"{validate_prefix(prefix)}/{manifest_path}"
+                if prefix
+                else manifest_path
+            )
+            cached = (catalog_cache or {}).get(f"manifest:{key}")
+            if (
+                isinstance(cached, dict)
+                and cached.get("manifest_sha256") == version["manifest_sha256"]
+                and isinstance(cached.get("source_sha256"), str)
+            ):
+                return identity, str(cached["source_sha256"])
+            if not fetch_missing_source_sha256:
+                return identity, None
+            return identity, _manifest_source_sha256(
+                bucket=bucket,
+                prefix=prefix,
+                profile=profile,
+                region=region,
+                design_id=identity[0],
+                product_profile_id=identity[1],
+                version=version,
+                catalog_cache=catalog_cache,
+            )
+
+        worker_count = min(8, max(1, len(versions)))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            for identity, digest in executor.map(resolve_source, versions):
+                if digest is not None:
+                    source_digests[identity] = digest
+
+    for product, version in versions:
+        source_sha256 = source_digests.get(
+            (
+                str(product["design_id"]),
+                str(product["product_profile_id"]),
+                str(version["version_id"]),
+            )
+        )
+        entry = {
+            "release_id": version["release_id"],
+            "product_profile_id": product["product_profile_id"],
+            "version_id": version["version_id"],
+            "lifecycle_status": product["status"],
+            "latest_version_id": product["latest_version_id"],
+        }
+        if source_sha256 is not None:
+            entry["source_sha256"] = source_sha256
+        published.setdefault(product["design_id"], []).append(entry)
     return published
+
+
+def cached_release_entries(
+    catalog: dict[str, Any],
+    *,
+    bucket: str,
+    prefix: str,
+    catalog_cache: dict[str, dict[str, Any]],
+) -> dict[str, list[dict[str, str]]]:
+    """Build a non-network last-known publication view from a validated catalog."""
+
+    validate_catalog(catalog)
+    return _entries_from_catalog(
+        catalog,
+        bucket=bucket,
+        prefix=prefix,
+        catalog_cache=catalog_cache,
+        include_source_sha256=True,
+        fetch_missing_source_sha256=False,
+    )
 
 
 def _manifest_source_sha256(
@@ -621,16 +813,21 @@ def _remote_hash(
     return value["sha256"] if value is not None else None
 
 
-def _upload(
+def _upload_once(
     *,
     path: Path,
     bucket: str,
     key: str,
     profile: str | None,
     region: str | None,
+    known_missing: bool = False,
 ) -> str:
     digest = sha256_file(path)
-    existing = _remote_hash(bucket=bucket, key=key, profile=profile, region=region)
+    existing = (
+        None
+        if known_missing
+        else _remote_hash(bucket=bucket, key=key, profile=profile, region=region)
+    )
     if existing is not None:
         if existing == digest:
             return "existing-match"
@@ -673,7 +870,38 @@ def _upload(
     return "uploaded"
 
 
-def _upload_catalog(
+def _upload(
+    *,
+    path: Path,
+    bucket: str,
+    key: str,
+    profile: str | None,
+    region: str | None,
+    known_missing: bool = False,
+    max_attempts: int | None = None,
+    retry_base_seconds: float | None = None,
+) -> str:
+    _, configured_attempts, configured_backoff = _s3_retry_settings()
+    attempts = max_attempts or configured_attempts
+    backoff = retry_base_seconds or configured_backoff
+    return str(
+        _retry_s3_call(
+            lambda: _upload_once(
+                path=path,
+                bucket=bucket,
+                key=key,
+                profile=profile,
+                region=region,
+                known_missing=known_missing,
+            ),
+            label=f"S3 immutable upload s3://{bucket}/{key}",
+            max_attempts=attempts,
+            retry_base_seconds=backoff,
+        )
+    )
+
+
+def _upload_catalog_once(
     *,
     path: Path,
     bucket: str,
@@ -724,6 +952,37 @@ def _upload_catalog(
             f"remote_sha256={verified['sha256'] if verified else '<missing>'}"
         )
     return "updated" if expected is not None else "created"
+
+
+def _upload_catalog(
+    *,
+    path: Path,
+    bucket: str,
+    key: str,
+    profile: str | None,
+    region: str | None,
+    expected: dict[str, str] | None,
+    max_attempts: int | None = None,
+    retry_base_seconds: float | None = None,
+) -> str:
+    _, configured_attempts, configured_backoff = _s3_retry_settings()
+    attempts = max_attempts or configured_attempts
+    backoff = retry_base_seconds or configured_backoff
+    return str(
+        _retry_s3_call(
+            lambda: _upload_catalog_once(
+                path=path,
+                bucket=bucket,
+                key=key,
+                profile=profile,
+                region=region,
+                expected=expected,
+            ),
+            label=f"S3 discovery catalog update s3://{bucket}/{key}",
+            max_attempts=attempts,
+            retry_base_seconds=backoff,
+        )
+    )
 
 
 def _publish_catalog_version(
@@ -952,6 +1211,87 @@ def publication_plan(
     return result
 
 
+def _preflight_immutable_objects(
+    objects: list[dict[str, Any]],
+    *,
+    bucket: str,
+    profile: str | None,
+    region: str | None,
+    max_concurrency: int | None = None,
+    max_attempts: int | None = None,
+    retry_base_seconds: float | None = None,
+) -> dict[str, str]:
+    """Validate the complete immutable upload plan before writing any object."""
+
+    configured_workers, configured_attempts, configured_backoff = (
+        _s3_retry_settings()
+    )
+    worker_count = min(
+        max_concurrency or configured_workers,
+        max(1, len(objects)),
+    )
+    attempts = max_attempts or configured_attempts
+    backoff = retry_base_seconds or configured_backoff
+    statuses: dict[str, str] = {}
+    conflicts: list[dict[str, str]] = []
+    failures: list[str] = []
+
+    def inspect(item: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+        key = str(item["key"])
+        remote = _retry_s3_call(
+            lambda: _remote_hash(
+                bucket=bucket,
+                key=key,
+                profile=profile,
+                region=region,
+            ),
+            label=f"S3 immutable preflight s3://{bucket}/{key}",
+            max_attempts=attempts,
+            retry_base_seconds=backoff,
+        )
+        return item, remote
+
+    with ThreadPoolExecutor(
+        max_workers=worker_count,
+        thread_name_prefix="static-s3-preflight",
+    ) as executor:
+        futures = {executor.submit(inspect, item): item for item in objects}
+        for future in as_completed(futures):
+            item = futures[future]
+            try:
+                _, remote = future.result()
+            except Exception as exc:  # noqa: BLE001 - report every failed object
+                failures.append(f"{item['uri']}: {exc}")
+                continue
+            key = str(item["key"])
+            if remote is None:
+                statuses[key] = "missing"
+            elif remote == item["sha256"]:
+                statuses[key] = "existing-match"
+            else:
+                conflicts.append(
+                    {
+                        "uri": str(item["uri"]),
+                        "expected_sha256": str(item["sha256"]),
+                        "remote_sha256": remote,
+                    }
+                )
+    if failures:
+        raise StaticPrintError(
+            "immutable S3 preflight could not inspect every object; "
+            f"failure_count={len(failures)}; first_failures={failures[:3]}"
+        )
+    if conflicts:
+        raise StaticPrintError(
+            "immutable S3 preflight failed before upload; "
+            f"conflict_count={len(conflicts)}; conflicts={conflicts}; "
+            "an existing bundle version cannot be changed—generate the next product "
+            "version, or restore the local artifact that originally produced the "
+            "published manifest"
+        )
+    return statuses
+
+
 def publish_release(
     plan: ReleasePlan,
     *,
@@ -962,9 +1302,45 @@ def publish_release(
     region: str | None,
     execute: bool,
     progress: Callable[[str, dict[str, Any]], None] | None = None,
+    upload_max_concurrency: int | None = None,
+    upload_max_attempts: int | None = None,
+    upload_retry_base_seconds: float | None = None,
 ) -> dict[str, Any]:
     if not bucket.strip():
         raise StaticPrintError("S3 bucket must not be empty")
+    configured_workers, configured_attempts, configured_backoff = (
+        _s3_retry_settings()
+    )
+    worker_limit = (
+        configured_workers
+        if upload_max_concurrency is None
+        else upload_max_concurrency
+    )
+    max_attempts = (
+        configured_attempts if upload_max_attempts is None else upload_max_attempts
+    )
+    retry_base_seconds = (
+        configured_backoff
+        if upload_retry_base_seconds is None
+        else upload_retry_base_seconds
+    )
+    if isinstance(worker_limit, bool) or not 1 <= worker_limit <= MAX_S3_CONCURRENCY:
+        raise StaticPrintError(
+            "upload_max_concurrency must be between 1 and "
+            f"{MAX_S3_CONCURRENCY}; actual={worker_limit!r}"
+        )
+    if isinstance(max_attempts, bool) or not 1 <= max_attempts <= 20:
+        raise StaticPrintError(
+            f"upload_max_attempts must be between 1 and 20; actual={max_attempts!r}"
+        )
+    if (
+        isinstance(retry_base_seconds, bool)
+        or not 0 < retry_base_seconds <= 300
+    ):
+        raise StaticPrintError(
+            "upload_retry_base_seconds must be greater than 0 and at most 300; "
+            f"actual={retry_base_seconds!r}"
+        )
     objects = publication_plan(plan, bucket=bucket, prefix=prefix)
     public_objects = [
         {key: value for key, value in item.items() if key != "source"}
@@ -978,7 +1354,40 @@ def publish_release(
         "catalog": objects[-1]["uri"],
         "discovery_catalog": f"s3://{bucket}/{_catalog_key(prefix)}",
         "objects": public_objects,
+        "upload_scheduler": {
+            "max_concurrency": worker_limit,
+            "max_attempts": max_attempts,
+            "retry_base_seconds": retry_base_seconds,
+        },
     }
+    if progress:
+        progress(
+            "preflight-start",
+            {"release_id": plan.release_id, "object_count": len(objects)},
+        )
+    preflight = _preflight_immutable_objects(
+        objects,
+        bucket=bucket,
+        profile=aws_profile,
+        region=region,
+        max_concurrency=worker_limit,
+        max_attempts=max_attempts,
+        retry_base_seconds=retry_base_seconds,
+    )
+    if progress:
+        progress(
+            "preflight-complete",
+            {
+                "release_id": plan.release_id,
+                "object_count": len(objects),
+                "existing_count": sum(
+                    status == "existing-match" for status in preflight.values()
+                ),
+                "missing_count": sum(
+                    status == "missing" for status in preflight.values()
+                ),
+            },
+        )
     if not execute:
         if progress:
             progress(
@@ -987,20 +1396,98 @@ def publish_release(
             )
         shutil.rmtree(plan.staging_root)
         return result
-    uploaded: list[dict[str, str]] = []
-    for item in objects:
+    uploaded_by_key: dict[str, dict[str, str]] = {}
+
+    def upload_stage(stage: str, items: list[dict[str, Any]]) -> None:
+        if not items:
+            return
+        failures: list[str] = []
+        worker_count = min(worker_limit, len(items))
         if progress:
-            progress("upload-start", dict(item))
-        status = _upload(
-            path=Path(item["source"]),
-            bucket=bucket,
-            key=item["key"],
-            profile=aws_profile,
-            region=region,
+            progress(
+                "upload-stage-start",
+                {
+                    "stage": stage,
+                    "object_count": len(items),
+                    "worker_count": worker_count,
+                },
+            )
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix=f"static-s3-{stage}",
+        ) as executor:
+            futures = {}
+            for item in items:
+                if progress:
+                    progress("upload-start", dict(item))
+                status = preflight[str(item["key"])]
+                if status == "existing-match":
+                    uploaded_by_key[str(item["key"])] = {
+                        "uri": str(item["uri"]),
+                        "status": status,
+                    }
+                    if progress:
+                        progress("upload-complete", {**item, "status": status})
+                    continue
+                future = executor.submit(
+                    _upload,
+                    path=Path(item["source"]),
+                    bucket=bucket,
+                    key=str(item["key"]),
+                    profile=aws_profile,
+                    region=region,
+                    known_missing=True,
+                    max_attempts=max_attempts,
+                    retry_base_seconds=retry_base_seconds,
+                )
+                futures[future] = item
+            for future in as_completed(futures):
+                item = futures[future]
+                try:
+                    status = str(future.result())
+                except Exception as exc:  # noqa: BLE001 - preserve sibling uploads
+                    failures.append(f"{item['uri']}: {exc}")
+                    if progress:
+                        progress("upload-failed", {**item, "error": str(exc)})
+                    continue
+                uploaded_by_key[str(item["key"])] = {
+                    "uri": str(item["uri"]),
+                    "status": status,
+                }
+                if progress:
+                    progress("upload-complete", {**item, "status": status})
+        if failures:
+            raise StaticPrintError(
+                f"S3 {stage} upload stage failed after retries; "
+                f"failure_count={len(failures)}; first_failures={failures[:3]}; "
+                "matching successful immutable uploads are safe to reuse on retry"
+            )
+
+    manifest_sources = {str(path.resolve()) for path in plan.bundle_manifests}
+    catalog_source = str(plan.catalog_path.resolve())
+    assets = [
+        item
+        for item in objects
+        if str(item["source"]) not in manifest_sources
+        and str(item["source"]) != catalog_source
+    ]
+    manifests = [
+        item for item in objects if str(item["source"]) in manifest_sources
+    ]
+    release_catalogs = [
+        item for item in objects if str(item["source"]) == catalog_source
+    ]
+    if len(release_catalogs) != 1:
+        raise StaticPrintError(
+            "publication plan must contain exactly one release catalog; "
+            f"actual={len(release_catalogs)}"
         )
-        uploaded.append({"uri": item["uri"], "status": status})
-        if progress:
-            progress("upload-complete", {**item, "status": status})
+    # Assets must exist before their bundle manifests; the release catalog is
+    # the immutable commit marker and is therefore uploaded last.
+    upload_stage("asset", assets)
+    upload_stage("manifest", manifests)
+    upload_stage("release-catalog", release_catalogs)
+    uploaded = [uploaded_by_key[str(item["key"])] for item in objects]
     release_catalog = read_json(plan.catalog_path)
     activated = {str(entry["bundle_id"]) for entry in release_catalog["bundles"]}
     if progress:

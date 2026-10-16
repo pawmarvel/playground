@@ -3,15 +3,18 @@ from __future__ import annotations
 import fcntl
 import json
 import mimetypes
+import os
 import secrets
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock, Thread
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .authoring import (
     design_canvas_policy,
@@ -35,7 +38,14 @@ from .core import (
     validate_id,
     validate_release_id,
     validate_version,
+    write_json,
 )
+from .history_cleanup import (
+    create_history_cleanup_proposal,
+    execute_history_cleanup,
+    latest_cleanup_state,
+)
+from .image_quality import print_readiness_warning
 from .lifecycle import (
     OPAQUE_FULL_BLEED,
     PRESERVE_TRANSPARENCY,
@@ -59,6 +69,7 @@ from .operations import (
     update_operation_item,
 )
 from .publisher import (
+    cached_release_entries,
     load_s3_release_entries,
     publish_release,
     rebuild_discovery_catalog,
@@ -79,6 +90,148 @@ SEED_TRANSITIONS = {
     "restore": ("abandoned", "active"),
 }
 
+PUBLICATION_PROVENANCE_CACHE_SCHEMA = (
+    "pawmarvel-static-publication-provenance-cache-v1"
+)
+S3_STATUS_REFRESH_SECONDS = 60
+DEFAULT_IMAGE_REQUESTS_PER_MINUTE = 50
+DEFAULT_IMAGE_MAX_CONCURRENCY = 50
+MAX_IMAGE_BATCH_SETTING = 500
+
+
+class _ImageRequestRateLimiter:
+    """Queue paid image starts and apply account-wide throttle deferrals."""
+
+    def __init__(
+        self,
+        requests_per_minute: int,
+        *,
+        clock: Callable[[], float] = monotonic,
+        sleeper: Callable[[float], None] = sleep,
+    ) -> None:
+        if requests_per_minute <= 0:
+            raise ValueError("requests_per_minute must be positive")
+        self.requests_per_minute = requests_per_minute
+        self.minimum_interval_seconds = 60.0 / requests_per_minute
+        self._clock = clock
+        self._sleeper = sleeper
+        self._lock = Lock()
+        self._next_start = 0.0
+        self._blocked_until = 0.0
+
+    def wait(self) -> None:
+        while True:
+            with self._lock:
+                now = self._clock()
+                request_start = max(self._next_start, self._blocked_until)
+                if now >= request_start:
+                    self._next_start = now + self.minimum_interval_seconds
+                    return
+                delay = request_start - now
+            # Do not reserve a future slot before sleeping. Other workers can
+            # therefore observe a later global defer after a provider 429.
+            self._sleeper(delay)
+
+    def defer(self, delay_seconds: float) -> None:
+        if delay_seconds <= 0:
+            return
+        with self._lock:
+            self._blocked_until = max(
+                self._blocked_until, self._clock() + delay_seconds
+            )
+
+
+def _positive_batch_setting(
+    body: dict[str, Any],
+    *,
+    request_key: str,
+    environment_key: str,
+    default: int,
+) -> int:
+    raw = body.get(request_key)
+    if raw is None:
+        raw = os.environ.get(environment_key, str(default))
+    if isinstance(raw, bool):
+        raise StaticPrintError(
+            f"{request_key} must be a positive integer; actual={raw!r}"
+        )
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise StaticPrintError(
+            f"{request_key} must be a positive integer; actual={raw!r}; "
+            f"environment={environment_key}"
+        ) from exc
+    if not 1 <= value <= MAX_IMAGE_BATCH_SETTING:
+        raise StaticPrintError(
+            f"{request_key} must be between 1 and {MAX_IMAGE_BATCH_SETTING}; "
+            f"actual={value}; environment={environment_key}"
+        )
+    return value
+
+
+def _subject_batch_limits(body: dict[str, Any]) -> tuple[int, int]:
+    """Resolve and validate the durable paid-image scheduling limits."""
+
+    requests_per_minute = _positive_batch_setting(
+        body,
+        request_key="image_requests_per_minute",
+        environment_key="STATIC_PRINT_IMAGE_REQUESTS_PER_MINUTE",
+        default=DEFAULT_IMAGE_REQUESTS_PER_MINUTE,
+    )
+    max_concurrency = _positive_batch_setting(
+        body,
+        request_key="image_max_concurrency",
+        environment_key="STATIC_PRINT_IMAGE_MAX_CONCURRENCY",
+        default=DEFAULT_IMAGE_MAX_CONCURRENCY,
+    )
+    return requests_per_minute, max_concurrency
+
+
+def _positive_float_setting(
+    body: dict[str, Any],
+    *,
+    request_key: str,
+    environment_key: str,
+    default: float,
+) -> float:
+    raw = body.get(request_key)
+    if raw is None:
+        raw = os.environ.get(environment_key, str(default))
+    if isinstance(raw, bool):
+        raise StaticPrintError(
+            f"{request_key} must be a positive number; actual={raw!r}"
+        )
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError) as exc:
+        raise StaticPrintError(
+            f"{request_key} must be a positive number; actual={raw!r}; "
+            f"environment={environment_key}"
+        ) from exc
+    if not 0 < value <= 300:
+        raise StaticPrintError(
+            f"{request_key} must be greater than 0 and at most 300; "
+            f"actual={value}; environment={environment_key}"
+        )
+    return value
+
+
+def _subject_retry_settings(body: dict[str, Any]) -> tuple[int, float]:
+    max_attempts = _positive_batch_setting(
+        body,
+        request_key="image_max_attempts",
+        environment_key="STATIC_PRINT_IMAGE_MAX_ATTEMPTS",
+        default=4,
+    )
+    retry_base_seconds = _positive_float_setting(
+        body,
+        request_key="image_retry_base_seconds",
+        environment_key="STATIC_PRINT_IMAGE_RETRY_BASE_SECONDS",
+        default=10.0,
+    )
+    return max_attempts, retry_base_seconds
+
 
 def _operation_recommendation(message: str) -> str:
     lowered = message.lower()
@@ -91,7 +244,11 @@ def _operation_recommendation(message: str) -> str:
     if "no such file" in lowered or "does not exist" in lowered:
         return "Open the reported absolute path and regenerate or restore the missing artifact."
     if "immutable" in lowered or "already exists" in lowered or "conflict" in lowered:
-        return "Refresh operator state and retry with the automatically allocated next version or release ID."
+        return (
+            "Refresh operator state. If the published version has different bytes, "
+            "generate the next product version; changing only the release ID cannot "
+            "replace an immutable bundle version."
+        )
     if "timeout" in lowered or "connection" in lowered or "network" in lowered:
         return "Check network connectivity and credentials, then retry the batch or resume when that action is available."
     return "Inspect the failed work unit and its absolute paths, correct the input, then retry, resume when available, or dismiss the report."
@@ -132,6 +289,107 @@ def _published_entries(exchange_root: Path) -> dict[str, list[dict[str, str]]]:
                 }
             )
     return published
+
+
+def _valid_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _load_publication_provenance_cache(
+    path: Path,
+    *,
+    bucket: str,
+    prefix: str,
+) -> dict[str, dict[str, Any]]:
+    """Load the verified, operator-only manifest provenance cache."""
+
+    if not path.is_file():
+        return {}
+    value = read_json(path)
+    required = {"schema", "bucket", "prefix", "updated_at", "manifests"}
+    if set(value) != required:
+        raise StaticPrintError(
+            f"publication provenance cache fields mismatch: {path.resolve()}"
+        )
+    if value.get("schema") != PUBLICATION_PROVENANCE_CACHE_SCHEMA:
+        raise StaticPrintError(
+            f"unsupported publication provenance cache schema: {path.resolve()}"
+        )
+    if value.get("bucket") != bucket or value.get("prefix") != prefix:
+        return {}
+    manifests = value.get("manifests")
+    if not isinstance(manifests, list):
+        raise StaticPrintError(
+            f"publication provenance cache manifests must be an array: {path.resolve()}"
+        )
+    cache: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(manifests):
+        if not isinstance(item, dict) or set(item) != {
+            "object_key",
+            "manifest_sha256",
+            "source_sha256",
+        }:
+            raise StaticPrintError(
+                "publication provenance cache manifest fields mismatch; "
+                f"path={path.resolve()}; index={index}"
+            )
+        object_key = item.get("object_key")
+        if not isinstance(object_key, str) or not object_key:
+            raise StaticPrintError(
+                "publication provenance cache object_key is invalid; "
+                f"path={path.resolve()}; index={index}"
+            )
+        if not _valid_sha256(item.get("manifest_sha256")) or not _valid_sha256(
+            item.get("source_sha256")
+        ):
+            raise StaticPrintError(
+                "publication provenance cache digest is invalid; "
+                f"path={path.resolve()}; index={index}"
+            )
+        cache[f"manifest:{object_key}"] = {
+            "manifest_sha256": item["manifest_sha256"],
+            "source_sha256": item["source_sha256"],
+        }
+    return cache
+
+
+def _write_publication_provenance_cache(
+    path: Path,
+    *,
+    bucket: str,
+    prefix: str,
+    cache: dict[str, dict[str, Any]],
+) -> None:
+    manifests = []
+    for cache_key, item in sorted(cache.items()):
+        if not cache_key.startswith("manifest:"):
+            continue
+        object_key = cache_key.removeprefix("manifest:")
+        if not _valid_sha256(item.get("manifest_sha256")) or not _valid_sha256(
+            item.get("source_sha256")
+        ):
+            continue
+        manifests.append(
+            {
+                "object_key": object_key,
+                "manifest_sha256": item["manifest_sha256"],
+                "source_sha256": item["source_sha256"],
+            }
+        )
+    write_json(
+        path,
+        {
+            "schema": PUBLICATION_PROVENANCE_CACHE_SCHEMA,
+            "bucket": bucket,
+            "prefix": prefix,
+            "updated_at": utc_now(),
+            "manifests": manifests,
+        },
+    )
 
 
 def _product_coverage_records(
@@ -395,8 +653,10 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
         self.generation_lock = Lock()
         self.subject_generation_lock = Lock()
         self.release_lock = Lock()
+        self.history_cleanup_lock = Lock()
         self.s3_status_lock = Lock()
         self.s3_catalog_cache: dict[str, dict[str, Any]] = {}
+        self.s3_cache_warning: str | None = None
         self.s3_published_cache: dict[str, list[dict[str, str]]] | None = None
         self.s3_status_cache: dict[str, Any] | None = None
         self.s3_checked_at = 0.0
@@ -422,6 +682,8 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
                 profiles=discover_profiles(config.profiles_root),
             )
             self.recovery_report["interrupted_operations"] = interrupted
+            self._load_publication_cache()
+            self._bootstrap_local_publications()
         except Exception:
             self.server_close()
             raise
@@ -518,14 +780,115 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
             )
         finish_operation(self.config.database, operation_id=operation_id, error=error)
 
-    def operation_snapshot(self) -> list[dict[str, Any]]:
-        return operation_snapshots(self.config.database)
+    def operation_snapshot(
+        self, operation_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return the operation feed or one exact operation for live polling."""
+
+        return operation_snapshots(
+            self.config.database,
+            operation_id=operation_id,
+        )
+
+    @property
+    def publication_cache_path(self) -> Path:
+        return self.config.work_root / "cache/s3-publication-provenance.json"
+
+    def _load_publication_cache(self) -> None:
+        config = self.config
+        if not config.s3_bucket:
+            return
+        try:
+            self.s3_catalog_cache.update(
+                _load_publication_provenance_cache(
+                    self.publication_cache_path,
+                    bucket=config.s3_bucket,
+                    prefix=config.s3_prefix,
+                )
+            )
+        except StaticPrintError as exc:
+            # This file is a rebuildable cache, never an authority. Keep the GUI
+            # available and explain the one-time remote rebuild in status.
+            self.s3_cache_warning = str(exc)
+
+    def _persist_publication_cache(self) -> None:
+        config = self.config
+        if not config.s3_bucket or not hasattr(config, "work_root"):
+            return
+        _write_publication_provenance_cache(
+            self.publication_cache_path,
+            bucket=config.s3_bucket,
+            prefix=config.s3_prefix,
+            cache=self.s3_catalog_cache,
+        )
+
+    def _bootstrap_local_publications(self, *, authoritative: bool = False) -> None:
+        """Serve the last successful local S3 catalog while refreshing remotely."""
+
+        config = self.config
+        catalog_path = config.exchange_root / "catalog.json"
+        if not config.s3_bucket or not catalog_path.is_file():
+            return
+        catalog = read_json(catalog_path)
+        published = cached_release_entries(
+            catalog,
+            bucket=config.s3_bucket,
+            prefix=config.s3_prefix,
+            catalog_cache=self.s3_catalog_cache,
+        )
+        version_count = sum(
+            len(product["versions"]) for product in catalog["products"]
+        )
+        provenance_count = sum(
+            "source_sha256" in entry
+            for entries in published.values()
+            for entry in entries
+        )
+        with self.s3_status_lock:
+            self.s3_published_cache = published
+            self.s3_status_cache = {
+                "source": (
+                    "confirmed-publication-result"
+                    if authoritative
+                    else "local-catalog-bootstrap"
+                ),
+                "available": authoritative,
+                "stale": not authoritative,
+                "checked_at": utc_now(),
+                "error": self.s3_cache_warning,
+                "catalog_count": 1,
+                "bundle_count": len(catalog["products"]),
+                "version_count": version_count,
+                "source_provenance_count": provenance_count,
+                "source_provenance_complete": provenance_count == version_count,
+                "prefix": f"{config.s3_prefix}/catalog.json",
+                "updated_at": catalog["updated_at"],
+            }
+            self.s3_checked_at = (
+                monotonic()
+                if authoritative and provenance_count == version_count
+                else 0.0
+            )
+
+    def cache_prepared_bundle_provenance(
+        self, records: list[dict[str, str]]
+    ) -> None:
+        """Persist provenance already validated and uploaded by publication."""
+
+        with self.s3_status_lock:
+            for record in records:
+                self.s3_catalog_cache[f"manifest:{record['object_key']}"] = {
+                    "manifest_sha256": record["manifest_sha256"],
+                    "source_sha256": record["source_sha256"],
+                }
+            self._persist_publication_cache()
 
     def s3_publications(
         self,
         *,
         force: bool = False,
         allow_stale: bool = True,
+        include_source_sha256: bool = True,
     ) -> tuple[dict[str, list[dict[str, str]]], dict[str, Any]]:
         config = self.config
         if not config.s3_bucket:
@@ -537,7 +900,7 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
             if (
                 not force
                 and self.s3_published_cache is not None
-                and now - self.s3_checked_at < 15
+                and now - self.s3_checked_at < S3_STATUS_REFRESH_SECONDS
             ):
                 return self.s3_published_cache, dict(self.s3_status_cache or {})
         # Never hold the cache mutex across AWS CLI/network I/O. Operator-state
@@ -549,7 +912,7 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
                 profile=config.aws_profile,
                 region=config.aws_region,
                 catalog_cache=self.s3_catalog_cache,
-                include_source_sha256=True,
+                include_source_sha256=include_source_sha256,
             )
         except StaticPrintError as exc:
             with self.s3_status_lock:
@@ -562,6 +925,22 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
                     }
                     return self.s3_published_cache, status
             raise
+        if not include_source_sha256:
+            return published, {
+                "source": "s3-catalog-index",
+                "available": True,
+                "stale": False,
+                "checked_at": utc_now(),
+                "error": None,
+                **inventory,
+            }
+        self._persist_publication_cache()
+        version_count = sum(len(entries) for entries in published.values())
+        provenance_count = sum(
+            "source_sha256" in entry
+            for entries in published.values()
+            for entry in entries
+        )
         with self.s3_status_lock:
             self.s3_published_cache = published
             self.s3_checked_at = monotonic()
@@ -571,6 +950,8 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
                 "stale": False,
                 "checked_at": utc_now(),
                 "error": None,
+                "source_provenance_count": provenance_count,
+                "source_provenance_complete": provenance_count == version_count,
                 **inventory,
             }
             return published, dict(self.s3_status_cache)
@@ -589,7 +970,10 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
         with self.s3_status_lock:
             now = monotonic()
             refreshing = self.s3_refresh_thread is not None
-            refresh_due = self.s3_checked_at == 0 or now - self.s3_checked_at >= 15
+            refresh_due = (
+                self.s3_checked_at == 0
+                or now - self.s3_checked_at >= S3_STATUS_REFRESH_SECONDS
+            )
             if refresh_due and not refreshing:
                 thread_to_start = Thread(
                     target=self._refresh_s3_publications,
@@ -643,11 +1027,6 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
         finally:
             with self.s3_status_lock:
                 self.s3_refresh_thread = None
-
-    def invalidate_s3_publications(self) -> None:
-        with self.s3_status_lock:
-            self.s3_checked_at = 0.0
-
 
 class StaticPrintHandler(BaseHTTPRequestHandler):
     server: StaticPrintHTTPServer
@@ -819,6 +1198,68 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                     None,
                 )
                 design["operator_decision"] = current_decision
+                attention: list[dict[str, Any]] = []
+                feedback_attention = (
+                    design["feedback_summary"].get("changes", 0)
+                    + design["feedback_summary"].get("reject", 0)
+                )
+                if feedback_attention and current_decision is None:
+                    attention.append(
+                        {
+                            "kind": "reference-feedback",
+                            "active": True,
+                            "label": "Reviewer feedback needs attention",
+                            "reason": (
+                                f"{feedback_attention} current needs-changes/reject "
+                                "review(s) require an operator decision."
+                            ),
+                        }
+                    )
+                subject_attention = design.get("subject_review_attention")
+                if isinstance(subject_attention, dict):
+                    resolved = bool(
+                        current_decision
+                        and current_decision.get("decision")
+                        in {"approved", "abandoned"}
+                    )
+                    attention.append(
+                        {
+                            **subject_attention,
+                            "active": not resolved,
+                            "label": (
+                                "Animal behavior reviewed"
+                                if resolved
+                                else "Animal behavior needs attention"
+                            ),
+                        }
+                    )
+                subject_print_readiness = design.get("subject_print_readiness")
+                if (
+                    isinstance(subject_print_readiness, dict)
+                    and subject_print_readiness.get("print_ready") is False
+                ):
+                    resolved = bool(
+                        current_decision
+                        and current_decision.get("decision")
+                        in {"approved", "abandoned"}
+                    )
+                    reason = print_readiness_warning(
+                        f"subject preview {design_id}", subject_print_readiness
+                    )
+                    attention.append(
+                        {
+                            "kind": "print-quality",
+                            "active": not resolved,
+                            "label": (
+                                "Pixel preflight reviewed"
+                                if resolved
+                                else "Pixel preflight needs attention"
+                            ),
+                            "reason": reason
+                            or "The subject preview did not pass pixel preflight.",
+                        }
+                    )
+                design["review_attention"] = attention
                 candidates: list[dict[str, str]] = []
                 for version in design["versions"]:
                     version_id = version["version_id"]
@@ -850,6 +1291,22 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                         if isinstance(recorded_transparency, dict)
                         else {}
                     )
+                    recorded_print_readiness = (
+                        generation.get("print_readiness")
+                        if isinstance(generation, dict)
+                        else None
+                    )
+                    generation_print_readiness = (
+                        recorded_print_readiness
+                        if isinstance(recorded_print_readiness, dict)
+                        else {}
+                    )
+                    recorded_print_reports = generation_print_readiness.get("prints")
+                    print_readiness_reports = (
+                        recorded_print_reports
+                        if isinstance(recorded_print_reports, dict)
+                        else {}
+                    )
                     recorded_print_transparency = generation_transparency.get("prints")
                     print_transparency = (
                         recorded_print_transparency
@@ -871,6 +1328,9 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                                 "width": target.width,
                                 "height": target.height,
                                 "transparency": print_transparency.get(
+                                    target.target_id
+                                ),
+                                "print_readiness": print_readiness_reports.get(
                                     target.target_id
                                 ),
                             }
@@ -918,11 +1378,48 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                                     "transparency": generation_transparency[
                                         "profile_preview"
                                     ],
+                                    "print_readiness": generation_print_readiness.get(
+                                        "profile_preview"
+                                    ),
                                 },
                                 "canvas_policy": design["canvas_policy"],
                                 "prints": print_assets,
+                                "warnings": list(generation.get("warnings", []))
+                                if isinstance(generation, dict)
+                                else [],
                             }
                         )
+                        for artifact_label, report in [
+                            (
+                                f"{profile.profile_id} preview",
+                                generation_print_readiness.get("profile_preview"),
+                            ),
+                            *[
+                                (
+                                    f"{profile.profile_id}/{target.target_id}",
+                                    print_readiness_reports.get(target.target_id),
+                                )
+                                for target in profile.targets
+                            ],
+                        ]:
+                            if (
+                                isinstance(report, dict)
+                                and report.get("print_ready") is False
+                            ):
+                                reason = print_readiness_warning(
+                                    artifact_label, report
+                                )
+                                attention.append(
+                                    {
+                                        "kind": "product-print-quality",
+                                        "active": True,
+                                        "label": "Product pixels need attention",
+                                        "reason": reason
+                                        or "Product pixel preflight did not pass.",
+                                        "product_profile_id": profile.profile_id,
+                                        "version_id": version_id,
+                                    }
+                                )
                         candidates.append(
                             {
                                 "selection": f"{design_id}:{version_id}:{profile.profile_id}",
@@ -998,8 +1495,50 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                     design,
                     sorted(profiles),
                     publication_known=(
-                        publication_status["available"] or publication_status["stale"]
+                        (
+                            publication_status["available"]
+                            or publication_status["stale"]
+                        )
+                        and publication_status.get(
+                            "source_provenance_complete", False
+                        )
                     ),
+                )
+                attention = design.setdefault("review_attention", [])
+                published_versions = {
+                    (entry["product_profile_id"], entry["version_id"])
+                    for entry in design["publication"]["current_entries"]
+                }
+                for item in attention:
+                    if (
+                        item.get("kind") == "product-print-quality"
+                        and (
+                            item.get("product_profile_id"),
+                            item.get("version_id"),
+                        )
+                        in published_versions
+                    ):
+                        item["active"] = False
+                        item["label"] = "Product pixel warning reviewed and published"
+                for product in design["product_coverage"]:
+                    if product["state"] == "local-attention":
+                        attention.append(
+                            {
+                                "kind": "product-artifact",
+                                "active": True,
+                                "label": "Product artifact needs attention",
+                                "reason": (
+                                    "A generated product version is not a current "
+                                    "release candidate. Regenerate or inspect it before "
+                                    "publication."
+                                ),
+                                "product_profile_id": product[
+                                    "product_profile_id"
+                                ],
+                            }
+                        )
+                design["needs_review_attention"] = any(
+                    item.get("active") is True for item in attention
                 )
         _, subjects = load_subject_catalog(config.subject_catalog)
         result: dict[str, Any] = {
@@ -1055,10 +1594,12 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                     )
                 },
             }
+            result["history_cleanup"] = latest_cleanup_state(config.work_root)
         return result
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        request_url = urlparse(self.path)
+        path = request_url.path
         if path in {"/", "/operator"}:
             self._static("index.html")
         elif path == "/static/app.js":
@@ -1073,10 +1614,30 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, self._state(True))
         elif path == "/api/operator/operations":
             if self._require("operator"):
-                self._json(
-                    HTTPStatus.OK,
-                    {"operations": self.server.operation_snapshot()},
+                values = parse_qs(request_url.query, keep_blank_values=True).get(
+                    "operation_id", []
                 )
+                if len(values) > 1:
+                    self._json(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": "operation_id must be supplied at most once"},
+                    )
+                else:
+                    try:
+                        operation_id = (
+                            validate_id(values[0], "operation ID") if values else None
+                        )
+                    except StaticPrintError as exc:
+                        self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                    else:
+                        self._json(
+                            HTTPStatus.OK,
+                            {
+                                "operations": self.server.operation_snapshot(
+                                    operation_id
+                                )
+                            },
+                        )
         elif path.startswith("/asset/"):
             self._asset(path)
         else:
@@ -1170,6 +1731,12 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
             elif path == "/api/operator/rebuild-catalog":
                 if self._require("operator"):
                     self._rebuild_catalog()
+            elif path == "/api/operator/history-cleanup-proposal":
+                if self._require("operator"):
+                    self._history_cleanup_proposal(body)
+            elif path == "/api/operator/history-cleanup-execute":
+                if self._require("operator"):
+                    self._history_cleanup_execute(body)
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
         except StaticPrintError as exc:
@@ -1179,6 +1746,111 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {"error": f"unexpected {type(exc).__name__}: {exc}"},
             )
+
+    def _history_release_references(self) -> set[tuple[str, str, str]]:
+        config = self.server.config
+        combined = _published_entries(config.exchange_root)
+        local_catalog = config.exchange_root / "catalog.json"
+        if local_catalog.is_file():
+            catalog = read_json(local_catalog)
+            for product in catalog.get("products", []):
+                if not isinstance(product, dict):
+                    continue
+                design_id = str(product.get("design_id", ""))
+                for version in product.get("versions", []):
+                    if not isinstance(version, dict):
+                        continue
+                    combined.setdefault(design_id, []).append(
+                        {
+                            "product_profile_id": str(
+                                product.get("product_profile_id", "")
+                            ),
+                            "version_id": str(version.get("version_id", "")),
+                        }
+                    )
+        if config.s3_bucket:
+            remote, _ = self.server.s3_publications(
+                force=True,
+                allow_stale=False,
+                include_source_sha256=False,
+            )
+            for design_id, entries in remote.items():
+                combined.setdefault(design_id, []).extend(entries)
+        references: set[tuple[str, str, str]] = set()
+        for design_id, entries in combined.items():
+            for entry in entries:
+                references.add(
+                    (
+                        design_id,
+                        str(entry.get("product_profile_id", "")),
+                        str(entry.get("version_id", "")),
+                    )
+                )
+        return references
+
+    def _history_cleanup_proposal(self, body: dict[str, Any]) -> None:
+        proposal_id = str(body.get("proposal_id", "")).strip() or (
+            f"history-{secrets.token_hex(8)}"
+        )
+        with self.server.history_cleanup_lock:
+            proposal = create_history_cleanup_proposal(
+                work_root=self.server.config.work_root,
+                authoring_root=self.server.config.authoring_root,
+                release_references=self._history_release_references(),
+                proposal_id=proposal_id,
+            )
+        self._json(HTTPStatus.OK, proposal)
+
+    def _history_cleanup_execute(self, body: dict[str, Any]) -> None:
+        proposal_id = str(body.get("proposal_id", "")).strip()
+        raw_ids = body.get("design_ids")
+        if (
+            not isinstance(raw_ids, list)
+            or not raw_ids
+            or not all(isinstance(item, str) for item in raw_ids)
+        ):
+            raise StaticPrintError("design_ids must be a non-empty string array")
+        design_ids = list(dict.fromkeys(validate_design_id(item) for item in raw_ids))
+        operation_id = str(body.get("operation_id", "")).strip() or (
+            f"history-{secrets.token_hex(8)}"
+        )
+        self.server.begin_operation(
+            operation_id,
+            kind="history-cleanup",
+            label="Clean superseded authoring history",
+            items=design_ids,
+            request={"proposal_id": proposal_id, "design_ids": design_ids},
+        )
+        try:
+            for design_id in design_ids:
+                self.server.update_operation(operation_id, design_id, "running")
+            with (
+                self.server.history_cleanup_lock,
+                self.server.generation_lock,
+                self.server.release_lock,
+            ):
+                receipt = execute_history_cleanup(
+                    work_root=self.server.config.work_root,
+                    authoring_root=self.server.config.authoring_root,
+                    release_references=self._history_release_references(),
+                    proposal_id=proposal_id,
+                    design_ids=design_ids,
+                )
+            for design_id in design_ids:
+                self.server.update_operation(operation_id, design_id, "succeeded")
+        except Exception as exc:
+            for design_id in design_ids:
+                try:
+                    self.server.update_operation(
+                        operation_id, design_id, "failed", error=str(exc)
+                    )
+                except StaticPrintError:
+                    pass
+            self.server.finish_operation(operation_id, error=str(exc))
+            raise
+        else:
+            self.server.finish_operation(operation_id)
+        self._json(HTTPStatus.OK, {**receipt, "operation_id": operation_id})
 
     def _login(self, body: dict[str, Any]) -> None:
         role = body.get("role")
@@ -1357,10 +2029,18 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
             "force": force,
             "instruction": instruction,
         }
-        results: list[dict[str, Any]] = []
+        requests_per_minute, max_concurrency = _subject_batch_limits(body)
+        image_max_attempts, image_retry_base_seconds = _subject_retry_settings(body)
+        results_by_seed: dict[str, list[dict[str, Any]]] = {
+            seed_id: [] for seed_id in seed_ids
+        }
         skipped_existing: list[dict[str, str]] = []
         generated_count = 0
         with self.server.subject_generation_lock:
+            request["image_requests_per_minute"] = requests_per_minute
+            request["image_max_concurrency"] = max_concurrency
+            request["image_max_attempts"] = image_max_attempts
+            request["image_retry_base_seconds"] = image_retry_base_seconds
             self.server.begin_operation(
                 operation_id,
                 kind="subject-generation",
@@ -1376,18 +2056,14 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 )["items"]
                 if item["status"] in {"succeeded", "skipped"}
             }
-            current_item: str | None = None
+            limiter = _ImageRequestRateLimiter(requests_per_minute)
+            pending: list[tuple[str, str, Any]] = []
             try:
                 for seed_id in seed_ids:
-                    generated_subjects: list[dict[str, Any]] = []
                     for subject in subjects:
                         item_label = f"{seed_id} / {subject.subject_id}"
-                        current_item = item_label
                         if item_label in completed_items:
                             continue
-                        self.server.update_operation(
-                            operation_id, item_label, "running"
-                        )
                         output = (
                             self.server.config.graduated_root
                             / seed_id
@@ -1414,40 +2090,151 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                                 operation_id, item_label, "skipped"
                             )
                             continue
-                        generated = generate_subject_variants(
+                        pending.append((item_label, seed_id, subject))
+
+                worker_count = min(max_concurrency, len(pending))
+                self.server.operation_event(
+                    operation_id,
+                    "Paid image scheduler: "
+                    f"{requests_per_minute} request starts/minute, "
+                    f"{worker_count} active worker(s) with a configured maximum "
+                    f"of {max_concurrency}, "
+                    f"{limiter.minimum_interval_seconds:.2f}s start spacing, "
+                    f"{len(pending)} queued work unit(s). Corrective image retries "
+                    "and provider retries use the same quota; "
+                    f"provider_max_attempts={image_max_attempts}.",
+                )
+                failures: list[tuple[str, str]] = []
+                if pending:
+
+                    def generate_one(
+                        item_label: str, seed_id: str, subject: Any
+                    ) -> list[dict[str, Any]]:
+                        first_request = True
+
+                        def before_image_request() -> None:
+                            nonlocal first_request
+                            limiter.wait()
+                            if first_request:
+                                self.server.update_operation(
+                                    operation_id, item_label, "running"
+                                )
+                                first_request = False
+                            else:
+                                self.server.operation_event(
+                                    operation_id,
+                                    "Started subsequent rate-limited image request.",
+                                    item_label=item_label,
+                                )
+
+                        def image_retry_event(details: dict[str, Any]) -> None:
+                            self.server.operation_event(
+                                operation_id,
+                                "Image provider retry queued: "
+                                f"attempt={details['provider_attempt']}; "
+                                f"next_attempt={details['next_provider_attempt']}; "
+                                f"delay_seconds={details['delay_seconds']}; "
+                                f"rate_limited={details['rate_limited']}; "
+                                f"error={details['error']}",
+                                severity="warning",
+                                item_label=item_label,
+                            )
+
+                        return generate_subject_variants(
                             graduated_root=self.server.config.graduated_root,
                             seed_design_id=seed_id,
                             subjects=[subject],
                             force=force,
                             instruction=instruction,
                             operation_id=operation_id,
+                            before_image_request=before_image_request,
+                            provider_max_attempts=image_max_attempts,
+                            provider_retry_base_seconds=image_retry_base_seconds,
+                            throttle_image_requests=limiter.defer,
+                            image_retry_event=image_retry_event,
                         )
-                        generated_count += len(generated)
-                        generated_subjects.extend(generated)
-                        for artifact in generated:
-                            self.server.operation_event(
-                                operation_id,
-                                f"Generated subject preview: {artifact['output']}",
-                                item_label=item_label,
+
+                    with ThreadPoolExecutor(
+                        max_workers=worker_count,
+                        thread_name_prefix="static-subject",
+                    ) as executor:
+                        future_items = {}
+                        for item_label, seed_id, subject in pending:
+                            future = executor.submit(
+                                generate_one, item_label, seed_id, subject
                             )
-                        self.server.update_operation(
-                            operation_id, item_label, "succeeded"
-                        )
-                    results.append(
-                        {
-                            "seed_design_id": seed_id,
-                            "subjects": generated_subjects,
-                        }
+                            future_items[future] = (item_label, seed_id)
+                        for future in as_completed(future_items):
+                            item_label, seed_id = future_items[future]
+                            try:
+                                generated = future.result()
+                            except Exception as exc:  # noqa: BLE001 - isolate work item
+                                message = str(exc)
+                                failures.append((item_label, message))
+                                self.server.update_operation(
+                                    operation_id,
+                                    item_label,
+                                    "failed",
+                                    error=message,
+                                )
+                                continue
+                            generated_count += len(generated)
+                            results_by_seed[seed_id].extend(generated)
+                            for artifact in generated:
+                                self.server.operation_event(
+                                    operation_id,
+                                    f"Generated subject preview: {artifact['output']}",
+                                    item_label=item_label,
+                                )
+                                if artifact.get("operator_review_recommended"):
+                                    validation = (
+                                        artifact.get("semantic_validation") or {}
+                                    )
+                                    self.server.operation_event(
+                                        operation_id,
+                                        "Operator review recommended for this subject "
+                                        "preview: "
+                                        f"{validation.get('reason', 'borderline animal behavior')}",
+                                        severity="warning",
+                                        item_label=item_label,
+                                    )
+                                print_warning = artifact.get(
+                                    "print_readiness_warning"
+                                )
+                                if print_warning:
+                                    self.server.operation_event(
+                                        operation_id,
+                                        str(print_warning),
+                                        severity="warning",
+                                        item_label=item_label,
+                                    )
+                            self.server.update_operation(
+                                operation_id, item_label, "succeeded"
+                            )
+                if failures:
+                    examples = "; ".join(
+                        f"{item}: {message}" for item, message in failures[:3]
+                    )
+                    raise StaticPrintError(
+                        "subject generation batch completed with "
+                        f"{len(failures)} failed work unit(s) and "
+                        f"{generated_count} successful generation(s); "
+                        f"first_failures={examples}; fix the failed inputs and resume "
+                        f"operation {operation_id!r} to retain successful outputs"
+                    )
+                for generated_subjects in results_by_seed.values():
+                    generated_subjects.sort(
+                        key=lambda artifact: str(artifact.get("subject_id", ""))
                     )
             except Exception as exc:
-                if current_item:
-                    self.server.update_operation(
-                        operation_id, current_item, "failed", error=str(exc)
-                    )
                 self.server.finish_operation(operation_id, error=str(exc))
                 raise
             else:
                 self.server.finish_operation(operation_id)
+        results = [
+            {"seed_design_id": seed_id, "subjects": results_by_seed[seed_id]}
+            for seed_id in seed_ids
+        ]
         self._json(
             HTTPStatus.OK,
             {
@@ -1457,6 +2244,15 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 "generated_count": generated_count,
                 "skipped_existing": skipped_existing,
                 "results": results,
+                "image_scheduler": {
+                    "requests_per_minute": requests_per_minute,
+                    "max_concurrency": max_concurrency,
+                    "max_attempts": image_max_attempts,
+                    "retry_base_seconds": image_retry_base_seconds,
+                    "minimum_start_interval_seconds": round(
+                        limiter.minimum_interval_seconds, 3
+                    ),
+                },
             },
         )
 
@@ -1548,7 +2344,11 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
         profiles = discover_profiles(self.server.config.profiles_root)
         plans = _generation_plans(body.get("plans"), set(profiles))
         if self.server.config.s3_bucket:
-            published, _ = self.server.s3_publications(force=True, allow_stale=False)
+            published, _ = self.server.s3_publications(
+                force=True,
+                allow_stale=False,
+                include_source_sha256=False,
+            )
         else:
             published = _published_entries(self.server.config.exchange_root)
         plans = _resolve_generation_versions(
@@ -1823,7 +2623,9 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 "Reading the current S3 discovery catalog and release history.",
             )
             remote_publications, _ = self.server.s3_publications(
-                force=True, allow_stale=False
+                force=True,
+                allow_stale=False,
+                include_source_sha256=False,
             )
             remote_release_ids = {
                 entry["release_id"]
@@ -1865,7 +2667,6 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.server.finish_operation(operation_id, error=str(exc))
             raise
-        current_item: str | None = None
         started_items: set[str] = set()
         manifest_to_item: dict[str, str] = {}
         bundle_roots: list[tuple[Path, str]] = []
@@ -1902,7 +2703,6 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 )
 
         def publish_progress(event: str, details: dict[str, Any]) -> None:
-            nonlocal current_item
             source = Path(str(details.get("source", ""))).resolve()
             matched_item = next(
                 (
@@ -1913,7 +2713,6 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 None,
             )
             if event == "upload-start":
-                current_item = matched_item
                 if matched_item and matched_item not in started_items:
                     self.server.update_operation(operation_id, matched_item, "running")
                     started_items.add(matched_item)
@@ -1933,9 +2732,30 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                     self.server.update_operation(
                         operation_id, manifest_item, "succeeded"
                     )
-                    current_item = None
+            elif event == "upload-failed":
+                self.server.operation_event(
+                    operation_id,
+                    f"S3 upload failed after retries: {details['uri']}; "
+                    f"error={details['error']}",
+                    severity="error",
+                    item_label=matched_item,
+                )
+                if matched_item:
+                    self.server.update_operation(
+                        operation_id,
+                        matched_item,
+                        "failed",
+                        error=str(details["error"]),
+                    )
+            elif event == "upload-stage-start":
+                self.server.operation_event(
+                    operation_id,
+                    "Starting concurrent S3 upload stage: "
+                    f"stage={details['stage']}; "
+                    f"objects={details['object_count']}; "
+                    f"workers={details['worker_count']}.",
+                )
             elif event == "catalog-start":
-                current_item = None
                 self.server.operation_event(
                     operation_id,
                     "Updating the stable FE discovery catalog and immutable history.",
@@ -1951,6 +2771,18 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                     operation_id,
                     f"Validation complete: {details['object_count']} object(s) planned.",
                 )
+            elif event == "preflight-start":
+                self.server.operation_event(
+                    operation_id,
+                    f"Checking {details['object_count']} immutable S3 object(s) before upload.",
+                )
+            elif event == "preflight-complete":
+                self.server.operation_event(
+                    operation_id,
+                    "S3 preflight complete: "
+                    f"{details['existing_count']} existing match(es), "
+                    f"{details['missing_count']} new object(s).",
+                )
 
         try:
             plan = prepare_release(
@@ -1961,6 +2793,25 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 exchange_root=config.exchange_root,
                 progress=prepare_progress,
             )
+            prepared_provenance: list[dict[str, str]] = []
+            if execute:
+                for manifest_path in plan.bundle_manifests:
+                    manifest = read_json(manifest_path)
+                    relative = str(
+                        manifest_path.relative_to(plan.staging_root)
+                    ).replace("\\", "/")
+                    object_key = (
+                        f"{config.s3_prefix}/{relative}"
+                        if config.s3_prefix
+                        else relative
+                    )
+                    prepared_provenance.append(
+                        {
+                            "object_key": object_key,
+                            "manifest_sha256": sha256_file(manifest_path),
+                            "source_sha256": str(manifest["source_sha256"]),
+                        }
+                    )
             result = publish_release(
                 plan,
                 exchange_root=config.exchange_root,
@@ -1972,11 +2823,22 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 progress=publish_progress,
             )
             if execute:
-                self.server.invalidate_s3_publications()
+                self.server.cache_prepared_bundle_provenance(prepared_provenance)
+                self.server._bootstrap_local_publications(authoritative=True)
         except Exception as exc:
-            if current_item:
+            snapshot = operation_snapshot(config.database, operation_id)
+            for item in snapshot["items"]:
+                if item["status"] not in {"pending", "running"}:
+                    continue
+                self.server.operation_event(
+                    operation_id,
+                    "Skipped after a sibling upload or release stage failed; "
+                    "retrying the release will safely reuse matching immutable objects.",
+                    severity="warning",
+                    item_label=str(item["item_key"]),
+                )
                 self.server.update_operation(
-                    operation_id, current_item, "failed", error=str(exc)
+                    operation_id, str(item["item_key"]), "skipped"
                 )
             self.server.finish_operation(operation_id, error=str(exc))
             raise
@@ -2044,7 +2906,7 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                     reason=reason,
                     catalog_cache=self.server.s3_catalog_cache,
                 )
-                self.server.invalidate_s3_publications()
+                self.server._bootstrap_local_publications(authoritative=True)
             for bundle_id in bundle_ids:
                 self.server.update_operation(operation_id, bundle_id, "succeeded")
         except Exception as exc:
@@ -2071,7 +2933,7 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 exchange_root=config.exchange_root,
                 catalog_cache=self.server.s3_catalog_cache,
             )
-            self.server.invalidate_s3_publications()
+            self.server._bootstrap_local_publications(authoritative=True)
         self._json(HTTPStatus.OK, result)
 
 

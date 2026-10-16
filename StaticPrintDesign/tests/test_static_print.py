@@ -41,15 +41,27 @@ from pawmarvel_static_print.core import (
     load_profile,
     read_json,
 )
+from pawmarvel_static_print.history_cleanup import (
+    HISTORY_CLEANUP_SCHEMA,
+    create_history_cleanup_proposal,
+    execute_history_cleanup,
+    latest_cleanup_state,
+)
+from pawmarvel_static_print.image_quality import print_readiness_report
 from pawmarvel_static_print.lifecycle import (
+    OPAQUE_FULL_BLEED,
     DesignIdProposal,
     Subject,
+    SubjectGenerationError,
     generate_subject_variants,
     import_review_collection,
     load_subject_catalog,
     move_seed,
     move_seeds,
     openai_design_id_generator,
+    openai_subject_generator,
+    openai_subject_validator,
+    subject_prompt,
     transparency_report,
 )
 from pawmarvel_static_print.operations import (
@@ -64,8 +76,11 @@ from pawmarvel_static_print.operations import (
 )
 from pawmarvel_static_print.publisher import (
     _load_latest_catalog_history,
+    _preflight_immutable_objects,
     _publish_catalog_version,
+    _retry_s3_call,
     _store_local_catalog,
+    cached_release_entries,
     load_s3_release_entries,
     publication_plan,
     publish_release,
@@ -86,12 +101,17 @@ from pawmarvel_static_print.reviews import (
     save_operator_decisions,
 )
 from pawmarvel_static_print.server import (
+    PUBLICATION_PROVENANCE_CACHE_SCHEMA,
     StaticPrintHTTPServer,
     _generation_plans,
+    _ImageRequestRateLimiter,
+    _load_publication_provenance_cache,
     _next_release_id,
     _product_coverage_records,
     _published_entries,
     _resolve_generation_versions,
+    _subject_batch_limits,
+    _write_publication_provenance_cache,
 )
 
 
@@ -146,6 +166,191 @@ class StaticPrintWorkflowTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_image_request_limiter_evenly_spaces_launch_tier_starts(self) -> None:
+        current = [100.0]
+        delays: list[float] = []
+
+        def clock() -> float:
+            return current[0]
+
+        def sleeper(delay: float) -> None:
+            delays.append(delay)
+            current[0] += delay
+
+        limiter = _ImageRequestRateLimiter(50, clock=clock, sleeper=sleeper)
+        limiter.wait()
+        limiter.wait()
+        limiter.wait()
+
+        self.assertEqual(len(delays), 2)
+        self.assertAlmostEqual(delays[0], 1.2)
+        self.assertAlmostEqual(delays[1], 1.2)
+        self.assertAlmostEqual(limiter.minimum_interval_seconds, 1.2)
+
+    def test_image_request_limiter_defers_the_shared_queue_after_throttle(
+        self,
+    ) -> None:
+        current = [100.0]
+        delays: list[float] = []
+
+        def clock() -> float:
+            return current[0]
+
+        def sleeper(delay: float) -> None:
+            delays.append(delay)
+            current[0] += delay
+
+        limiter = _ImageRequestRateLimiter(50, clock=clock, sleeper=sleeper)
+        limiter.wait()
+        limiter.defer(5.0)
+        limiter.wait()
+
+        self.assertEqual(len(delays), 1)
+        self.assertAlmostEqual(delays[0], 5.0)
+
+    def test_subject_batch_limits_use_launch_defaults_and_durable_override(
+        self,
+    ) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "STATIC_PRINT_IMAGE_REQUESTS_PER_MINUTE": "50",
+                "STATIC_PRINT_IMAGE_MAX_CONCURRENCY": "50",
+            },
+        ):
+            self.assertEqual(_subject_batch_limits({}), (50, 50))
+            self.assertEqual(
+                _subject_batch_limits(
+                    {
+                        "image_requests_per_minute": 24,
+                        "image_max_concurrency": 12,
+                    }
+                ),
+                (24, 12),
+            )
+
+    def _history_version(self, version_id: str, content: bytes) -> Path:
+        version = self.authoring / "sample-design/test-product" / version_id
+        version.mkdir(parents=True)
+        (version / "generation.json").write_text(
+            json.dumps(
+                {
+                    "schema": "pawmarvel-static-generation-v3",
+                    "design_id": "sample-design",
+                    "product_profile_id": "test-product",
+                    "version_id": version_id,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (version / "artifact.bin").write_bytes(content)
+        return version
+
+    def test_history_cleanup_preserves_latest_and_release_referenced_versions(self) -> None:
+        first = self._history_version("v000001", b"released")
+        second = self._history_version("v000002", b"superseded")
+        third = self._history_version("v000003", b"current")
+        proposal = create_history_cleanup_proposal(
+            work_root=self.root,
+            authoring_root=self.authoring,
+            release_references={
+                ("sample-design", "test-product", "v000001")
+            },
+            proposal_id="history-review",
+        )
+        self.assertEqual(proposal["schema"], HISTORY_CLEANUP_SCHEMA)
+        self.assertEqual(proposal["design_count"], 1)
+        self.assertEqual(proposal["designs"][0]["lifecycle"], "released")
+        self.assertEqual(
+            [item["version_id"] for item in proposal["designs"][0]["versions"]],
+            ["v000002"],
+        )
+        receipt = execute_history_cleanup(
+            work_root=self.root,
+            authoring_root=self.authoring,
+            release_references={
+                ("sample-design", "test-product", "v000001")
+            },
+            proposal_id="history-review",
+            design_ids=["sample-design"],
+        )
+        self.assertEqual(receipt["removed_version_count"], 1)
+        self.assertTrue(first.is_dir())
+        self.assertFalse(second.exists())
+        self.assertTrue(third.is_dir())
+        self.assertEqual(
+            latest_cleanup_state(self.root)["receipt"]["status"], "complete"
+        )
+
+    def test_history_cleanup_proposes_all_unreleased_abandoned_versions(self) -> None:
+        first = self._history_version("v000001", b"old")
+        second = self._history_version("v000002", b"new")
+        abandoned = self.root / "static-abandoned-designs/sample-design"
+        abandoned.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(self.inputs / "sample-design"), abandoned)
+        proposal = create_history_cleanup_proposal(
+            work_root=self.root,
+            authoring_root=self.authoring,
+            release_references=set(),
+            proposal_id="abandoned-review",
+        )
+        self.assertEqual(proposal["designs"][0]["pool"], "abandoned")
+        self.assertEqual(
+            {item["version_id"] for item in proposal["designs"][0]["versions"]},
+            {"v000001", "v000002"},
+        )
+        self.assertTrue(first.exists())
+        self.assertTrue(second.exists())
+
+    def test_history_cleanup_stops_when_reviewed_history_changes(self) -> None:
+        self._history_version("v000001", b"old")
+        target = self._history_version("v000002", b"superseded")
+        self._history_version("v000003", b"current")
+        create_history_cleanup_proposal(
+            work_root=self.root,
+            authoring_root=self.authoring,
+            release_references=set(),
+            proposal_id="stale-review",
+        )
+        (target / "artifact.bin").write_bytes(b"changed")
+        with self.assertRaisesRegex(StaticPrintError, "became stale"):
+            execute_history_cleanup(
+                work_root=self.root,
+                authoring_root=self.authoring,
+                release_references=set(),
+                proposal_id="stale-review",
+                design_ids=["sample-design"],
+            )
+        self.assertTrue(target.is_dir())
+
+    def test_history_cleanup_records_a_delete_failure_before_returning(self) -> None:
+        self._history_version("v000001", b"superseded")
+        self._history_version("v000002", b"current")
+        create_history_cleanup_proposal(
+            work_root=self.root,
+            authoring_root=self.authoring,
+            release_references=set(),
+            proposal_id="failed-review",
+        )
+        with (
+            patch(
+                "pawmarvel_static_print.history_cleanup.shutil.rmtree",
+                side_effect=OSError("disk busy"),
+            ),
+            self.assertRaisesRegex(OSError, "disk busy"),
+        ):
+            execute_history_cleanup(
+                work_root=self.root,
+                authoring_root=self.authoring,
+                release_references=set(),
+                proposal_id="failed-review",
+                design_ids=["sample-design"],
+            )
+        receipt = latest_cleanup_state(self.root)["receipt"]
+        self.assertEqual(receipt["status"], "failed")
+        self.assertEqual(receipt["current_target"], "sample-design/test-product/v000001")
+        self.assertIn("disk busy", receipt["error"])
 
     def test_operator_state_schedules_s3_refresh_without_blocking(self) -> None:
         server = object.__new__(StaticPrintHTTPServer)
@@ -438,6 +643,24 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         self.assertEqual(
             operation_snapshot(database, "batch-0")["operation_id"], "batch-0"
         )
+
+        server = object.__new__(StaticPrintHTTPServer)
+        server.config = SimpleNamespace(database=database)
+        exact = server.operation_snapshot("batch-0")
+        self.assertEqual(
+            [item["operation_id"] for item in exact],
+            ["batch-0"],
+        )
+
+    def test_static_ui_polls_the_exact_current_operation(self) -> None:
+        project = Path(__file__).resolve().parents[1]
+        javascript = (
+            project / "src/pawmarvel_static_print/static/app.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("const terminalOperationIds = new Set();", javascript)
+        self.assertIn("?operation_id=${encodeURIComponent(targetOperationId)}", javascript)
+        self.assertIn("pollGeneration !== operationPollGeneration", javascript)
+        self.assertIn('cache: "no-store"', javascript)
 
     def test_interrupted_operation_can_resume_only_unfinished_items(self) -> None:
         database = self.root / "operations.sqlite3"
@@ -746,6 +969,108 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         self.assertEqual(cached, published)
         run_bytes.assert_not_called()
 
+    def test_publication_provenance_cache_survives_server_restart(self) -> None:
+        path = self.root / "cache/s3-publication-provenance.json"
+        object_key = (
+            "templates/static_design/bundles/sample-design--subject-cat--"
+            "mens-tee-house-style/v000004/bundle.json"
+        )
+        cache = {
+            f"manifest:{object_key}": {
+                "manifest_sha256": "b" * 64,
+                "source_sha256": "c" * 64,
+            },
+            "catalog:unrelated": {"etag": "ignored"},
+        }
+        _write_publication_provenance_cache(
+            path,
+            bucket="example-bucket",
+            prefix="templates/static_design",
+            cache=cache,
+        )
+        stored = read_json(path)
+        self.assertEqual(
+            stored["schema"], PUBLICATION_PROVENANCE_CACHE_SCHEMA
+        )
+        self.assertEqual(len(stored["manifests"]), 1)
+        self.assertEqual(
+            _load_publication_provenance_cache(
+                path,
+                bucket="example-bucket",
+                prefix="templates/static_design",
+            ),
+            {f"manifest:{object_key}": cache[f"manifest:{object_key}"]},
+        )
+        self.assertEqual(
+            _load_publication_provenance_cache(
+                path,
+                bucket="different-bucket",
+                prefix="templates/static_design",
+            ),
+            {},
+        )
+
+    def test_local_catalog_bootstrap_never_fetches_missing_provenance(self) -> None:
+        catalog = {
+            "schema": "pawmarvel-static-catalog-v1",
+            "updated_at": "2026-10-15T12:00:00Z",
+            "products": [
+                {
+                    "bundle_id": (
+                        "sample-design--subject-cat--mens-tee-house-style"
+                    ),
+                    "design_id": "sample-design--subject-cat",
+                    "product_profile_id": "mens-tee-house-style",
+                    "status": "active",
+                    "latest_version_id": "v000004",
+                    "versions": [
+                        {
+                            "version_id": "v000004",
+                            "release_id": "2026-10-15.002",
+                            "published_at": "2026-10-15T11:00:00Z",
+                            "manifest_path": (
+                                "bundles/sample-design--subject-cat--"
+                                "mens-tee-house-style/v000004/bundle.json"
+                            ),
+                            "manifest_sha256": "b" * 64,
+                        }
+                    ],
+                }
+            ],
+        }
+        with patch(
+            "pawmarvel_static_print.publisher._run_bytes"
+        ) as run_bytes:
+            published = cached_release_entries(
+                catalog,
+                bucket="example-bucket",
+                prefix="templates/static_design",
+                catalog_cache={},
+            )
+        self.assertEqual(
+            published["sample-design--subject-cat"][0]["version_id"],
+            "v000004",
+        )
+        self.assertNotIn(
+            "source_sha256", published["sample-design--subject-cat"][0]
+        )
+        run_bytes.assert_not_called()
+
+    def test_static_ui_does_not_classify_unknown_release_state_as_graduated(
+        self,
+    ) -> None:
+        project = Path(__file__).resolve().parents[1]
+        javascript = (
+            project / "src/pawmarvel_static_print/static/app.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn('return "unknown";', javascript)
+        self.assertIn(
+            'item => releaseState(item) === "unreleased"', javascript
+        )
+        self.assertIn(
+            "They are not classified as graduated or released", javascript
+        )
+
     def test_discovery_catalog_resolves_latest_and_preserves_retirement(self) -> None:
         releases = [
             {
@@ -1046,6 +1371,13 @@ class StaticPrintWorkflowTest(unittest.TestCase):
             [(item["width"], item["height"]) for item in generated["outputs"]],
             [(80, 80), (120, 60)],
         )
+        self.assertIn("prints", generated["print_readiness"])
+        self.assertTrue(
+            all(item["print_readiness"] for item in generated["outputs"])
+        )
+        self.assertTrue(
+            any("not print-ready" in warning for warning in generated["warnings"])
+        )
         self.assertEqual(
             (
                 generated["profile_previews"][0]["width"],
@@ -1111,19 +1443,24 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         self.assertTrue(objects[-1]["key"].endswith("/catalog.json"))
         self.assertTrue(all("source-design.png" not in item["key"] for item in objects))
         publication_events: list[tuple[str, dict[str, object]]] = []
-        dry_run = publish_release(
-            plan,
-            exchange_root=self.exchange,
-            bucket="static-print-test-bucket",
-            prefix="templates/static_design",
-            aws_profile=None,
-            region=None,
-            execute=False,
-            progress=lambda event, details: publication_events.append((event, details)),
-        )
+        with patch(
+            "pawmarvel_static_print.publisher._remote_hash", return_value=None
+        ):
+            dry_run = publish_release(
+                plan,
+                exchange_root=self.exchange,
+                bucket="static-print-test-bucket",
+                prefix="templates/static_design",
+                aws_profile=None,
+                region=None,
+                execute=False,
+                progress=lambda event, details: publication_events.append(
+                    (event, details)
+                ),
+            )
         self.assertEqual(
             [event for event, _ in publication_events],
-            ["validation-complete"],
+            ["preflight-start", "preflight-complete", "validation-complete"],
         )
         self.assertFalse(plan.staging_root.exists())
         self.assertTrue(all("source" not in item for item in dry_run["objects"]))
@@ -1138,6 +1475,280 @@ class StaticPrintWorkflowTest(unittest.TestCase):
             plan.exchange_catalog_path.read_bytes(),
             retried.exchange_catalog_path.read_bytes(),
         )
+        generation = read_json(
+            self.authoring / "sample-design/cat/test-product/v000001/generation.json"
+        )
+        self.assertEqual(
+            read_json(retried.bundle_manifests[0])["created_at"],
+            generation["created_at"],
+        )
+        manifest_bytes = retried.bundle_manifests[0].read_bytes()
+        later_release = prepare_release(
+            release_id="2026-10-20.002",
+            selections=[BundleSelection(design_id, "v000001", profile)],
+            inputs_root=self.inputs,
+            authoring_root=self.authoring,
+            exchange_root=self.exchange,
+        )
+        self.assertEqual(manifest_bytes, later_release.bundle_manifests[0].read_bytes())
+
+    def test_legacy_generation_recovers_published_bundle_timestamp(self) -> None:
+        profile = load_profile(self.profile_path)
+        design_id = self._subject_design()
+        generate_design(
+            inputs_root=self.inputs,
+            authoring_root=self.authoring,
+            design_id=design_id,
+            version_id="v000001",
+            profiles=[profile],
+        )
+        generation_path = (
+            self.authoring / "sample-design/cat/test-product/v000001/generation.json"
+        )
+        generation = read_json(generation_path)
+        generation.pop("created_at")
+        generation_path.write_text(json.dumps(generation), encoding="utf-8")
+        legacy_created_at = "2026-10-19T08:30:00Z"
+        legacy_catalog = self.exchange / "releases/2026-10-19.001/catalog.json"
+        legacy_catalog.parent.mkdir(parents=True)
+        legacy_catalog.write_text(
+            json.dumps(
+                {
+                    "schema": "pawmarvel-static-release-catalog-v1",
+                    "release_id": "2026-10-19.001",
+                    "created_at": legacy_created_at,
+                    "bundles": [
+                        {
+                            "bundle_id": f"{design_id}--test-product",
+                            "design_id": design_id,
+                            "product_profile_id": "test-product",
+                            "version_id": "v000001",
+                            "manifest_path": (
+                                f"bundles/{design_id}--test-product/v000001/bundle.json"
+                            ),
+                            "manifest_sha256": "a" * 64,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        plan = prepare_release(
+            release_id="2026-10-20.001",
+            selections=[BundleSelection(design_id, "v000001", profile)],
+            inputs_root=self.inputs,
+            authoring_root=self.authoring,
+            exchange_root=self.exchange,
+        )
+        self.assertEqual(
+            read_json(plan.bundle_manifests[0])["created_at"], legacy_created_at
+        )
+        self.assertEqual(read_json(generation_path)["created_at"], legacy_created_at)
+
+    def test_publication_preflight_rejects_all_conflicts_before_upload(self) -> None:
+        profile = load_profile(self.profile_path)
+        design_id = self._subject_design()
+        generate_design(
+            inputs_root=self.inputs,
+            authoring_root=self.authoring,
+            design_id=design_id,
+            version_id="v000001",
+            profiles=[profile],
+        )
+        plan = prepare_release(
+            release_id="2026-10-20.001",
+            selections=[BundleSelection(design_id, "v000001", profile)],
+            inputs_root=self.inputs,
+            authoring_root=self.authoring,
+            exchange_root=self.exchange,
+        )
+
+        def remote_hash(*, key: str, **_: object) -> str | None:
+            return "f" * 64 if key.endswith("/bundle.json") else None
+
+        with (
+            patch(
+                "pawmarvel_static_print.publisher._remote_hash",
+                side_effect=remote_hash,
+            ),
+            patch("pawmarvel_static_print.publisher._upload") as upload,
+            self.assertRaisesRegex(
+                StaticPrintError,
+                "immutable S3 preflight failed before upload; conflict_count=1",
+            ),
+        ):
+            publish_release(
+                plan,
+                exchange_root=self.exchange,
+                bucket="static-print-test-bucket",
+                prefix="templates/static_design",
+                aws_profile=None,
+                region=None,
+                execute=True,
+            )
+        upload.assert_not_called()
+
+    def test_s3_retry_uses_bounded_exponential_backoff(self) -> None:
+        attempts = [
+            StaticPrintError("SlowDown from S3"),
+            StaticPrintError("connection reset by peer"),
+            "uploaded",
+        ]
+        delays: list[float] = []
+
+        def operation():
+            outcome = attempts.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        with patch("pawmarvel_static_print.publisher.sleep", side_effect=delays.append):
+            result = _retry_s3_call(
+                operation,
+                label="test upload",
+                max_attempts=4,
+                retry_base_seconds=0.5,
+            )
+
+        self.assertEqual(result, "uploaded")
+        self.assertEqual(delays, [0.5, 1.0])
+
+    def test_s3_preflight_inspects_objects_concurrently(self) -> None:
+        objects = [
+            {
+                "key": f"bundles/test/{index}.png",
+                "uri": f"s3://bucket/bundles/test/{index}.png",
+                "sha256": str(index) * 64,
+            }
+            for index in range(1, 5)
+        ]
+        state = {"active": 0, "maximum": 0}
+        state_lock = Lock()
+
+        def remote_hash(**_: object) -> None:
+            with state_lock:
+                state["active"] += 1
+                state["maximum"] = max(state["maximum"], state["active"])
+            time.sleep(0.02)
+            with state_lock:
+                state["active"] -= 1
+
+        with patch(
+            "pawmarvel_static_print.publisher._remote_hash", side_effect=remote_hash
+        ):
+            statuses = _preflight_immutable_objects(
+                objects,
+                bucket="bucket",
+                profile=None,
+                region=None,
+                max_concurrency=4,
+                max_attempts=1,
+                retry_base_seconds=0.01,
+            )
+
+        self.assertGreaterEqual(state["maximum"], 2)
+        self.assertEqual(set(statuses.values()), {"missing"})
+
+    def test_publication_uploads_assets_concurrently_before_commit_markers(
+        self,
+    ) -> None:
+        profile = load_profile(self.profile_path)
+        design_id = self._subject_design()
+        generate_design(
+            inputs_root=self.inputs,
+            authoring_root=self.authoring,
+            design_id=design_id,
+            version_id="v000001",
+            profiles=[profile],
+        )
+        plan = prepare_release(
+            release_id="2026-10-20.003",
+            selections=[BundleSelection(design_id, "v000001", profile)],
+            inputs_root=self.inputs,
+            authoring_root=self.authoring,
+            exchange_root=self.exchange,
+        )
+        calls: list[tuple[str, str]] = []
+        active = 0
+        maximum = 0
+        calls_lock = Lock()
+
+        def fake_upload(*, key: str, **_: object) -> str:
+            nonlocal active, maximum
+            kind = (
+                "release-catalog"
+                if "/releases/" in key
+                else "manifest"
+                if key.endswith("/bundle.json")
+                else "asset"
+            )
+            with calls_lock:
+                calls.append(("start", kind))
+                active += 1
+                maximum = max(maximum, active)
+            time.sleep(0.02)
+            with calls_lock:
+                active -= 1
+                calls.append(("finish", kind))
+            return "uploaded"
+
+        objects = publication_plan(
+            plan, bucket="bucket", prefix="templates/static_design"
+        )
+        with (
+            patch(
+                "pawmarvel_static_print.publisher._preflight_immutable_objects",
+                return_value={str(item["key"]): "missing" for item in objects},
+            ),
+            patch(
+                "pawmarvel_static_print.publisher._upload",
+                side_effect=fake_upload,
+            ),
+            patch(
+                "pawmarvel_static_print.publisher._rebuild_and_upload_catalog",
+                return_value={
+                    "uri": "s3://bucket/catalog.json",
+                    "sha256": "a" * 64,
+                    "history_uri": "s3://bucket/catalog-history/test.json",
+                },
+            ),
+            patch(
+                "pawmarvel_static_print.publisher._store_local_catalog",
+                return_value=str(self.exchange / "catalog.json"),
+            ),
+        ):
+            result = publish_release(
+                plan,
+                exchange_root=self.exchange,
+                bucket="bucket",
+                prefix="templates/static_design",
+                aws_profile=None,
+                region=None,
+                execute=True,
+                upload_max_concurrency=8,
+                upload_max_attempts=2,
+                upload_retry_base_seconds=0.01,
+            )
+
+        self.assertGreaterEqual(maximum, 2)
+        last_asset_finish = max(
+            index
+            for index, event in enumerate(calls)
+            if event == ("finish", "asset")
+        )
+        first_manifest_start = min(
+            index
+            for index, event in enumerate(calls)
+            if event == ("start", "manifest")
+        )
+        first_catalog_start = min(
+            index
+            for index, event in enumerate(calls)
+            if event == ("start", "release-catalog")
+        )
+        self.assertLess(last_asset_finish, first_manifest_start)
+        self.assertLess(first_manifest_start, first_catalog_start)
+        self.assertEqual(result["upload_scheduler"]["max_concurrency"], 8)
 
     def test_existing_release_id_rejects_changed_bundle_bytes(self) -> None:
         profile = load_profile(self.profile_path)
@@ -1346,6 +1957,8 @@ class StaticPrintWorkflowTest(unittest.TestCase):
             subject_id="dog-dachshund",
             display_name="Dachshund",
             subject_kind="dog-breed",
+            subject_species="dog",
+            generation_description="exactly one Dachshund dog",
             hero_strategy="breed-specific",
             collection_path="/collections/dachshund-gifts",
         )
@@ -1374,6 +1987,10 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         self.assertEqual(provenance["operator_instruction"], "keep the red scarf")
         self.assertEqual(provenance["canvas_policy"], "opaque-full-bleed")
         self.assertEqual(provenance["output_transparency"]["result"], "opaque")
+        self.assertTrue(provenance["print_readiness"]["print_ready"])
+        self.assertTrue(generated[0]["print_readiness"]["print_ready"])
+        self.assertIsNone(generated[0]["print_readiness_warning"])
+        self.assertFalse(provenance["semantic_validation"]["enabled"])
         discovered = discover_designs(graduated, self.authoring)
         discovered_subject = next(
             item for item in discovered if item["design_id"] == design_id
@@ -1392,6 +2009,478 @@ class StaticPrintWorkflowTest(unittest.TestCase):
             ],
             "approved",
         )
+
+    def test_subject_generation_retries_wrong_featured_species_before_commit(
+        self,
+    ) -> None:
+        graduated = self.root / "static-graduated-designs"
+        destination = move_seed(
+            self.root,
+            seed_design_id="sample-design",
+            source="active",
+            target="graduated",
+        )
+        subject = Subject(
+            subject_id="dog-mixed-breed",
+            display_name="Dog lover",
+            subject_kind="dog-general",
+            subject_species="dog",
+            generation_description="exactly one mixed-breed domestic dog",
+            hero_strategy="mixed-breed-heroes",
+            collection_path="/collections/gifts-for-dog-lovers",
+        )
+        prompts: list[str] = []
+        sources: list[Path] = []
+        request_starts: list[str] = []
+        validations = iter(
+            [
+                {
+                    "passed": False,
+                    "featured_subject_species": "human",
+                    "human_replaced_pet": True,
+                    "reason": "a woman is the principal character",
+                },
+                {
+                    "passed": True,
+                    "featured_subject_species": "dog",
+                    "human_replaced_pet": False,
+                    "reason": "a dog is the principal character",
+                },
+            ]
+        )
+
+        def fake_generator(source, selected, prompt, size):
+            sources.append(source)
+            prompts.append(prompt)
+            return Image.new("RGBA", size, (10 * len(prompts), 20, 30, 255))
+
+        generated = generate_subject_variants(
+            graduated_root=graduated,
+            seed_design_id="sample-design",
+            subjects=[subject],
+            generator=fake_generator,
+            validator=lambda source, output, selected: next(validations),
+            before_image_request=lambda: request_starts.append("started"),
+        )
+
+        self.assertEqual(len(prompts), 2)
+        self.assertEqual(request_starts, ["started", "started"])
+        self.assertEqual(sources, [destination / "source-design.png"] * 2)
+        self.assertIn("exactly one mixed-breed domestic dog", prompts[0])
+        self.assertIn("never a human", prompts[0])
+        self.assertNotIn("representative Dog lover", prompts[0])
+        self.assertIn("Corrective retry", prompts[1])
+        provenance = read_json(
+            destination / "dog-mixed-breed/subject-generation.json"
+        )
+        self.assertTrue(provenance["semantic_validation"]["enabled"])
+        self.assertEqual(
+            [item["passed"] for item in provenance["semantic_validation"]["attempts"]],
+            [False, True],
+        )
+        self.assertEqual(
+            provenance["subject_contract"]["generation_description"],
+            "exactly one mixed-breed domestic dog",
+        )
+        self.assertEqual(generated[0]["subject_id"], "dog-mixed-breed")
+
+    def test_subject_generation_requeues_rate_limit_through_shared_throttle(
+        self,
+    ) -> None:
+        graduated = self.root / "static-graduated-designs"
+        destination = move_seed(
+            self.root,
+            seed_design_id="sample-design",
+            source="active",
+            target="graduated",
+        )
+        subject = Subject(
+            subject_id="dog-mixed-breed",
+            display_name="Dog lover",
+            subject_kind="dog-general",
+            subject_species="dog",
+            generation_description="exactly one mixed-breed domestic dog",
+            hero_strategy="mixed-breed-heroes",
+            collection_path="/collections/gifts-for-dog-lovers",
+        )
+        calls: list[int] = []
+        starts: list[str] = []
+        deferrals: list[float] = []
+        retry_events: list[dict[str, object]] = []
+        local_sleeps: list[float] = []
+
+        def fake_generator(source, selected, prompt, size):
+            calls.append(len(calls) + 1)
+            if len(calls) == 1:
+                raise SubjectGenerationError(
+                    "provider returned 429",
+                    retryable=True,
+                    rate_limited=True,
+                    retry_after_seconds=3.0,
+                )
+            return Image.new("RGBA", size, (10, 20, 30, 255))
+
+        generate_subject_variants(
+            graduated_root=graduated,
+            seed_design_id="sample-design",
+            subjects=[subject],
+            generator=fake_generator,
+            before_image_request=lambda: starts.append("start"),
+            provider_max_attempts=3,
+            provider_retry_base_seconds=1.0,
+            throttle_image_requests=deferrals.append,
+            image_retry_event=retry_events.append,
+            retry_sleeper=local_sleeps.append,
+        )
+
+        self.assertEqual(calls, [1, 2])
+        self.assertEqual(starts, ["start", "start"])
+        self.assertEqual(deferrals, [3.0])
+        self.assertEqual(local_sleeps, [])
+        self.assertEqual(retry_events[0]["rate_limited"], True)
+        provenance = read_json(
+            destination / "dog-mixed-breed/subject-generation.json"
+        )
+        self.assertEqual(
+            [item["outcome"] for item in provenance["provider_retry"]["requests"]],
+            ["failed", "succeeded"],
+        )
+
+    def test_openai_subject_generator_disables_hidden_retries_and_reads_throttle(
+        self,
+    ) -> None:
+        subject = Subject(
+            subject_id="dog-mixed-breed",
+            display_name="Dog lover",
+            subject_kind="dog-general",
+            subject_species="dog",
+            generation_description="exactly one mixed-breed domestic dog",
+            hero_strategy="mixed-breed-heroes",
+            collection_path="/collections/gifts-for-dog-lovers",
+        )
+        failure = RuntimeError("rate limit exceeded")
+        failure.status_code = 429  # type: ignore[attr-defined]
+        failure.code = "rate_limit_exceeded"  # type: ignore[attr-defined]
+        failure.response = SimpleNamespace(  # type: ignore[attr-defined]
+            headers={"retry-after": "7"}
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "test-key",
+                    "STATIC_PRINT_SUBJECT_MODEL": "gpt-image-2.5-sunburst",
+                },
+                clear=False,
+            ),
+            patch("openai.OpenAI") as client_type,
+            self.assertRaises(SubjectGenerationError) as caught,
+        ):
+            client_type.return_value.images.edit.side_effect = failure
+            openai_subject_generator(
+                self.inputs / "sample-design/source-design.png",
+                subject,
+                "test prompt",
+                (100, 50),
+            )
+
+        client_type.assert_called_once_with(api_key="test-key", max_retries=0)
+        self.assertTrue(caught.exception.retryable)
+        self.assertTrue(caught.exception.rate_limited)
+        self.assertEqual(caught.exception.retry_after_seconds, 7.0)
+
+    def test_cat_tongue_retry_edits_failed_candidate(self) -> None:
+        graduated = self.root / "static-graduated-designs"
+        destination = move_seed(
+            self.root,
+            seed_design_id="sample-design",
+            source="active",
+            target="graduated",
+        )
+        subject = Subject(
+            subject_id="cat",
+            display_name="Cat",
+            subject_kind="cat-general",
+            subject_species="cat",
+            generation_description="exactly one domestic cat with a representative mixed coat",
+            hero_strategy="mixed-coat-heroes",
+            collection_path="/collections/cat-gifts",
+        )
+        sources: list[Path] = []
+        prompts: list[str] = []
+        validations = iter(
+            [
+                {
+                    "passed": False,
+                    "featured_subject_species": "cat",
+                    "human_replaced_pet": False,
+                    "mouth_and_tongue_appropriate": False,
+                    "tongue_visible": True,
+                    "behavior_context": "inappropriate",
+                    "reason": "visible tongue",
+                },
+                {
+                    "passed": True,
+                    "featured_subject_species": "cat",
+                    "human_replaced_pet": False,
+                    "mouth_and_tongue_appropriate": True,
+                    "tongue_visible": False,
+                    "behavior_context": "natural",
+                    "reason": "closed feline mouth",
+                },
+            ]
+        )
+
+        def fake_generator(source, selected, prompt, size):
+            sources.append(source)
+            prompts.append(prompt)
+            return Image.new("RGBA", size, (10 * len(prompts), 20, 30, 255))
+
+        generate_subject_variants(
+            graduated_root=graduated,
+            seed_design_id="sample-design",
+            subjects=[subject],
+            generator=fake_generator,
+            validator=lambda source, output, selected: next(validations),
+        )
+
+        self.assertEqual(sources[0], destination / "source-design.png")
+        self.assertEqual(sources[1].parent.parent.resolve(), destination.resolve())
+        self.assertTrue(sources[1].parent.name.startswith(".cat.partial-"))
+        self.assertEqual(sources[1].name, "source-design.png")
+        self.assertIn("species-inappropriate mouth", prompts[1])
+        self.assertIn("natural, closed feline muzzle", prompts[1])
+        self.assertIn("Optimize the returned pixels for production printing", prompts[1])
+
+    def test_subject_review_attention_is_persistent_and_digest_bound(self) -> None:
+        graduated = self.root / "static-graduated-designs"
+        destination = move_seed(
+            self.root,
+            seed_design_id="sample-design",
+            source="active",
+            target="graduated",
+        )
+        subject = Subject(
+            subject_id="cat",
+            display_name="Cat",
+            subject_kind="cat-general",
+            subject_species="cat",
+            generation_description="exactly one domestic cat with a representative mixed coat",
+            hero_strategy="mixed-coat-heroes",
+            collection_path="/collections/cat-gifts",
+        )
+        generate_subject_variants(
+            graduated_root=graduated,
+            seed_design_id="sample-design",
+            subjects=[subject],
+            generator=lambda source, selected, prompt, size: Image.new(
+                "RGBA", size, (20, 30, 40, 255)
+            ),
+            validator=lambda source, output, selected: {
+                "passed": True,
+                "operator_review_recommended": True,
+                "behavior_context": "borderline",
+                "reason": "Open feline mouth needs operator review.",
+            },
+        )
+
+        generated = next(
+            item
+            for item in discover_designs(graduated, self.authoring)
+            if item["design_id"] == "sample-design--subject-cat"
+        )
+        self.assertEqual(
+            generated["subject_review_attention"]["behavior_context"],
+            "borderline",
+        )
+        self.assertEqual(
+            generated["subject_review_attention"]["source_sha256"],
+            generated["source_sha256"],
+        )
+
+        Image.new("RGBA", (100, 100), (90, 80, 70, 255)).save(
+            destination / "cat/source-design.png"
+        )
+        changed = next(
+            item
+            for item in discover_designs(graduated, self.authoring)
+            if item["design_id"] == "sample-design--subject-cat"
+        )
+        self.assertIsNone(changed["subject_review_attention"])
+
+    def test_openai_subject_validator_checks_featured_species(self) -> None:
+        source = self.root / "seed.png"
+        output = self.root / "subject.png"
+        Image.new("RGB", (40, 40), (50, 60, 70)).save(source)
+        Image.new("RGB", (40, 40), (20, 30, 40)).save(output)
+        subject = Subject(
+            subject_id="dog-mixed-breed",
+            display_name="Dog lover",
+            subject_kind="dog-general",
+            subject_species="dog",
+            generation_description="exactly one mixed-breed domestic dog",
+            hero_strategy="mixed-breed-heroes",
+            collection_path="/collections/gifts-for-dog-lovers",
+        )
+        response = type(
+            "Response",
+            (),
+            {
+                "output_text": json.dumps(
+                    {
+                        "featured_subject_species": "dog",
+                        "expected_subject_visible": True,
+                        "subject_identity_matches": True,
+                        "emotion_preserved": True,
+                        "facial_expression_appropriate": True,
+                        "mouth_and_tongue_appropriate": True,
+                        "tongue_visible": False,
+                        "behavior_context": "natural",
+                        "operator_review_recommended": False,
+                        "pose_appropriate": True,
+                        "tail_appropriate": True,
+                        "human_replaced_pet": False,
+                        "reason": "The principal character is a dog.",
+                    }
+                ),
+                "_request_id": "req-subject-validation",
+            },
+        )()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "test-key",
+                    "STATIC_PRINT_SUBJECT_VALIDATION_MODEL": "test-vision-model",
+                },
+                clear=False,
+            ),
+            patch("openai.OpenAI") as client_type,
+        ):
+            client_type.return_value.responses.create.return_value = response
+            validation = openai_subject_validator(source, output, subject)
+
+        self.assertTrue(validation["passed"])
+        self.assertEqual(validation["expected_species"], "dog")
+        self.assertTrue(validation["subject_identity_matches"])
+        self.assertTrue(validation["emotion_preserved"])
+        self.assertTrue(validation["mouth_and_tongue_appropriate"])
+        request = client_type.return_value.responses.create.call_args.kwargs
+        self.assertEqual(request["model"], "test-vision-model")
+        self.assertFalse(request["store"])
+        self.assertEqual(request["input"][0]["content"][1]["detail"], "low")
+        self.assertEqual(request["input"][0]["content"][2]["detail"], "low")
+        self.assertEqual(
+            request["text"]["format"]["name"], "subject_preview_validation"
+        )
+
+    def test_subject_prompt_translates_emotion_to_species_behavior(self) -> None:
+        cat = Subject(
+            subject_id="cat",
+            display_name="Cat",
+            subject_kind="cat-general",
+            subject_species="cat",
+            generation_description="exactly one domestic cat with a representative mixed coat",
+            hero_strategy="mixed-coat-heroes",
+            collection_path="/collections/cat-gifts",
+        )
+        dog = Subject(
+            subject_id="dog-corgi",
+            display_name="Corgi",
+            subject_kind="dog-breed",
+            subject_species="dog",
+            generation_description="exactly one Corgi dog",
+            hero_strategy="breed-specific",
+            collection_path="/collections/corgi-gifts",
+        )
+        cat_value = subject_prompt(cat, canvas_policy=OPAQUE_FULL_BLEED)
+        dog_value = subject_prompt(dog, canvas_policy=OPAQUE_FULL_BLEED)
+        self.assertIn("Preserve the seed pet's emotional intent", cat_value)
+        self.assertIn("Prefer a naturally closed, relaxed feline mouth", cat_value)
+        self.assertIn("An open cat mouth is allowed", cat_value)
+        self.assertIn("any visible tongue must belong to that specific feline action", cat_value)
+        self.assertIn("cat-appropriate eyes, ears, whiskers", cat_value)
+        self.assertIn("breed-appropriate ears, mouth, tongue", dog_value)
+        self.assertIn("do not force a tongue-out pose", dog_value)
+        self.assertIn("Optimize the returned pixels for production printing", dog_value)
+        self.assertIn("solid fully opaque pixels inside visible artwork", dog_value)
+        self.assertIn("avoid blur, compression artifacts, color halos", dog_value)
+        self.assertNotIn("pet pose, crop, expression", cat_value)
+
+    def test_print_readiness_detects_translucent_art_and_upscale(self) -> None:
+        solid = Image.new("RGBA", (20, 20), (40, 50, 60, 255))
+        solid_report = print_readiness_report(
+            solid,
+            expected_size=(20, 20),
+            canvas_policy=OPAQUE_FULL_BLEED,
+        )
+        self.assertTrue(solid_report["print_ready"])
+
+        translucent = Image.new("RGBA", (20, 20), (40, 50, 60, 80))
+        translucent.putpixel((0, 0), (0, 0, 0, 0))
+        warning_report = print_readiness_report(
+            translucent,
+            expected_size=(20, 20),
+            canvas_policy="preserve-transparency",
+            upscale_ratio=2.5,
+        )
+        self.assertFalse(warning_report["print_ready"])
+        self.assertGreater(
+            warning_report["pixel_percent"]["partial_alpha_visible"], 99
+        )
+        self.assertTrue(
+            any("enlarged" in item for item in warning_report["warnings"])
+        )
+
+    def test_cat_validator_allows_borderline_expression_for_operator_review(self) -> None:
+        source = self.root / "cat-seed.png"
+        output = self.root / "cat-subject.png"
+        Image.new("RGB", (40, 40), (50, 60, 70)).save(source)
+        Image.new("RGB", (40, 40), (20, 30, 40)).save(output)
+        subject = Subject(
+            subject_id="cat",
+            display_name="Cat",
+            subject_kind="cat-general",
+            subject_species="cat",
+            generation_description="exactly one domestic cat with a representative mixed coat",
+            hero_strategy="mixed-coat-heroes",
+            collection_path="/collections/cat-gifts",
+        )
+        response = type(
+            "Response",
+            (),
+            {
+                "output_text": json.dumps(
+                    {
+                        "featured_subject_species": "cat",
+                        "expected_subject_visible": True,
+                        "subject_identity_matches": True,
+                        "emotion_preserved": True,
+                        "facial_expression_appropriate": True,
+                        "mouth_and_tongue_appropriate": False,
+                        "tongue_visible": True,
+                        "behavior_context": "borderline",
+                        "operator_review_recommended": True,
+                        "pose_appropriate": True,
+                        "tail_appropriate": True,
+                        "human_replaced_pet": False,
+                        "reason": "A brief feline blep is plausible but needs operator review.",
+                    }
+                ),
+                "_request_id": "req-cat-tongue-validation",
+            },
+        )()
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=False),
+            patch("openai.OpenAI") as client_type,
+        ):
+            client_type.return_value.responses.create.return_value = response
+            validation = openai_subject_validator(source, output, subject)
+
+        self.assertTrue(validation["passed"])
+        self.assertTrue(validation["tongue_visible"])
+        self.assertEqual(validation["behavior_context"], "borderline")
+        self.assertTrue(validation["operator_review_recommended"])
 
     def test_flat_review_collection_import_preserves_original(self) -> None:
         collection = self.root / "Holiday Design Collection"
@@ -1700,6 +2789,8 @@ class StaticPrintWorkflowTest(unittest.TestCase):
             subject_id="cat",
             display_name="Cat",
             subject_kind="pet-kind",
+            subject_species="cat",
+            generation_description="exactly one domestic cat",
             hero_strategy="mixed-coat",
             collection_path="/collections/cat-gifts",
         )
@@ -1971,6 +3062,43 @@ class StaticPrintWorkflowTest(unittest.TestCase):
                 subject["collection_path"],
                 f"/collections/{subject['collection_handle']}",
             )
+            self.assertIn(subject["subject_species"], {"dog", "cat"})
+            self.assertTrue(subject["generation_description"])
+            self.assertRegex(
+                subject["generation_description"].lower(),
+                rf"\b{subject['subject_species']}\b",
+            )
+        mixed_breed = next(
+            subject
+            for subject in loaded_subjects
+            if subject.subject_id == "dog-mixed-breed"
+        )
+        self.assertEqual(mixed_breed.display_name, "Dog lover")
+        self.assertEqual(mixed_breed.subject_species, "dog")
+        self.assertEqual(
+            mixed_breed.generation_description,
+            "exactly one mixed-breed domestic dog",
+        )
+
+    def test_static_ui_supports_exact_subject_and_product_filters(self) -> None:
+        project = Path(__file__).resolve().parents[1]
+        html = (project / "src/pawmarvel_static_print/static/index.html").read_text(
+            encoding="utf-8"
+        )
+        javascript = (
+            project / "src/pawmarvel_static_print/static/app.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn('id="subject-filter"', html)
+        self.assertIn('id="product-filter"', html)
+        self.assertIn("design.subject_id !== subject", javascript)
+        self.assertIn("function activeProductFilter()", javascript)
+        self.assertIn("function visibleProductProfiles()", javascript)
+        self.assertIn("item.product_profile_id === activeProductFilter()", javascript)
+        self.assertIn("function printReadinessBadge(report)", javascript)
+        self.assertIn("Not print-ready", javascript)
+        self.assertIn('id="history-cleanup-controls"', html)
+        self.assertIn("function renderHistoryCleanup()", javascript)
+        self.assertIn("/api/operator/history-cleanup-execute", javascript)
 
     def test_checked_in_profiles_match_public_schema(self) -> None:
         project = Path(__file__).resolve().parents[1]

@@ -11,14 +11,19 @@ const batchProfileIds = new Set();
 const productPlans = new Map();
 const selectedBundleCandidates = new Map();
 const selectedLifecycleSeeds = new Set();
+const selectedHistoryCleanupDesignIds = new Set();
 const pendingReviewerFeedback = new Map();
 const expandedProductCoverage = new Set();
 const expectedOperationIds = new Set();
+const terminalOperationIds = new Set();
 const observedOperationIds = new Set();
 const operationCompletedCounts = new Map();
 let operationPollTimer = null;
 let operationPollRunning = false;
+let operationPollGeneration = 0;
+let operationFeedBootstrapped = false;
 let publicationRefreshTimer = null;
+let releaseRequestInFlight = false;
 
 const $ = (id) => document.getElementById(id);
 const node = (tag, className, text) => {
@@ -27,6 +32,17 @@ const node = (tag, className, text) => {
   if (text !== undefined) element.textContent = text;
   return element;
 };
+
+function publicationActionsReady() {
+  const publication = currentState?.publication;
+  const status = publication?.status;
+  return Boolean(
+    publication?.enabled
+    && status?.available
+    && !status?.refreshing
+    && !status?.stale,
+  );
+}
 
 function errorRecommendation(message) {
   const value = String(message).toLocaleLowerCase();
@@ -172,16 +188,38 @@ async function runOperationAction(operation, action) {
 
 async function pollOperations() {
   if (!operatorMode || operationPollRunning) return;
+  operationPollTimer = null;
   operationPollRunning = true;
-  let keepPolling = expectedOperationIds.size > 0;
+  const pollGeneration = operationPollGeneration;
+  const expected = [...expectedOperationIds];
+  const terminal = [...terminalOperationIds];
+  const targetOperationId = expected.at(-1) || terminal.at(-1) || null;
+  let keepPolling = expected.length > 0;
   try {
-    const value = await request("/api/operator/operations");
+    const query = targetOperationId
+      ? `?operation_id=${encodeURIComponent(targetOperationId)}`
+      : "";
+    const value = await request(`/api/operator/operations${query}`);
+    if (pollGeneration !== operationPollGeneration) return;
     const operations = value.operations || [];
     const running = operations.filter(item => item.status === "running");
-    const tracked = running[0]
-      || operations.find(item => expectedOperationIds.has(item.operation_id))
-      || operations.find(item => ["failed", "interrupted"].includes(item.status))
-      || operations.find(item => !observedOperationIds.has(item.operation_id));
+    let tracked = null;
+    if (targetOperationId) {
+      tracked = operations.find(item => item.operation_id === targetOperationId) || null;
+      if (!tracked && terminalOperationIds.has(targetOperationId)) {
+        // The request may have failed before the server created its durable
+        // operation. Preserve the action's own error instead of replacing it
+        // with unrelated historical progress.
+        terminalOperationIds.delete(targetOperationId);
+      }
+    } else {
+      tracked = running[0]
+        || (!operationFeedBootstrapped
+          ? operations.find(item => ["failed", "interrupted"].includes(item.status))
+            || operations.find(item => !observedOperationIds.has(item.operation_id))
+          : null);
+      operationFeedBootstrapped = true;
+    }
     if (tracked) {
       renderOperationStatus(tracked);
       const previous = operationCompletedCounts.get(tracked.operation_id) || 0;
@@ -189,41 +227,58 @@ async function pollOperations() {
       if ((tracked.completed_count || 0) > previous && tracked.kind === "product-generation") {
         await loadState();
       }
+      if (tracked.status !== "running") {
+        expectedOperationIds.delete(tracked.operation_id);
+        terminalOperationIds.delete(tracked.operation_id);
+      }
     }
-    keepPolling = keepPolling || running.length > 0;
+    keepPolling = expectedOperationIds.size > 0
+      || terminalOperationIds.size > 0
+      || (!targetOperationId && running.length > 0);
   } catch (error) {
-    if (expectedOperationIds.size) {
+    if (pollGeneration !== operationPollGeneration) return;
+    if (expectedOperationIds.size || terminalOperationIds.size) {
       showStatus(`Operation progress unavailable: ${error.message}`, true);
       keepPolling = true;
     }
   } finally {
     operationPollRunning = false;
     clearTimeout(operationPollTimer);
-    operationPollTimer = keepPolling
-      ? setTimeout(pollOperations, 1000)
-      : null;
+    operationPollTimer = null;
+    if (pollGeneration !== operationPollGeneration) {
+      operationPollTimer = setTimeout(pollOperations, 0);
+    } else if (keepPolling) {
+      operationPollTimer = setTimeout(pollOperations, 1000);
+    }
   }
 }
 
 function monitorOperation(operationId) {
   expectedOperationIds.add(operationId);
+  terminalOperationIds.delete(operationId);
+  observedOperationIds.delete(operationId);
+  operationPollGeneration += 1;
   clearTimeout(operationPollTimer);
-  operationPollTimer = setTimeout(pollOperations, 150);
+  operationPollTimer = null;
+  if (!operationPollRunning) operationPollTimer = setTimeout(pollOperations, 150);
 }
 
 function finishOperationMonitor(operationId) {
   expectedOperationIds.delete(operationId);
+  terminalOperationIds.add(operationId);
+  operationPollGeneration += 1;
   // Force one terminal refresh so the durable count summary and recent output
   // replace the temporary one-line request message.
   observedOperationIds.delete(operationId);
-  if (!operationPollTimer && !operationPollRunning) {
-    operationPollTimer = setTimeout(pollOperations, 0);
-  }
+  clearTimeout(operationPollTimer);
+  operationPollTimer = null;
+  if (!operationPollRunning) operationPollTimer = setTimeout(pollOperations, 0);
 }
 
 async function request(url, options = {}) {
   const response = await fetch(url, {
     credentials: "same-origin",
+    cache: "no-store",
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
@@ -270,9 +325,14 @@ function artifactImage(url, alt) {
   return image;
 }
 
+function releaseState(design) {
+  const status = currentState?.publication?.status;
+  if (!status?.available && !status?.stale) return "unknown";
+  return design.publication?.entries?.length ? "released" : "unreleased";
+}
+
 function isReleased(design) {
-  return design.operator_decision?.decision === "approved"
-    && Boolean(design.publication?.current_entries?.length);
+  return releaseState(design) === "released";
 }
 
 function summaryBadges(summary) {
@@ -326,6 +386,18 @@ function artifactTransparencyBadge(report, canvasPolicy) {
   );
 }
 
+function printReadinessBadge(report) {
+  if (!report) return null;
+  if (report.print_ready) {
+    return node("span", "badge pass", "Pixel preflight passed");
+  }
+  const finding = [...(report.failures || []), ...(report.warnings || [])][0]
+    || "Inspect pixels at 100% zoom before approval";
+  const badge = node("span", "badge attention", "Not print-ready · operator follow-up");
+  badge.title = finding;
+  return badge;
+}
+
 function intakeBadge(design) {
   if (!design.intake) return null;
   return node("span", "badge", `collection: ${design.intake.collection_id}`);
@@ -333,6 +405,28 @@ function intakeBadge(design) {
 
 function designCollection(design) {
   return design.intake?.collection_id || "@manual";
+}
+
+function reviewAttentionItems(design, { kinds = null, productProfileId = null, activeOnly = false } = {}) {
+  return (design?.review_attention || []).filter(item => {
+    if (activeOnly && !item.active) return false;
+    if (kinds && !kinds.includes(item.kind)) return false;
+    if (productProfileId && item.product_profile_id && item.product_profile_id !== productProfileId) return false;
+    return true;
+  });
+}
+
+function reviewAttentionNotice(design, options = {}) {
+  const items = reviewAttentionItems(design, options);
+  if (!items.length) return null;
+  const panel = node("div", "review-attention");
+  for (const item of items) {
+    panel.append(
+      node("span", `badge ${item.active ? "attention" : "pass"}`, item.label || "Review attention"),
+      node("p", "review-attention-reason", item.reason || "Inspect this artifact before advancing."),
+    );
+  }
+  return panel;
 }
 
 function matchesReviewFilter(design, value) {
@@ -349,23 +443,30 @@ function matchesReviewFilter(design, value) {
   if (value === "subject-pending") return design.subject_id && !design.operator_decision;
   const released = isReleased(design);
   if (value === "released") return released;
-  if (value === "unreleased") return !released;
+  if (value === "unreleased") return releaseState(design) === "unreleased";
   return true;
 }
 
 function filteredDesigns(items) {
   const collection = $("collection-filter").value;
+  const subject = $("subject-filter").value;
+  const product = activeProductFilter();
   const query = $("design-filter").value.trim().toLocaleLowerCase();
   const transparency = $("transparency-filter").value;
   const review = $("review-filter").value;
+  const attention = operatorMode ? $("attention-filter").value : "";
   const selection = operatorMode && activeOperatorTab !== "released"
     ? $("selection-filter").value
     : "";
   return items.filter(design => {
     if (collection && designCollection(design) !== collection) return false;
+    if (subject && design.subject_id !== subject) return false;
+    if (product && !design.subject_id) return false;
     const searchable = `${design.design_id} ${design.seed_design_id} ${design.subject_id || ""} ${design.intake?.collection_id || "manual"}`.toLocaleLowerCase();
     if (query && !searchable.includes(query)) return false;
     if (transparency && design.transparency?.result !== transparency) return false;
+    if (attention === "needs-attention" && !design.needs_review_attention) return false;
+    if (attention === "no-attention" && design.needs_review_attention) return false;
     const selected = isDesignSelected(design);
     if (selection === "selected" && !selected) return false;
     if (selection === "unselected" && selected) return false;
@@ -394,6 +495,66 @@ function populateCollectionFilter() {
     ...values.map(value => new Option(value === "@manual" ? "Manual intake" : value, value)),
   );
   if (values.includes(current)) select.value = current;
+}
+
+function populateSubjectFilter() {
+  const select = $("subject-filter");
+  const current = select.value;
+  const available = new Set(
+    currentState.designs
+      .map(design => design.subject_id)
+      .filter(Boolean),
+  );
+  const catalog = new Map(
+    (currentState.subjects || []).map(subject => [subject.subject_id, subject]),
+  );
+  const values = [...available].sort((left, right) => {
+    const leftLabel = catalog.get(left)?.display_name || left;
+    const rightLabel = catalog.get(right)?.display_name || right;
+    return leftLabel.localeCompare(rightLabel) || left.localeCompare(right);
+  });
+  select.replaceChildren(
+    new Option("All subjects", ""),
+    ...values.map(value => {
+      const label = catalog.get(value)?.display_name;
+      return new Option(label ? `${label} (${value})` : value, value);
+    }),
+  );
+  if (values.includes(current)) select.value = current;
+  select.disabled = values.length === 0;
+  select.title = values.length
+    ? "Show designs for one exact subject"
+    : "No generated subject variants are available in this view";
+}
+
+function populateProductFilter() {
+  const select = $("product-filter");
+  const current = select.value;
+  const profiles = [...(currentState.profiles || [])].sort((left, right) =>
+    left.product_profile_id.localeCompare(right.product_profile_id)
+  );
+  select.replaceChildren(
+    new Option("All products", ""),
+    ...profiles.map(profile => new Option(
+      `${profile.product_profile_id} (${profile.preview.width}×${profile.preview.height} preview)`,
+      profile.product_profile_id,
+    )),
+  );
+  if (profiles.some(profile => profile.product_profile_id === current)) {
+    select.value = current;
+  }
+}
+
+function activeProductFilter() {
+  if (!operatorMode || !["graduated", "released"].includes(activeOperatorTab)) return "";
+  return $("product-filter").value;
+}
+
+function visibleProductProfiles() {
+  const selected = activeProductFilter();
+  return selected
+    ? currentState.profiles.filter(profile => profile.product_profile_id === selected)
+    : currentState.profiles;
 }
 
 function updateFilterCount(visible, total) {
@@ -457,6 +618,12 @@ function reconcileSelections() {
   const subjectIds = new Set(currentState.subjects.map(subject => subject.subject_id));
   for (const subjectId of batchSubjectIds) {
     if (!subjectIds.has(subjectId)) batchSubjectIds.delete(subjectId);
+  }
+  const cleanupDesigns = new Set(
+    (currentState.history_cleanup?.designs || []).map(item => item.design_id),
+  );
+  for (const designId of selectedHistoryCleanupDesignIds) {
+    if (!cleanupDesigns.has(designId)) selectedHistoryCleanupDesignIds.delete(designId);
   }
 }
 
@@ -846,7 +1013,7 @@ function productProfileSnapshot(design, profileId) {
 }
 
 function productCoverage(design) {
-  const snapshots = currentState.profiles.map(profile => ({
+  const snapshots = visibleProductProfiles().map(profile => ({
     profile,
     snapshot: productProfileSnapshot(design, profile.product_profile_id),
   }));
@@ -1025,8 +1192,12 @@ function productPlanControls(design) {
       actions.append(releaseCandidateControl(snapshot.latestCandidate));
       const publishOne = node("button", "compact", "Publish");
       publishOne.type = "button";
-      publishOne.disabled = !currentState.publication?.enabled;
-      if (publishOne.disabled) publishOne.title = "Configure S3 and restart the server before publishing.";
+      publishOne.disabled = releaseRequestInFlight || !publicationActionsReady();
+      if (publishOne.disabled) {
+        publishOne.title = currentState.publication?.enabled
+          ? "Wait for authoritative S3 release status to finish refreshing."
+          : "Configure S3 and restart the server before publishing.";
+      }
       publishOne.addEventListener("click", () => publishCandidate(snapshot.latestCandidate, publishOne));
       actions.append(publishOne);
     }
@@ -1129,6 +1300,11 @@ function referenceCheckpoint(seed, includeGeneration) {
   const intake = intakeBadge(seed);
   if (intake) badges.append(intake);
   cell.append(badges);
+  const attention = reviewAttentionNotice(seed, {
+    kinds: ["reference-feedback"],
+    activeOnly: true,
+  });
+  if (attention) cell.append(attention);
   if (includeGeneration) {
     const selection = node("label", "lifecycle-selection", "Select reference for batch subject generation");
     const checkbox = node("input");
@@ -1166,6 +1342,12 @@ function subjectCheckpoint(design, { released = false } = {}) {
     node("strong", "checkpoint-id", design.subject_id),
     node("p", "meta checkpoint-id", design.design_id),
   );
+  const attention = reviewAttentionNotice(design, {
+    kinds: ["subject-behavior", "print-quality"],
+  });
+  if (attention) cell.append(attention);
+  const pixelBadge = printReadinessBadge(design.subject_print_readiness);
+  if (pixelBadge) cell.append(pixelBadge);
   if (!released) {
     cell.append(subjectSelectionControl(design), subjectDecisionControls(design));
   } else {
@@ -1202,6 +1384,8 @@ function productEvidence(version, output, design) {
     node("figcaption", "", `Preview · ${output.preview.width}×${output.preview.height}`),
     artifactTransparencyBadge(output.preview.transparency, output.canvas_policy),
   );
+  const previewReadiness = printReadinessBadge(output.preview.print_readiness);
+  if (previewReadiness) preview.append(previewReadiness);
   const gallery = node("div", "product-artifacts");
   gallery.append(preview);
   for (const print of output.prints) {
@@ -1211,9 +1395,26 @@ function productEvidence(version, output, design) {
       node("figcaption", "", `Print · ${print.target_id} · ${print.width}×${print.height}`),
       artifactTransparencyBadge(print.transparency, output.canvas_policy),
     );
+    const printReadiness = printReadinessBadge(print.print_readiness);
+    if (printReadiness) figure.append(printReadiness);
     gallery.append(figure);
   }
   block.append(gallery);
+  if (output.warnings?.length) {
+    const warnings = node("details", "artifact-warnings");
+    warnings.open = true;
+    warnings.append(node("summary", "", `${output.warnings.length} generation warning(s)`));
+    const list = node("ul");
+    for (const warning of output.warnings) list.append(node("li", "", warning));
+    warnings.append(list);
+    block.append(warnings);
+  }
+  const attention = reviewAttentionNotice(design, {
+    kinds: ["subject-behavior", "print-quality", "product-artifact", "product-print-quality"],
+    productProfileId: output.product_profile_id,
+    activeOnly: true,
+  });
+  if (attention) block.append(attention);
   const candidate = design.bundle_candidates.find(item =>
     item.version_id === version.version_id
       && item.product_profile_id === output.product_profile_id
@@ -1235,8 +1436,11 @@ function productCheckpoint(design) {
   } else {
     cell.append(node("p", "hint", "Approve the subject preview before generating product outputs."));
   }
+  const product = activeProductFilter();
   const outputs = design.versions.flatMap(version =>
-    (version.profile_outputs || []).map(output => ({ version, output })),
+    (version.profile_outputs || [])
+      .filter(output => !product || output.product_profile_id === product)
+      .map(output => ({ version, output })),
   );
   if (!outputs.length) {
     cell.prepend(node("span", "stage-state pending", "Step 3 · product generation required"));
@@ -1262,23 +1466,34 @@ function workflowStatusCheckpoint(design) {
     return cell;
   }
   const coverage = productCoverage(design);
+  const product = activeProductFilter();
+  const relevantCandidates = design.bundle_candidates.filter(
+    candidate => !product || candidate.product_profile_id === product,
+  );
+  const attention = reviewAttentionNotice(design, { activeOnly: true });
+  if (attention) cell.append(attention);
   cell.append(node(
     "p",
     "product-coverage-summary",
     `${coverage.active}/${coverage.snapshots.length} products active · ${coverage.retired} retired · ${coverage.ready} ready · ${coverage.missing} not generated${coverage.attention ? ` · ${coverage.attention} need attention` : ""}${coverage.unknown ? ` · ${coverage.unknown} S3 status unknown` : ""}`,
   ));
+  if (design.needs_review_attention) {
+    cell.prepend(node("span", "stage-state attention", "Attention required"));
+  }
   if (coverage.ready) {
     cell.prepend(node("span", "stage-state ready", "Next: publish ready products"));
     cell.append(node("p", "hint", "Review the product evidence, then use Publish in the product list or select several candidates for batch publication."));
-  } else if (isReleased(design)) {
+  } else if (coverage.published) {
     cell.append(node("span", "stage-state complete", "Released"));
-    for (const entry of design.publication.current_entries || []) {
+    for (const entry of (design.publication.current_entries || []).filter(
+      item => !activeProductFilter() || item.product_profile_id === activeProductFilter(),
+    )) {
       cell.append(node("p", "meta", `${entry.product_profile_id} · ${entry.version_id} · ${entry.release_id}`));
     }
     cell.append(node("p", "hint", coverage.missing
       ? "Select missing products in the product list and generate them to extend released coverage."
       : "All configured products are released. Generate a new version only when an improvement is needed."));
-  } else if (design.bundle_candidates.length) {
+  } else if (relevantCandidates.length) {
     cell.append(
       node("span", "stage-state ready", "Ready for release"),
       node("p", "hint", "Select a product candidate, validate the release, then publish it."),
@@ -1335,7 +1550,10 @@ function workflowTable(seeds, subjects, { released = false } = {}) {
     if (!seed) continue;
     const rows = variants.length ? variants : [null];
     rows.forEach((design, index) => {
-      const row = node("tr", design && isDesignSelected(design) ? "selected" : "");
+      const rowClasses = [];
+      if (design && isDesignSelected(design)) rowClasses.push("selected");
+      if (design?.needs_review_attention) rowClasses.push("needs-attention");
+      const row = node("tr", rowClasses.join(" "));
       const referenceCell = node("td");
       referenceCell.append(referenceCheckpoint(seed, index === 0));
       const subjectCell = node("td"); subjectCell.append(subjectCheckpoint(design, { released }));
@@ -1415,10 +1633,15 @@ function operatorCard(design) {
   const intake = intakeBadge(design);
   if (intake) badges.append(intake);
   if (design.subject_id) badges.append(node("span", "badge", `subject: ${design.subject_id}`));
+  if (design.needs_review_attention) {
+    badges.append(node("span", "badge attention", "Needs review attention"));
+  }
   if (design.publication?.release_ids.length) {
     badges.append(node("span", "badge pass", `released · ${design.publication.product_profile_ids.length} profile(s)`));
   }
   card.append(badges, feedbackBlock(design));
+  const attention = reviewAttentionNotice(design, { activeOnly: true });
+  if (attention) card.append(attention);
   if (!design.subject_id) {
     card.append(seedActions(design));
     if (design.pool === "graduated") card.append(subjectGenerationControls(design));
@@ -1469,7 +1692,9 @@ function currentOperatorPoolItems() {
   if (activeOperatorTab === "graduated") {
     const graduated = currentState.designs.filter(item => item.pool === "graduated");
     const subjects = graduated.filter(item => item.subject_id);
-    const unfinishedSubjects = subjects.filter(item => !isReleased(item));
+    const unfinishedSubjects = subjects.filter(
+      item => releaseState(item) === "unreleased",
+    );
     const unfinishedSeedIds = new Set(unfinishedSubjects.map(item => item.seed_design_id));
     const seedIdsWithSubjects = new Set(subjects.map(item => item.seed_design_id));
     const pendingSeeds = graduated.filter(item =>
@@ -1497,6 +1722,121 @@ function compactSelection(label, values) {
   return `${label}: ${visible.join(", ")}${selected.length > visible.length ? ` +${selected.length - visible.length} more` : ""}`;
 }
 
+function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let amount = bytes / 1024;
+  let index = 0;
+  while (amount >= 1024 && index < units.length - 1) {
+    amount /= 1024;
+    index += 1;
+  }
+  return `${amount.toFixed(amount >= 10 ? 1 : 2)} ${units[index]}`;
+}
+
+function filteredHistoryCleanupDesigns() {
+  const proposal = currentState?.history_cleanup;
+  if (!proposal) return [];
+  const pool = $("history-cleanup-pool-filter").value;
+  const product = $("history-cleanup-product-filter").value;
+  const query = $("history-cleanup-design-filter").value.trim().toLocaleLowerCase();
+  const selection = $("history-cleanup-selection-filter").value;
+  return (proposal.designs || []).filter(item => {
+    if (pool && item.lifecycle !== pool) return false;
+    if (product && !item.versions.some(version => version.product_profile_id === product)) return false;
+    const searchable = `${item.design_id} ${item.seed_design_id} ${item.subject_id || ""}`.toLocaleLowerCase();
+    if (query && !searchable.includes(query)) return false;
+    const selected = selectedHistoryCleanupDesignIds.has(item.design_id);
+    if (selection === "selected" && !selected) return false;
+    if (selection === "unselected" && selected) return false;
+    return true;
+  });
+}
+
+function renderHistoryCleanup() {
+  const panel = $("history-cleanup-controls");
+  panel.classList.toggle("hidden", activeOperatorTab !== "abandoned");
+  if (activeOperatorTab !== "abandoned") return;
+  const proposal = currentState.history_cleanup;
+  const container = $("history-cleanup-proposal");
+  container.replaceChildren();
+  const productFilter = $("history-cleanup-product-filter");
+  const selectedProduct = productFilter.value;
+  const products = proposal
+    ? [...new Set(proposal.designs.flatMap(item => item.versions.map(version => version.product_profile_id)))].sort()
+    : [];
+  productFilter.replaceChildren(
+    new Option("All products", ""),
+    ...products.map(value => new Option(value, value)),
+  );
+  if (products.includes(selectedProduct)) productFilter.value = selectedProduct;
+  if (!proposal) {
+    $("history-cleanup-stat").textContent = "No proposal";
+    $("history-cleanup-summary").textContent = "Generate a read-only proposal to inventory reclaimable authoring history.";
+    $("execute-history-cleanup").disabled = true;
+    return;
+  }
+  const executed = Boolean(proposal.receipt);
+  const visible = filteredHistoryCleanupDesigns();
+  const selected = proposal.designs.filter(item => selectedHistoryCleanupDesignIds.has(item.design_id));
+  const selectedBytes = selected.reduce((total, item) => total + item.bytes, 0);
+  $("history-cleanup-stat").textContent = executed
+    ? `${proposal.receipt.removed_version_count} versions removed · ${proposal.receipt.status}`
+    : `${proposal.design_count} designs · ${formatBytes(proposal.reclaimable_bytes)}`;
+  $("history-cleanup-summary").textContent = executed
+    ? `Proposal ${proposal.proposal_id} execution is ${proposal.receipt.status}; reclaimed ${formatBytes(proposal.receipt.reclaimed_bytes)}.${proposal.receipt.error ? ` Error: ${proposal.receipt.error}.` : ""} Generate a new proposal to rescan the workspace before any further cleanup.`
+    : `Proposal ${proposal.proposal_id} · showing ${visible.length} of ${proposal.design_count} designs · ${selected.length} selected (${formatBytes(selectedBytes)}). Paths and content hashes will be revalidated immediately before deletion.`;
+  $("execute-history-cleanup").disabled = executed || selected.length === 0;
+  if (!visible.length) {
+    container.append(node("p", "meta", proposal.design_count ? "No cleanup candidates match these filters." : "No unused authoring history was found."));
+    return;
+  }
+  const table = node("table", "history-cleanup-table");
+  const head = node("thead");
+  const header = node("tr");
+  for (const label of ["Select", "Lifecycle / design", "Unused versions", "Reclaimable"]) {
+    header.append(node("th", "", label));
+  }
+  head.append(header);
+  const body = node("tbody");
+  for (const item of visible) {
+    const row = node("tr", selectedHistoryCleanupDesignIds.has(item.design_id) ? "selected" : "");
+    const chooseCell = node("td");
+    const choose = node("input");
+    choose.type = "checkbox";
+    choose.checked = selectedHistoryCleanupDesignIds.has(item.design_id);
+    choose.setAttribute("aria-label", `Select cleanup history for ${item.design_id}`);
+    choose.addEventListener("change", () => {
+      if (choose.checked) selectedHistoryCleanupDesignIds.add(item.design_id);
+      else selectedHistoryCleanupDesignIds.delete(item.design_id);
+      renderHistoryCleanup();
+    });
+    chooseCell.append(choose);
+    const identity = node("td");
+    identity.append(
+      node("span", "badge", item.lifecycle),
+      node("strong", "cleanup-design-id", item.design_id),
+      node("span", "meta", item.subject_id ? `Subject: ${item.subject_id}` : "Seed history"),
+    );
+    const history = node("td");
+    const list = node("ul", "cleanup-version-list");
+    for (const version of item.versions) {
+      list.append(node(
+        "li",
+        "",
+        `${version.product_profile_id} / ${version.version_id} · ${formatBytes(version.bytes)} · ${version.relative_path} · ${version.reason}`,
+      ));
+    }
+    history.append(list);
+    const size = node("td", "", `${formatBytes(item.bytes)} · ${item.files} files`);
+    row.append(chooseCell, identity, history, size);
+    body.append(row);
+  }
+  table.append(head, body);
+  container.append(table);
+}
+
 function updateBatchToolbar() {
   if (!operatorMode || !currentState) return;
   const count = currentTabSelectionCount();
@@ -1521,10 +1861,11 @@ function updateBatchToolbar() {
   $("rework-subjects-selected").disabled = activeOperatorTab !== "graduated" || count === 0;
   $("abandon-subjects-selected").disabled = activeOperatorTab !== "graduated" || count === 0;
   $("batch-toolbar").classList.toggle("hidden", activeOperatorTab === "released");
+  renderHistoryCleanup();
   $("selection-filter-control").classList.toggle("hidden", activeOperatorTab === "released");
   $("subject-batch-stat").textContent = (
     `${selectedGenerationSeedIds.size} references × ${batchSubjectIds.size} subjects = `
-    + `${selectedGenerationSeedIds.size * batchSubjectIds.size} calls`
+    + `${selectedGenerationSeedIds.size * batchSubjectIds.size} base calls`
   );
   $("subject-batch-selection").textContent = (
     `${compactSelection("References", selectedGenerationSeedIds)} · `
@@ -1547,8 +1888,9 @@ function updateBatchToolbar() {
   );
   $("generate-subjects-batch").disabled = !selectedGenerationSeedIds.size || !batchSubjectIds.size;
   $("generate").disabled = !selectedPrintDesignIds.size || !batchProfileIds.size;
-  $("validate-release").disabled = selectedBundleCandidates.size === 0;
-  $("publish-release").disabled = selectedBundleCandidates.size === 0;
+  const releaseActionsReady = publicationActionsReady();
+  $("validate-release").disabled = releaseRequestInFlight || !releaseActionsReady || selectedBundleCandidates.size === 0;
+  $("publish-release").disabled = releaseRequestInFlight || !releaseActionsReady || selectedBundleCandidates.size === 0;
   const poolItems = currentOperatorPoolItems();
   updateFilterCount(filteredDesigns(poolItems).length, poolItems.length);
 }
@@ -1582,8 +1924,10 @@ function visibleReferenceSeedIds() {
 
 function selectVisibleReleaseCandidates() {
   let added = 0;
+  const product = activeProductFilter();
   for (const design of filteredDesigns(currentOperatorPoolItems())) {
     for (const candidate of design.bundle_candidates || []) {
+      if (product && candidate.product_profile_id !== product) continue;
       const alreadyPublished = (design.publication?.current_entries || []).some(entry =>
         entry.version_id === candidate.version_id
           && entry.product_profile_id === candidate.product_profile_id
@@ -1669,6 +2013,71 @@ async function transitionSelected(action) {
   finally { finishOperationMonitor(operationId); button.disabled = false; }
 }
 
+async function generateHistoryCleanupProposal() {
+  const button = $("generate-history-cleanup");
+  button.disabled = true;
+  selectedHistoryCleanupDesignIds.clear();
+  showStatus("Scanning local authoring versions and release references…");
+  try {
+    const result = await request("/api/operator/history-cleanup-proposal", {
+      method: "POST",
+      body: "{}",
+    });
+    showStatus(
+      `Cleanup proposal ${result.proposal_id} generated · ${result.design_count} designs · `
+      + `${result.version_count} unused versions · ${formatBytes(result.reclaimable_bytes)} reclaimable.`,
+    );
+    await loadState();
+    $("history-cleanup-controls").open = true;
+  } catch (error) {
+    showStatus(`Cleanup proposal failed: ${error.message}`, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function executeHistoryCleanup() {
+  const proposal = currentState.history_cleanup;
+  if (!proposal || proposal.receipt) {
+    return showStatus("Generate a current cleanup proposal first.", true);
+  }
+  const selected = proposal.designs.filter(item => selectedHistoryCleanupDesignIds.has(item.design_id));
+  if (!selected.length) return showStatus("Select at least one cleanup candidate.", true);
+  const versions = selected.reduce((total, item) => total + item.versions.length, 0);
+  const bytes = selected.reduce((total, item) => total + item.bytes, 0);
+  if (!window.confirm(
+    `Permanently delete ${versions} unreferenced authoring version(s) for ${selected.length} design(s) and reclaim ${formatBytes(bytes)}? Current and released artifacts are protected, but deleted local history cannot be restored.`,
+  )) return;
+  const button = $("execute-history-cleanup");
+  const operationId = newOperationId("history-cleanup");
+  button.disabled = true;
+  showStatus(`Cleaning ${selected.length} design histories…`);
+  monitorOperation(operationId);
+  try {
+    const result = await request("/api/operator/history-cleanup-execute", {
+      method: "POST",
+      body: JSON.stringify({
+        operation_id: operationId,
+        proposal_id: proposal.proposal_id,
+        design_ids: selected.map(item => item.design_id),
+      }),
+    });
+    selectedHistoryCleanupDesignIds.clear();
+    showStatus(
+      `History cleanup completed · ${result.removed_version_count} versions removed · `
+      + `${formatBytes(result.reclaimed_bytes)} reclaimed.`,
+    );
+    await loadState();
+    $("history-cleanup-controls").open = true;
+  } catch (error) {
+    await loadState().catch(() => {});
+    showStatus(`History cleanup failed: ${error.message}`, true);
+  } finally {
+    finishOperationMonitor(operationId);
+    button.disabled = false;
+  }
+}
+
 function render() {
   const designs = $("designs");
   designs.replaceChildren();
@@ -1684,8 +2093,9 @@ function render() {
   const active = currentState.designs.filter(item => item.pool === "active" && !item.subject_id);
   const graduatedSeeds = currentState.designs.filter(item => item.pool === "graduated" && !item.subject_id);
   const subjects = currentState.designs.filter(item => item.pool === "graduated" && item.subject_id);
-  const graduatedSubjects = subjects.filter(item => !isReleased(item));
+  const graduatedSubjects = subjects.filter(item => releaseState(item) === "unreleased");
   const releasedSubjects = subjects.filter(isReleased);
+  const unknownReleaseSubjects = subjects.filter(item => releaseState(item) === "unknown");
   const abandoned = currentState.designs.filter(item => item.pool === "abandoned" && !item.subject_id);
   const seedsWithUnreleasedWork = new Set(graduatedSubjects.map(item => item.seed_design_id));
   const seedsWithAnySubject = new Set(subjects.map(item => item.seed_design_id));
@@ -1707,6 +2117,13 @@ function render() {
   document.querySelectorAll(".subject-production-control").forEach(panel => {
     panel.classList.toggle("hidden", !["graduated", "released"].includes(activeOperatorTab));
   });
+  if (["graduated", "released"].includes(activeOperatorTab) && unknownReleaseSubjects.length) {
+    designs.append(node(
+      "p",
+      "panel warning",
+      `Loading authoritative release inventory for ${unknownReleaseSubjects.length} subject(s). They are not classified as graduated or released until the inventory is available.`,
+    ));
+  }
   if (activeOperatorTab === "active") {
     const visible = filteredDesigns(active);
     designs.append(renderSection("Active seed review", visible, active.length ? "No active seeds match the current filters." : "No seed designs are waiting for review."));
@@ -1845,6 +2262,8 @@ async function loadState() {
   try {
     currentState = await request(stateUrl);
     populateCollectionFilter();
+    populateSubjectFilter();
+    populateProductFilter();
     reconcileSelections();
     $("login").classList.add("hidden");
     $("reviewer-sticky-controls").classList.remove("hidden");
@@ -1856,6 +2275,11 @@ async function loadState() {
       $("operator-workspace").classList.remove("hidden");
       $("operator-actions").classList.remove("hidden");
       $("selection-filter-control").classList.remove("hidden");
+      $("attention-filter-control").classList.remove("hidden");
+      $("product-filter-control").classList.toggle(
+        "hidden",
+        !["graduated", "released"].includes(activeOperatorTab),
+      );
     } else {
       $("reviewer-identity").classList.remove("hidden");
       $("reviewer-controls").classList.remove("hidden");
@@ -1887,18 +2311,25 @@ document.querySelectorAll(".workflow-tab").forEach(button => {
     selectedPrintDesignIds.clear();
     selectedBundleCandidates.clear();
     selectedGenerationSeedIds.clear();
+    $("product-filter-control").classList.toggle(
+      "hidden",
+      !["graduated", "released"].includes(activeOperatorTab),
+    );
     render();
   });
 });
-for (const filter of [$("collection-filter"), $("transparency-filter"), $("review-filter"), $("selection-filter")]) {
+for (const filter of [$("collection-filter"), $("subject-filter"), $("product-filter"), $("transparency-filter"), $("review-filter"), $("attention-filter"), $("selection-filter")]) {
   filter.addEventListener("change", render);
 }
 $("design-filter").addEventListener("input", render);
 $("clear-filters").addEventListener("click", () => {
   $("collection-filter").value = "";
+  $("subject-filter").value = "";
+  $("product-filter").value = "";
   $("design-filter").value = "";
   $("transparency-filter").value = "";
   $("review-filter").value = "";
+  $("attention-filter").value = "";
   $("selection-filter").value = "";
   render();
 });
@@ -1907,6 +2338,26 @@ $("clear-selection").addEventListener("click", clearCurrentSelection);
 $("graduate-selected").addEventListener("click", () => transitionSelected("graduate"));
 $("abandon-selected").addEventListener("click", () => transitionSelected("abandon"));
 $("restore-selected").addEventListener("click", () => transitionSelected("restore"));
+$("generate-history-cleanup").addEventListener("click", generateHistoryCleanupProposal);
+$("select-history-cleanup-visible").addEventListener("click", () => {
+  for (const item of filteredHistoryCleanupDesigns()) {
+    selectedHistoryCleanupDesignIds.add(item.design_id);
+  }
+  renderHistoryCleanup();
+});
+$("clear-history-cleanup-selection").addEventListener("click", () => {
+  selectedHistoryCleanupDesignIds.clear();
+  renderHistoryCleanup();
+});
+$("execute-history-cleanup").addEventListener("click", executeHistoryCleanup);
+for (const filter of [
+  $("history-cleanup-pool-filter"),
+  $("history-cleanup-product-filter"),
+  $("history-cleanup-selection-filter"),
+]) {
+  filter.addEventListener("change", renderHistoryCleanup);
+}
+$("history-cleanup-design-filter").addEventListener("input", renderHistoryCleanup);
 $("approve-subjects-selected").addEventListener("click", () => decideSelectedSubjects("approved"));
 $("approve-queue-subjects-selected").addEventListener("click", () => decideSelectedSubjects("approved", { queueProducts: true }));
 $("rework-subjects-selected").addEventListener("click", () => decideSelectedSubjects("rework"));
@@ -1951,7 +2402,7 @@ $("generate-subjects-batch").addEventListener("click", async () => {
   const force = $("batch-subject-force").checked;
   const replacement = force ? " Existing selected previews will be replaced." : "";
   if (!window.confirm(
-    `Run up to ${callCount} paid subject-generation call(s) across ${seedIds.length} reference(s) and ${subjectIds.length} subject(s)? Existing previews are skipped by default.${replacement}`,
+    `Run ${callCount} base paid subject-generation call(s) across ${seedIds.length} reference(s) and ${subjectIds.length} subject(s)? A failed semantic check may add one corrective image call per generated preview. Existing previews are skipped by default.${replacement}`,
   )) return;
   const button = $("generate-subjects-batch");
   const operationId = newOperationId("subject");
@@ -1972,7 +2423,9 @@ $("generate-subjects-batch").addEventListener("click", async () => {
     selectedGenerationSeedIds.clear();
     showStatus(
       `Generated ${result.generated_count} subject preview(s) across ${result.seed_count} reference design(s). `
-      + `Skipped ${result.skipped_existing.length} existing preview(s).`,
+      + `Skipped ${result.skipped_existing.length} existing preview(s). `
+      + `Scheduler: ${result.image_scheduler.requests_per_minute} image starts/minute, `
+      + `${result.image_scheduler.max_concurrency} maximum concurrency.`,
     );
     await loadState();
   } catch (error) {
@@ -2038,6 +2491,9 @@ $("generate").addEventListener("click", () => {
 });
 
 async function runRelease(candidates, execute, button, releaseId, { clearGlobal = false } = {}) {
+  if (releaseRequestInFlight) {
+    return showStatus("A release validation or publication is already running.", true);
+  }
   const selected = candidates.map(candidate => ({
     design_id: candidate.design_id,
     version_id: candidate.version_id,
@@ -2045,7 +2501,9 @@ async function runRelease(candidates, execute, button, releaseId, { clearGlobal 
   }));
   if (!selected.length) return showStatus("Select at least one release candidate.", true);
   const operationId = newOperationId(execute ? "publish" : "validate");
+  releaseRequestInFlight = true;
   button.disabled = true;
+  if (currentState) render();
   showStatus(`${execute ? "Publishing" : "Validating"} ${selected.length} bundle(s)…`);
   monitorOperation(operationId);
   try {
@@ -2066,7 +2524,12 @@ async function runRelease(candidates, execute, button, releaseId, { clearGlobal 
     await loadState().catch(() => {});
     showStatus(`${execute ? "Publication" : "Release validation"} failed: ${error.message}`, true);
   }
-  finally { finishOperationMonitor(operationId); button.disabled = false; }
+  finally {
+    finishOperationMonitor(operationId);
+    releaseRequestInFlight = false;
+    button.disabled = false;
+    if (currentState) render();
+  }
 }
 
 async function release(execute) {

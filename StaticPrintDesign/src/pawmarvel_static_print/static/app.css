@@ -65,6 +65,10 @@ details.panel > summary h2 { display: inline; margin: 0; font-size: 1rem; }
 .badge.pass { color: #0d5d36; background: #dff3e7; }
 .badge.ready { color: #174c85; background: #dfeafa; }
 .badge.warn { color: #8a4d00; background: #fff0d8; }
+.badge.attention { color: #7a3100; background: #ffe1b3; border: 1px solid #df8b26; font-weight: 850; }
+.review-attention { display: grid; gap: .3rem; padding: .6rem; border: 2px solid #df8b26; border-radius: 9px; background: #fff8eb; }
+.review-attention .badge { width: fit-content; }
+.review-attention-reason { margin: 0; color: #65330b; font-size: .8rem; line-height: 1.35; }
 label, legend { font-weight: 700; }
 input, select, textarea { width: 100%; margin-top: .35rem; padding: .7rem; border: 1px solid #b9c6bd; border-radius: 8px; background: white; color: var(--ink); font: inherit; }
 textarea { min-height: 90px; resize: vertical; }
@@ -105,6 +109,8 @@ fieldset { border: 1px solid var(--line); border-radius: 9px; margin: 0 0 1rem; 
 .stage-state { display: inline-flex; width: fit-content; padding: .25rem .55rem; border-radius: 999px; font-size: .78rem; font-weight: 800; background: #fff0d8; color: #8a4d00; }
 .stage-state.complete { background: #dff3e7; color: #0d5d36; }
 .stage-state.ready { background: #dfeafa; color: #174c85; }
+.stage-state.attention { background: #ffe1b3; color: #7a3100; border: 1px solid #df8b26; }
+.workflow-table tr.needs-attention td { background: #fffaf1; }
 .product-evidence { padding: .55rem; border: 1px solid var(--line); border-radius: 9px; }
 .product-plan-controls { padding: .55rem; border: 1px solid var(--line); border-radius: 9px; }
 .product-plan-controls summary { cursor: pointer; color: var(--brand-dark); font-weight: 750; }
@@ -153,10 +159,22 @@ button.review-decision-reject[aria-pressed="true"] { background: #f9dddd; color:
 .operation-status-list .warning { color: #9a5d00; font-weight: 650; }
 .operation-status-list .running { color: var(--brand-dark); font-weight: 700; }
 .operation-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .75rem; }
+.cleanup-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .65rem; margin: .8rem 0; }
+.history-cleanup-proposal { max-height: 45vh; overflow: auto; border: 1px solid var(--line); border-radius: 9px; }
+.history-cleanup-table { width: 100%; min-width: 860px; border-collapse: collapse; font-size: .82rem; }
+.history-cleanup-table th { position: sticky; top: 0; z-index: 1; padding: .65rem; text-align: left; background: #e7f1eb; border-bottom: 2px solid var(--line); }
+.history-cleanup-table td { padding: .65rem; vertical-align: top; border-bottom: 1px solid var(--line); }
+.history-cleanup-table tr.selected td { background: #fff4e9; }
+.history-cleanup-table input[type="checkbox"] { width: auto; }
+.history-cleanup-table td:nth-child(1) { width: 4rem; }
+.history-cleanup-table td:nth-child(2) { width: 28%; }
+.cleanup-design-id, .history-cleanup-table .meta { display: block; margin-top: .3rem; overflow-wrap: anywhere; }
+.cleanup-version-list { margin: 0; padding-left: 1.1rem; }
+.cleanup-version-list li { margin-bottom: .35rem; overflow-wrap: anywhere; }
 .status.error { border-left-color: var(--danger); color: var(--danger); }
 .hint, .meta { color: var(--muted); font-size: .88rem; }
 .error { color: var(--danger); }
 .hidden { display: none !important; }
 @media (max-width: 1100px) { .product-row-actions { justify-content: flex-start; } }
-@media (max-width: 900px) { .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .reviewer-sticky-controls.reviewer-mode { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .filters, .cleanup-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .reviewer-sticky-controls.reviewer-mode { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { header { align-items: flex-start; flex-direction: column; } .button-row, .workflow-tabs { flex-direction: column; } .workflow-tab { border-radius: 8px; } .collection-import, .filters { grid-template-columns: 1fr; } .review-decision-group { grid-template-columns: 1fr; } .operator-actions { position: static; max-height: none; overflow: visible; } }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import re
 import secrets
@@ -13,6 +14,7 @@ import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from time import sleep
 from typing import Any
 
 from PIL import Image, ImageOps
@@ -28,10 +30,23 @@ from .core import (
     validate_id,
     write_json,
 )
+from .image_quality import (
+    print_readiness_report_for_path,
+    print_readiness_warning,
+)
 
 POOL_NAMES = {"active", "graduated", "abandoned"}
 OPAQUE_FULL_BLEED = "opaque-full-bleed"
 PRESERVE_TRANSPARENCY = "preserve-transparency"
+PRINT_QUALITY_PROMPT = (
+    "Optimize the returned pixels for production printing at the requested canvas "
+    "size: preserve crisp typography, line art, pattern edges, and intentional fine "
+    "detail; use solid fully opaque pixels inside visible artwork; confine partial "
+    "alpha to a narrow antialiased outer edge; and avoid blur, compression artifacts, "
+    "color halos, stray pixels, broad translucent washes, or transparent holes inside "
+    "solid artwork. Preserve intentional painterly texture without making the "
+    "complete design fuzzy."
+)
 
 
 @dataclass(frozen=True)
@@ -39,6 +54,8 @@ class Subject:
     subject_id: str
     display_name: str
     subject_kind: str
+    subject_species: str
+    generation_description: str
     hero_strategy: str
     collection_path: str
 
@@ -59,13 +76,19 @@ DesignIdGenerator = Callable[[Path], DesignIdProposal | str]
 _MACHINE_FILENAME_PATTERNS = tuple(
     re.compile(pattern)
     for pattern in (
-        r"(?:^|-)(?:chatgpt|openai|gpt-image|dall-e|dalle|midjourney|"
-        r"stable-diffusion|gemini|flux|ai-generated)(?:-|$)",
-        r"^(?:img|dsc|dscn|pxl|screenshot|screen-shot|image|photo|download|"
-        r"untitled|output|generated|generated-image)(?:-|$)",
-        r"(?:^|-)(?:19|20)\d{2}-(?:0?[1-9]|1[0-2])-"
-        r"(?:0?[1-9]|[12]\d|3[01])(?:-at)?-(?:[01]?\d|2[0-3])-"
-        r"[0-5]\d(?:-[0-5]\d)?(?:-am|-pm)?(?:-|$)",
+        (
+            r"(?:^|-)(?:chatgpt|openai|gpt-image|dall-e|dalle|midjourney|"
+            r"stable-diffusion|gemini|flux|ai-generated)(?:-|$)"
+        ),
+        (
+            r"^(?:img|dsc|dscn|pxl|screenshot|screen-shot|image|photo|download|"
+            r"untitled|output|generated|generated-image)(?:-|$)"
+        ),
+        (
+            r"(?:^|-)(?:19|20)\d{2}-(?:0?[1-9]|1[0-2])-"
+            r"(?:0?[1-9]|[12]\d|3[01])(?:-at)?-(?:[01]?\d|2[0-3])-"
+            r"[0-5]\d(?:-[0-5]\d)?(?:-am|-pm)?(?:-|$)"
+        ),
         r"(?:^|-)(?:19|20)\d{6}-(?:[01]\d|2[0-3])[0-5]\d[0-5]\d(?:-|$)",
         r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$",
         r"^[0-9a-f]{16,}$",
@@ -551,11 +574,37 @@ def load_subject_catalog(path: Path) -> tuple[dict[str, Any], tuple[Subject, ...
                 f"duplicate subject priority {priority}: {path.resolve()}"
             )
         seen_priorities.add(priority)
+        subject_species = str(raw.get("subject_species", "")).strip()
+        if subject_species not in {"dog", "cat"}:
+            raise StaticPrintError(
+                f"subject {subject_id!r} species must be 'dog' or 'cat': "
+                f"{path.resolve()}; actual={subject_species!r}"
+            )
+        generation_description = str(
+            raw.get("generation_description", "")
+        ).strip()
+        if not generation_description or len(generation_description) > 200:
+            raise StaticPrintError(
+                f"subject {subject_id!r} generation_description must contain "
+                f"1-200 characters: {path.resolve()}"
+            )
+        if not re.search(
+            rf"\b{re.escape(subject_species)}\b",
+            generation_description,
+            flags=re.IGNORECASE,
+        ):
+            raise StaticPrintError(
+                f"subject {subject_id!r} generation_description must explicitly "
+                f"name its species {subject_species!r}: {path.resolve()}; "
+                f"actual={generation_description!r}"
+            )
         subjects.append(
             Subject(
                 subject_id=subject_id,
                 display_name=str(raw.get("display_name", "")).strip(),
                 subject_kind=str(raw.get("subject_kind", "")).strip(),
+                subject_species=subject_species,
+                generation_description=generation_description,
                 hero_strategy=str(raw.get("hero_strategy", "")).strip(),
                 collection_path=str(raw.get("collection_path", "")).strip(),
             )
@@ -760,6 +809,32 @@ def _closest_request_size(width: int, height: int) -> str:
     return f"{candidate_width}x{candidate_height}"
 
 
+def _subject_behavior_instruction(subject: Subject) -> str:
+    if subject.subject_species == "cat":
+        return (
+            "Preserve the seed pet's emotional intent, but express it through "
+            "natural cat behavior and anatomy rather than copying dog-specific "
+            "gestures. Use cat-appropriate eyes, ears, whiskers, mouth, paws, body "
+            "posture, and tail. Do not copy dog-like open-mouth panting or a casually "
+            "protruding tongue. Prefer a naturally closed, relaxed feline mouth and "
+            "express happiness, surprise, excitement, or playfulness through feline "
+            "eyes, ears, whiskers, head angle, and posture. An open cat mouth is "
+            "allowed only when it is natural and meaningful in the design context, "
+            "such as meowing, hissing, yawning, grooming, licking, eating, or drinking; "
+            "any visible tongue must belong to that specific feline action rather than "
+            "imitating a dog. "
+            "Keep the requested cat coat/type identity recognizable. "
+        )
+    return (
+        "Preserve the seed pet's emotional intent, but express it through natural "
+        "dog and requested-breed behavior and anatomy. Use breed-appropriate ears, "
+        "mouth, tongue, paws, body posture, and tail. Show a protruding tongue only "
+        "when it is a natural expression for the requested dog and the seed's "
+        "emotional intent; do not force a tongue-out pose. Keep the requested dog "
+        "breed/type identity recognizable. "
+    )
+
+
 def subject_prompt(subject: Subject, *, canvas_policy: str) -> str:
     if canvas_policy == OPAQUE_FULL_BLEED:
         canvas_instruction = (
@@ -778,18 +853,77 @@ def subject_prompt(subject: Subject, *, canvas_policy: str) -> str:
     return (
         "Image A is the approved seed design. Recreate the complete design on the "
         "same canvas and replace only its featured pet with a representative "
-        f"{subject.display_name} ({subject.subject_kind}; {subject.hero_strategy}). "
+        f"{subject.generation_description}. The replacement and principal featured "
+        f"subject must be a {subject.subject_species} animal, never a human, person, "
+        "child, owner, or human-like character. Do not add a human that is not "
+        "already present in Image A. "
         "Preserve every non-pet pixel and design decision as closely as possible: "
         "exact wording, typography, spelling, colors, background, border, ornaments, "
-        "composition, spacing, pet pose, crop, expression, accessories, and rendering "
-        "style. Keep the replacement pet anatomically recognizable and visually "
-        "cohesive with the seed. Do not add a second pet or new text. "
-        f"{canvas_instruction} Output only the complete design without a mockup, "
-        "product, room, shadow, or surrounding scene."
+        "composition, spacing, crop, accessories, and rendering style. Keep the "
+        "replacement pet in the same visual role and preserve the intended emotion, "
+        "but do not copy species-inappropriate anatomy or body language. "
+        f"{_subject_behavior_instruction(subject)}"
+        "Keep the replacement pet anatomically recognizable and visually cohesive "
+        "with the seed. Do not add a second pet or new text. "
+        f"{canvas_instruction} {PRINT_QUALITY_PROMPT} "
+        "Output only the complete design without a mockup, product, room, shadow, "
+        "or surrounding scene."
     )
 
 
 SubjectGenerator = Callable[[Path, Subject, str, tuple[int, int]], Image.Image]
+SubjectValidator = Callable[[Path, Path, Subject], dict[str, Any]]
+
+
+class SubjectGenerationError(StaticPrintError):
+    """An image-provider failure with explicit retry/throttle semantics."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool,
+        rate_limited: bool = False,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.rate_limited = rate_limited
+        self.retry_after_seconds = retry_after_seconds
+
+
+def _retry_after_seconds(error: BaseException) -> float | None:
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is None or not hasattr(headers, "get"):
+        return None
+    candidates = (
+        ("retry-after-ms", 0.001),
+        ("retry-after", 1.0),
+        ("x-ratelimit-reset-images", 1.0),
+        ("x-ratelimit-reset-requests", 1.0),
+    )
+    for name, multiplier in candidates:
+        raw = headers.get(name)
+        if raw is None:
+            continue
+        value = str(raw).strip().lower()
+        unit_multiplier = multiplier
+        if value.endswith("ms"):
+            value = value[:-2]
+            unit_multiplier = 0.001
+        elif value.endswith("s"):
+            value = value[:-1]
+        elif value.endswith("m"):
+            value = value[:-1]
+            unit_multiplier = 60.0
+        try:
+            seconds = float(value) * unit_multiplier
+        except ValueError:
+            continue
+        if seconds > 0:
+            return seconds
+    return None
 
 
 def openai_subject_generator(
@@ -830,7 +964,7 @@ def openai_subject_generator(
         ) from exc
     try:
         with source.open("rb") as image_file:
-            result = OpenAI(api_key=api_key).images.edit(
+            result = OpenAI(api_key=api_key, max_retries=0).images.edit(
                 model=model,
                 image=[image_file],
                 prompt=prompt,
@@ -845,10 +979,33 @@ def openai_subject_generator(
     except Exception as exc:
         request_id = getattr(exc, "request_id", None) or getattr(exc, "requestID", None)
         code = getattr(exc, "code", None)
-        raise StaticPrintError(
+        status_code = getattr(exc, "status_code", None)
+        error_text = f"{type(exc).__name__}: {exc}".lower()
+        rate_limited = (
+            status_code == 429
+            or str(code).lower() in {"rate_limit_exceeded", "rate_limit_error"}
+            or "ratelimit" in error_text
+            or "rate limit" in error_text
+        )
+        retryable = rate_limited or (
+            isinstance(status_code, int) and status_code >= 500
+        ) or any(
+            token in error_text
+            for token in (
+                "timeout",
+                "timed out",
+                "connection error",
+                "connection reset",
+                "temporarily unavailable",
+            )
+        )
+        raise SubjectGenerationError(
             f"subject generation failed for {subject.subject_id!r}; "
             f"provider=openai; model={model!r}; code={code!r}; "
-            f"request_id={request_id!r}; error={exc}"
+            f"status_code={status_code!r}; request_id={request_id!r}; error={exc}",
+            retryable=retryable,
+            rate_limited=rate_limited,
+            retry_after_seconds=_retry_after_seconds(exc),
         ) from exc
     data = getattr(result, "data", None)
     encoded = getattr(data[0], "b64_json", None) if data else None
@@ -877,15 +1034,217 @@ def openai_subject_generator(
     return normalized
 
 
+def openai_subject_validator(
+    source: Path, output: Path, subject: Subject
+) -> dict[str, Any]:
+    """Verify that the principal subject matches the catalog identity contract."""
+
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise StaticPrintError(
+            "subject validation requires OPENAI_API_KEY in the shared environment"
+        )
+    model = os.environ.get(
+        "STATIC_PRINT_SUBJECT_VALIDATION_MODEL", "gpt-5.4-mini"
+    ).strip()
+    if not model:
+        raise StaticPrintError("STATIC_PRINT_SUBJECT_VALIDATION_MODEL cannot be empty")
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise StaticPrintError(
+            "the OpenAI SDK is not installed; run .venv/bin/python -m pip install -e ."
+        ) from exc
+    source_encoded = base64.b64encode(source.read_bytes()).decode("ascii")
+    output_encoded = base64.b64encode(output.read_bytes()).decode("ascii")
+    prompt = (
+        "Image A is the approved seed design and Image B is the generated subject "
+        "variant. Inspect only the principal illustrated character occupying the "
+        "featured-pet role; ignore small decorative animals, printed patterns, and "
+        "text. The required featured species is "
+        f"{subject.subject_species}. The requested subject identity is: "
+        f"{subject.generation_description}. Determine whether Image B preserves Image "
+        "A's emotional intent while translating the face, mouth, tongue, pose, and "
+        "tail into natural behavior and anatomy for the requested animal. For cats, "
+        "dog-like panting or a copied casually protruding tongue is inappropriate. "
+        "Prefer a naturally closed feline mouth and translate playful or happy emotion "
+        "through cat-appropriate eyes, ears, whiskers, posture, and tail. An open mouth "
+        "is acceptable when it clearly expresses a natural feline action in this design "
+        "context, such as meowing, hissing, yawning, grooming, licking, eating, or "
+        "drinking. A visible tongue is acceptable only when it belongs to that specific "
+        "action; mark an ambiguous but plausible expression borderline for operator "
+        "review rather than automatically failing it. "
+        "A hidden or cropped "
+        "tail is acceptable and should be marked appropriate. Report whether the "
+        "requested breed/coat/type identity matches and whether a human/person was "
+        "substituted into the featured-pet role."
+    )
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "featured_subject_species": {
+                "type": "string",
+                "enum": ["dog", "cat", "human", "other", "none"],
+            },
+            "expected_subject_visible": {"type": "boolean"},
+            "subject_identity_matches": {"type": "boolean"},
+            "emotion_preserved": {"type": "boolean"},
+            "facial_expression_appropriate": {"type": "boolean"},
+            "mouth_and_tongue_appropriate": {"type": "boolean"},
+            "tongue_visible": {"type": "boolean"},
+            "behavior_context": {
+                "type": "string",
+                "enum": ["natural", "borderline", "inappropriate"],
+            },
+            "operator_review_recommended": {"type": "boolean"},
+            "pose_appropriate": {"type": "boolean"},
+            "tail_appropriate": {"type": "boolean"},
+            "human_replaced_pet": {"type": "boolean"},
+            "reason": {"type": "string"},
+        },
+        "required": [
+            "featured_subject_species",
+            "expected_subject_visible",
+            "subject_identity_matches",
+            "emotion_preserved",
+            "facial_expression_appropriate",
+            "mouth_and_tongue_appropriate",
+            "tongue_visible",
+            "behavior_context",
+            "operator_review_recommended",
+            "pose_appropriate",
+            "tail_appropriate",
+            "human_replaced_pet",
+            "reason",
+        ],
+    }
+    try:
+        response = OpenAI(api_key=api_key).responses.create(
+            model=model,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{source_encoded}",
+                            "detail": "low",
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{output_encoded}",
+                            "detail": "low",
+                        },
+                    ],
+                }
+            ],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "subject_preview_validation",
+                    "strict": True,
+                    "schema": schema,
+                }
+            },
+            max_output_tokens=350,
+            store=False,
+            timeout=60,
+        )
+    except Exception as exc:
+        request_id = getattr(exc, "request_id", None) or getattr(exc, "requestID", None)
+        code = getattr(exc, "code", None)
+        raise StaticPrintError(
+            "subject preview validation failed; "
+            f"subject_id={subject.subject_id!r}; output={output.resolve()}; "
+            f"provider=openai; model={model!r}; code={code!r}; "
+            f"request_id={request_id!r}; error={exc}"
+        ) from exc
+    try:
+        value = json.loads(str(getattr(response, "output_text", "") or ""))
+    except (TypeError, ValueError) as exc:
+        raise StaticPrintError(
+            "subject preview validation returned invalid JSON; "
+            f"subject_id={subject.subject_id!r}; output={output.resolve()}; "
+            f"model={model!r}; response={getattr(response, 'output_text', None)!r}"
+        ) from exc
+    featured_species = str(value.get("featured_subject_species", ""))
+    expected_visible = value.get("expected_subject_visible") is True
+    identity_matches = value.get("subject_identity_matches") is True
+    emotion_preserved = value.get("emotion_preserved") is True
+    facial_expression_appropriate = (
+        value.get("facial_expression_appropriate") is True
+    )
+    mouth_and_tongue_appropriate = (
+        value.get("mouth_and_tongue_appropriate") is True
+    )
+    tongue_visible = value.get("tongue_visible") is True
+    behavior_context = str(value.get("behavior_context", "inappropriate"))
+    operator_review_recommended = (
+        value.get("operator_review_recommended") is True
+    )
+    pose_appropriate = value.get("pose_appropriate") is True
+    tail_appropriate = value.get("tail_appropriate") is True
+    human_replaced_pet = value.get("human_replaced_pet") is True
+    behavior_is_acceptable = (
+        (
+            behavior_context == "natural"
+            and facial_expression_appropriate
+            and mouth_and_tongue_appropriate
+        )
+        or (
+            behavior_context == "borderline"
+            and operator_review_recommended
+        )
+    )
+    passed = (
+        featured_species == subject.subject_species
+        and expected_visible
+        and identity_matches
+        and emotion_preserved
+        and behavior_is_acceptable
+        and pose_appropriate
+        and tail_appropriate
+        and not human_replaced_pet
+    )
+    return {
+        "passed": passed,
+        "model": model,
+        "request_id": getattr(response, "_request_id", None),
+        "expected_species": subject.subject_species,
+        "featured_subject_species": featured_species,
+        "expected_subject_visible": expected_visible,
+        "subject_identity_matches": identity_matches,
+        "emotion_preserved": emotion_preserved,
+        "facial_expression_appropriate": facial_expression_appropriate,
+        "mouth_and_tongue_appropriate": mouth_and_tongue_appropriate,
+        "tongue_visible": tongue_visible,
+        "behavior_context": behavior_context,
+        "operator_review_recommended": operator_review_recommended,
+        "pose_appropriate": pose_appropriate,
+        "tail_appropriate": tail_appropriate,
+        "human_replaced_pet": human_replaced_pet,
+        "reason": str(value.get("reason", "")).strip(),
+    }
+
+
 def generate_subject_variants(
     *,
     graduated_root: Path,
     seed_design_id: str,
     subjects: Iterable[Subject],
     generator: SubjectGenerator = openai_subject_generator,
+    validator: SubjectValidator | None = None,
     force: bool = False,
     instruction: str = "",
     operation_id: str | None = None,
+    before_image_request: Callable[[], None] | None = None,
+    provider_max_attempts: int = 4,
+    provider_retry_base_seconds: float = 10.0,
+    throttle_image_requests: Callable[[float], None] | None = None,
+    image_retry_event: Callable[[dict[str, Any]], None] | None = None,
+    retry_sleeper: Callable[[float], None] = sleep,
 ) -> list[dict[str, Any]]:
     seed_design_id = validate_id(seed_design_id, "seed design ID")
     seed = (graduated_root / seed_design_id / "source-design.png").resolve()
@@ -905,8 +1264,14 @@ def generate_subject_variants(
         raise StaticPrintError(
             "subject generation instruction must not exceed 2000 characters"
         )
+    if provider_max_attempts <= 0:
+        raise StaticPrintError("provider_max_attempts must be positive")
+    if provider_retry_base_seconds <= 0:
+        raise StaticPrintError("provider_retry_base_seconds must be positive")
     results: list[dict[str, Any]] = []
     seed_digest = sha256_file(seed)
+    if validator is None and generator is openai_subject_generator:
+        validator = openai_subject_validator
     for subject in selected:
         seed_root = graduated_root / seed_design_id
         destination = seed_root / subject.subject_id
@@ -934,22 +1299,139 @@ def generate_subject_variants(
                 "conflict with identity, text accuracy, canvas, or transparency "
                 "requirements above."
             )
-        image = generator(seed, subject, prompt, target_size)
-        if image.size != target_size:
-            image = ImageOps.fit(
-                image.convert("RGBA"),
-                target_size,
-                method=Image.Resampling.LANCZOS,
-                centering=(0.5, 0.5),
+        generation_prompt = prompt
+        generation_source = seed
+        validation_attempts: list[dict[str, Any]] = []
+        provider_attempts: list[dict[str, Any]] = []
+        semantic_max_attempts = 2 if validator is not None else 1
+        try:
+            for attempt in range(1, semantic_max_attempts + 1):
+                for provider_attempt in range(1, provider_max_attempts + 1):
+                    if before_image_request is not None:
+                        before_image_request()
+                    try:
+                        image = generator(
+                            generation_source,
+                            subject,
+                            generation_prompt,
+                            target_size,
+                        )
+                    except SubjectGenerationError as exc:
+                        provider_attempts.append(
+                            {
+                                "semantic_attempt": attempt,
+                                "provider_attempt": provider_attempt,
+                                "outcome": "failed",
+                                "retryable": exc.retryable,
+                                "rate_limited": exc.rate_limited,
+                                "error": str(exc),
+                            }
+                        )
+                        if not exc.retryable or provider_attempt >= provider_max_attempts:
+                            raise
+                        delay = max(
+                            exc.retry_after_seconds or 0.0,
+                            provider_retry_base_seconds
+                            * (2 ** (provider_attempt - 1)),
+                        )
+                        retry_details = {
+                            "semantic_attempt": attempt,
+                            "provider_attempt": provider_attempt,
+                            "next_provider_attempt": provider_attempt + 1,
+                            "delay_seconds": round(delay, 3),
+                            "rate_limited": exc.rate_limited,
+                            "error": str(exc),
+                        }
+                        if image_retry_event is not None:
+                            image_retry_event(retry_details)
+                        if exc.rate_limited and throttle_image_requests is not None:
+                            throttle_image_requests(delay)
+                        else:
+                            retry_sleeper(delay)
+                        continue
+                    provider_attempts.append(
+                        {
+                            "semantic_attempt": attempt,
+                            "provider_attempt": provider_attempt,
+                            "outcome": "succeeded",
+                            "retryable": False,
+                            "rate_limited": False,
+                        }
+                    )
+                    break
+                if image.size != target_size:
+                    image = ImageOps.fit(
+                        image.convert("RGBA"),
+                        target_size,
+                        method=Image.Resampling.LANCZOS,
+                        centering=(0.5, 0.5),
+                    )
+                if canvas_policy == OPAQUE_FULL_BLEED:
+                    image = image.convert("RGB").convert("RGBA")
+                save_png(image.convert("RGBA"), output)
+                if validator is None:
+                    break
+                validation = dict(validator(seed, output, subject))
+                validation["attempt"] = attempt
+                validation_attempts.append(validation)
+                if validation.get("passed") is True:
+                    break
+                if attempt < semantic_max_attempts:
+                    if subject.subject_species == "cat" and (
+                        validation.get("mouth_and_tongue_appropriate") is False
+                        or validation.get("behavior_context") == "inappropriate"
+                    ):
+                        generation_source = output
+                        generation_prompt = (
+                            "Image A is the generated design candidate. Correct only the "
+                            "featured cat's species-inappropriate mouth while preserving "
+                            "every other pixel and design detail as closely as possible. "
+                            "Remove dog-like panting or a casually protruding tongue. Use "
+                            "a natural, closed feline muzzle unless the scene clearly calls "
+                            "for a cat-specific action such as meowing, hissing, yawning, "
+                            "grooming, licking, eating, or drinking; in that case render "
+                            "only the anatomically natural mouth/tongue needed for that action. "
+                            "Preserve the cat's identity, coat, eyes, ears, whiskers, head "
+                            "angle, emotional intent, pose, accessories, text, composition, "
+                            "colors, canvas coverage, and rendering style. Return only the "
+                            f"complete corrected design. {PRINT_QUALITY_PROMPT}"
+                        )
+                    else:
+                        generation_source = seed
+                        generation_prompt = (
+                            prompt
+                            + "\n\nCorrective retry: the previous candidate failed subject "
+                            "validation. Regenerate from Image A. The featured replacement "
+                            f"must be {subject.generation_description} and must not be a "
+                            "human or human-like character. Validator reason: "
+                            f"{validation.get('reason', 'wrong featured subject')}."
+                        )
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        if validation_attempts and not validation_attempts[-1].get("passed"):
+            failure = validation_attempts[-1]
+            shutil.rmtree(staging, ignore_errors=True)
+            raise StaticPrintError(
+                "generated subject preview failed semantic validation after "
+                f"{len(validation_attempts)} attempt(s); "
+                f"subject_id={subject.subject_id!r}; "
+                f"expected_species={subject.subject_species!r}; "
+                f"actual_species={failure.get('featured_subject_species')!r}; "
+                f"human_replaced_pet={failure.get('human_replaced_pet')!r}; "
+                f"reason={failure.get('reason')!r}"
             )
-        if canvas_policy == OPAQUE_FULL_BLEED:
-            image = image.convert("RGB").convert("RGBA")
-        save_png(image.convert("RGBA"), output)
         output_transparency = transparency_report(output)
+        print_readiness = print_readiness_report_for_path(
+            output,
+            expected_size=target_size,
+            canvas_policy=canvas_policy,
+        )
         if (
             canvas_policy == OPAQUE_FULL_BLEED
             and output_transparency["has_transparent_pixels"]
         ):
+            shutil.rmtree(staging, ignore_errors=True)
             raise StaticPrintError(
                 "opaque full-bleed subject generation produced transparency; "
                 f"subject_id={subject.subject_id!r}; output={output.resolve()}"
@@ -987,10 +1469,48 @@ def generate_subject_variants(
             "canvas_policy": canvas_policy,
             "source_transparency": source_transparency,
             "output_transparency": output_transparency,
-            "prompt": prompt,
+            "print_readiness": print_readiness,
+            "prompt": generation_prompt,
+            "subject_contract": {
+                "display_name": subject.display_name,
+                "subject_kind": subject.subject_kind,
+                "subject_species": subject.subject_species,
+                "generation_description": subject.generation_description,
+                "hero_strategy": subject.hero_strategy,
+            },
+            "semantic_validation": {
+                "enabled": validator is not None,
+                "attempts": validation_attempts,
+            },
+            "provider_retry": {
+                "max_attempts_per_image": provider_max_attempts,
+                "base_delay_seconds": provider_retry_base_seconds,
+                "requests": provider_attempts,
+            },
+            "review_attention": (
+                {
+                    "required": True,
+                    "kind": "subject-behavior",
+                    "behavior_context": validation_attempts[-1].get(
+                        "behavior_context", "borderline"
+                    ),
+                    "reason": validation_attempts[-1].get(
+                        "reason", "Animal behavior needs operator review."
+                    ),
+                }
+                if validation_attempts
+                and validation_attempts[-1].get(
+                    "operator_review_recommended"
+                )
+                else None
+            ),
             "operator_instruction": instruction,
         }
-        write_json(staging / "subject-generation.json", provenance)
+        try:
+            write_json(staging / "subject-generation.json", provenance)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
         try:
             if destination.exists():
                 os.replace(destination, backup)
@@ -1011,6 +1531,20 @@ def generate_subject_variants(
                 "output": str(output.resolve()),
                 "source_sha256": provenance["output_sha256"],
                 "transparency": transparency_report(output),
+                "print_readiness": print_readiness,
+                "print_readiness_warning": print_readiness_warning(
+                    f"subject preview {seed_design_id}/{subject.subject_id}",
+                    print_readiness,
+                ),
+                "semantic_validation": (
+                    validation_attempts[-1] if validation_attempts else None
+                ),
+                "operator_review_recommended": bool(
+                    validation_attempts
+                    and validation_attempts[-1].get(
+                        "operator_review_recommended"
+                    )
+                ),
             }
         )
     return results

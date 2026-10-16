@@ -15,7 +15,11 @@ The operator can:
 - share seed and subject previews for reviewer feedback;
 - approve subject previews and render versioned product print outputs,
   individually or in a batch;
-- review generated pixels in the local GUI; and
+- review generated pixels in the local GUI, including deterministic
+  print-readiness warnings for dimensions, alpha solidity, canvas policy, and
+  enlargement risk;
+- generate a guarded proposal and reclaim superseded local authoring history
+  without touching current candidates, source assets, or released versions; and
 - publish immutable static bundles and release history plus a stable discovery
   catalog for deterministic FE latest-or-pinned selection.
 
@@ -44,7 +48,10 @@ Git. Production bundles live in S3; only schemas, profiles, code, tests, and
 documentation belong in this repository.
 
 The browser can preview transparent PNGs over a checkerboard, blue, white, or
-a custom color and reports whether non-opaque pixels are present.
+a custom color and reports whether non-opaque pixels are present. GPT Image
+requests share one print-quality prompt contract, and every new paid or
+deterministic image output receives the same local pixel preflight before the
+operator advances it.
 
 The `test` extra installs the JSON Schema validator used to verify that emitted
 artifacts match the checked-in FE schemas. Run the focused contract tests with:

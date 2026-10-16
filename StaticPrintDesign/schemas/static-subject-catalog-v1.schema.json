@@ -36,12 +36,14 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["priority", "subject_id", "display_name", "subject_kind", "collection_handle", "collection_path", "hero_strategy"],
+        "required": ["priority", "subject_id", "display_name", "subject_kind", "subject_species", "generation_description", "collection_handle", "collection_path", "hero_strategy"],
         "properties": {
           "priority": {"type": "integer", "minimum": 1},
           "subject_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
           "display_name": {"type": "string", "minLength": 1},
           "subject_kind": {"enum": ["dog-breed", "dog-general", "cat-general", "cat-coat"]},
+          "subject_species": {"enum": ["dog", "cat"]},
+          "generation_description": {"type": "string", "minLength": 1, "maxLength": 200},
           "collection_handle": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
           "collection_path": {"type": "string", "pattern": "^/collections/[a-z0-9]+(?:-[a-z0-9]+)*$"},
           "hero_strategy": {"enum": ["breed-specific", "mixed-breed-heroes", "mixed-coat-heroes", "black-coat-heroes"]}

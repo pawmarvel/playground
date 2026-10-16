@@ -144,8 +144,8 @@ released mug, a ready-to-publish shirt, and a missing blanket at the same time.
 | Checkpoint | Evidence shown before decision | Individual action | Batch action | Persisted identity |
 | --- | --- | --- | --- | --- |
 | Active seed | exact source on raw/blue/white/custom backgrounds; alpha report; reviewer votes/comments; intake provenance | graduate or abandon | graduate/abandon filtered selection | seed source SHA-256 |
-| Subject preview | seed beside generated subject; generation provenance; alpha policy; current decision/note | approve, rework, abandon, regenerate | generate or decide selected seed/subject pairs | subject source SHA-256 |
-| Product preview and print | exact profile preview; every target PNG; dimensions; transparency; source/version/profile metadata | generate next version, select/publish | generate or publish selected tuples | `(design_id, profile_id, version_id)` plus hashes |
+| Subject preview | seed beside generated subject; generation provenance; alpha policy; pixel print-readiness report; current decision/note | approve, rework, abandon, regenerate | generate or decide selected seed/subject pairs | subject source SHA-256 |
+| Product preview and print | exact profile preview; every target PNG; dimensions; transparency; pixel print-readiness reports; source/version/profile metadata | generate next version, select/publish | generate or publish selected tuples | `(design_id, profile_id, version_id)` plus hashes |
 | Released inventory | latest/pinned versions, release ID, active/retired status, preview and target evidence | add product, improve, retire/reactivate | selected generation/publication/lifecycle change | immutable S3 key plus catalog state |
 
 Completed controls, product-coverage evidence, and secondary evidence are
@@ -166,6 +166,18 @@ staging directory and is atomically promoted only after its images and metadata
 are complete. Startup reconciliation removes staging debris, restores
 interrupted subject replacements, quarantines invalid product directories, and
 exposes Resume/Cleanup actions where supported.
+
+Paid subject generation uses a bounded worker pool independent from local
+product rendering and S3 publication. The MVP launch-tier defaults are 50 GPT
+Image request starts per minute and at most 50 requests in flight. A shared
+leaky-bucket limiter spaces starts evenly and also governs corrective image
+retries, avoiding a quota-sized burst while sustaining the available rate.
+Both limits are private deployment settings and are copied into the durable
+operation request so an interrupted batch resumes with the same scheduler
+contract. Provider 429 responses defer the shared queue using `Retry-After` or
+bounded exponential backoff; transient provider errors retry through the same
+limiter rather than bypassing the launch-tier quota. Successful work units
+remain committed when siblings fail.
 
 A workspace is single-writer: a process-held lock rejects a second server on
 the same work root. Resume provides at-least-once handling for an external paid
@@ -225,6 +237,18 @@ missing profiles individually or in a batch, generate local artifacts, review
 each target, and publish accepted candidates. Existing bundles and history are
 not rewritten.
 
+Every GPT Image subject request includes the same production-print pixel
+instruction whether invoked individually or through the GUI batch workflow.
+After every paid subject generation and every deterministic preview/print
+render, a shared local preflight measures exact canvas size, visible and opaque
+pixel counts, partial/low alpha, canvas-policy compliance, and product upscale
+ratio. Reports and actionable warnings are private, digest-bound operator
+evidence in `subject-generation.json` and `generation.json`; they do not change
+the FE bundle schema. A warning requires 100% zoom review and regeneration or
+repair when defects are visible. It is not a semantic or aesthetic classifier,
+so it does not replace human review and does not block intentional painterly
+transparency by itself.
+
 ### 5.4 Vendor or product-spec update
 
 Edit the tracked product profile, restart the server, and generate a new
@@ -267,6 +291,9 @@ work/
     <design-id>-preview.png
     profile-previews/<product-profile-id>.png
     <design-id>--<product-profile-id>[--<target-id>].png
+  static-history-cleanup/
+    proposals/<proposal-id>.json         # reviewed superseded-version inventory
+    receipts/<proposal-id>.json          # exact deleted paths, hashes, and bytes
   static-reviews.sqlite3
   static-exchange/
     catalog.json                         # non-authoritative mirror of S3 catalog
@@ -396,26 +423,39 @@ filenames for undeclared assets, or invoke an image model.
 
 1. Validate source decision, candidate, manifest, inventory, dimensions, and
    hashes locally.
-2. Upload immutable preview/print assets.
-3. Upload immutable bundle manifests.
-4. Upload the immutable release catalog.
-5. Rebuild and conditionally replace the stable discovery catalog.
-6. Upload an immutable catalog-history snapshot of the committed state.
-7. Write the local receipt and invalidate the GUI S3 cache.
+2. Preflight every planned immutable S3 key and reject all byte conflicts before
+   the first upload.
+3. Concurrently upload and verify immutable preview/print assets.
+4. Concurrently upload and verify immutable bundle manifests.
+5. Upload the immutable release catalog as the stage commit marker.
+6. Rebuild and conditionally replace the stable discovery catalog.
+7. Upload an immutable catalog-history snapshot of the committed state.
+8. Write the local receipt and invalidate the GUI S3 cache.
 
-The operation succeeds only after step 6. If catalog replacement loses an ETag
+The operation succeeds only after step 7. Bundle `created_at` is pinned when the
+product version is generated and therefore remains byte-identical when that
+version is validated or listed in another release. If catalog replacement loses an ETag
 race, immutable objects may already exist but remain safe; refresh and retry the
 same release so matching bytes are reused and the catalog is rebuilt. Changed
-bytes under an existing immutable key are always rejected.
+bytes under an existing immutable key are always rejected and require a new
+product version; allocating only a new release ID is not a repair.
+
+The immutable-object preflight and the asset/manifest stages use a bounded S3
+worker pool. Each upload remains an `If-None-Match` conditional write followed
+by a metadata-hash verification. Only throttling, timeout, connection, and
+transient server failures use bounded exponential retries. Authentication,
+authorization, immutable hash, and catalog concurrency conflicts remain
+terminal. A failed stage completes in-flight siblings, reports every failed
+key, and can be rerun safely because matching immutable objects are reused.
 
 ## 9. Inventory lifecycle and cleanup
 
 | Inventory | MVP lifecycle | Cleanup rule |
 | --- | --- | --- |
 | Active seeds | graduate or abandon | external collection remains unchanged |
-| Abandoned seeds | restore or retain | destructive purge is manual and outside GUI |
+| Abandoned seeds | restore or retain | source deletion remains outside GUI; unreferenced authoring history may use reviewed GUI cleanup |
 | Subject variants | approve, rework, abandon, regenerate | retain provenance needed by released versions |
-| Local candidates | ready, superseded, published | remove only after S3 verification; published-state correlation uses the immutable bundle manifest, not the private generation record |
+| Local candidates | ready, superseded, published | GUI proposes only superseded version directories after protecting the latest local candidate and every local/S3 release reference |
 | Published product | active or retired | current-contract bundles/releases are retained in MVP |
 | Pre-contract artifact | cannot be loaded by current identity/schema contract | audit, quarantine local files, and delete exact S3 keys with `retire-obsolete-artifacts` |
 
@@ -423,6 +463,30 @@ Normal product retirement is not deletion. Current-contract bundles are never
 selected by obsolete-artifact cleanup merely because they are old, retired, or
 unreferenced. A legal takedown that prevents pinned access requires separate
 FE/CDN policy.
+
+Private authoring-history cleanup is a distinct, operator-reviewed storage
+workflow. Its unit of deletion is exactly one
+`static-authoring/<seed>/<subject>/<profile>/<version>` directory. A proposal
+groups those targets by canonical subject design so the operator can filter,
+compare byte totals, and select designs in batches. For active and graduated
+designs, the highest local version per product profile is protected as the
+current candidate. For abandoned or orphaned designs there is no current
+candidate, so all non-release-referenced product versions may be proposed. Every version in
+the local catalog, publication receipts, or authoritative S3 catalog is always
+protected regardless of lifecycle status.
+
+The proposal records relative paths, file counts, byte counts, and a content
+hash. Execution reloads authoritative release references, recomputes candidate
+eligibility, checks containment under `static-authoring`, and verifies the
+reviewed hash before deleting exact directories. Any new publication, new
+candidate, file change, missing path, or catalog-read failure invalidates the
+whole selected execution. Source pools, subject-generation artifacts, exchange
+bundles, and S3 objects are never targets. This boundary lets operators reclaim
+iteration storage without changing the FE contract or release inventory.
+Execution writes a receipt before the first deletion and updates it after each
+version, including a current target and any failure. An interrupted or failed
+receipt is not resumed from stale assumptions; the operator generates another
+proposal, which inventories only the remaining eligible paths.
 
 The expert obsolete-artifact workflow is deliberately narrower. Its dry run
 validates the stable catalog and inventories only local records or S3 objects
@@ -446,12 +510,14 @@ The MVP keeps one installable Python package and a build-free local web UI:
 | --- | --- |
 | `core.py` | IDs, profiles, canonical profile digests, hashes, safe JSON/image primitives |
 | `lifecycle.py` | intake pools, seed movement, subject catalog and paid subject generation |
+| `image_quality.py` | shared deterministic pixel/alpha print-readiness reports and operator warnings |
 | `reviews.py` | digest-bound reviewer/operator decisions and atomic batches |
 | `authoring.py` | deterministic product preview/print rendering and private provenance |
 | `bundles.py` | immutable bundle/release construction and validation |
 | `catalog.py` | pure public discovery-catalog derivation, validation, and lifecycle transitions |
 | `publisher.py` | AWS reads, conditional immutable uploads, catalog replacement, verification |
 | `retirement.py` | contract-invalid inventory audit, local quarantine, conditional exact-key S3 retirement, resumable receipts |
+| `history_cleanup.py` | reviewed inventory and hash-guarded deletion of superseded private authoring versions |
 | `server.py` | authenticated local workflow orchestration and guarded endpoints |
 | `static/` | reviewer/operator presentation and client-side selection state |
 
@@ -462,6 +528,26 @@ has no framework/build dependency for MVP deployment. If additional personas or
 workflow families are added, split the current static application and HTTP
 handler by persona before adding another cross-cutting state system; do not put
 authoring rules into browser-only state.
+
+Subject display labels and generation identity are deliberately separate. The
+private subject catalog provides `subject_species` and an unambiguous
+`generation_description` that must explicitly name that species; prompts never
+treat marketing audience labels such as `Dog lover` as the visual subject.
+Before a subject preview is committed, a low-detail semantic check verifies
+that its principal featured character has the required species, preserves the
+seed's emotional intent, matches the requested breed/coat/type, and uses
+species-appropriate facial expression, mouth/tongue, pose, and tail. Cat
+variants do not inherit dog-like panting or a casually protruding tongue.
+Natural feline open-mouth actions are allowed when justified by the scene;
+ambiguous but plausible expressions are marked for operator review, while
+species-inappropriate expressions fail. Emotion is translated through
+cat-appropriate eyes, ears, whiskers, mouth shape, posture, and tail. The check
+also rejects a human substituted into the pet role. One corrective retry
+is allowed. Borderline evidence is persisted against the exact subject-output
+digest and appears as an attention label at every downstream operator review
+checkpoint. It is resolved by an explicit operator approve/abandon decision,
+not silently removed. These prompts, attention labels, and validation records
+are private operator evidence and do not change the FE bundle contract.
 
 ## 11. Security and operational constraints
 

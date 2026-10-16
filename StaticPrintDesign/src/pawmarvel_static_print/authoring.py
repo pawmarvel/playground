@@ -24,9 +24,14 @@ from .core import (
     require_png,
     resolve_design_identity,
     sha256_file,
+    utc_now,
     validate_id,
     validate_version,
     write_json,
+)
+from .image_quality import (
+    print_readiness_report_for_path,
+    print_readiness_warning,
 )
 
 PREVIEW_MAX_EDGE = 1080
@@ -91,6 +96,8 @@ def discover_designs(inputs_root: Path, authoring_root: Path) -> list[dict[str, 
         source_digest = sha256_file(source)
         intake = read_json(intake_path) if intake_path.is_file() else None
         source_transparency: dict[str, Any] | None = None
+        subject_review_attention: dict[str, Any] | None = None
+        subject_print_readiness: dict[str, Any] | None = None
         if identity.subject_id is None:
             if (
                 isinstance(intake, dict)
@@ -104,10 +111,49 @@ def discover_designs(inputs_root: Path, authoring_root: Path) -> list[dict[str, 
             )
             if provenance_path.is_file():
                 provenance = read_json(provenance_path)
-                if provenance.get("output_sha256") == source_digest and isinstance(
-                    provenance.get("output_transparency"), dict
-                ):
-                    source_transparency = provenance["output_transparency"]
+                if provenance.get("output_sha256") == source_digest:
+                    if isinstance(provenance.get("output_transparency"), dict):
+                        source_transparency = provenance["output_transparency"]
+                    if isinstance(provenance.get("print_readiness"), dict):
+                        subject_print_readiness = provenance["print_readiness"]
+                    semantic = provenance.get("semantic_validation")
+                    attempts = (
+                        semantic.get("attempts")
+                        if isinstance(semantic, dict)
+                        else None
+                    )
+                    latest_validation = (
+                        attempts[-1]
+                        if isinstance(attempts, list)
+                        and attempts
+                        and isinstance(attempts[-1], dict)
+                        else None
+                    )
+                    recorded_attention = provenance.get("review_attention")
+                    attention_source = (
+                        recorded_attention
+                        if isinstance(recorded_attention, dict)
+                        and recorded_attention.get("required") is True
+                        else latest_validation
+                        if latest_validation
+                        and latest_validation.get("operator_review_recommended") is True
+                        else None
+                    )
+                    if attention_source:
+                        subject_review_attention = {
+                            "kind": "subject-behavior",
+                            "behavior_context": str(
+                                attention_source.get(
+                                    "behavior_context", "borderline"
+                                )
+                            ),
+                            "reason": str(
+                                attention_source.get(
+                                    "reason", "Animal behavior needs operator review."
+                                )
+                            ),
+                            "source_sha256": source_digest,
+                        }
         versions: list[dict[str, Any]] = []
         profile_root = authoring_root / identity.relative_directory
         if profile_root.is_dir():
@@ -173,6 +219,8 @@ def discover_designs(inputs_root: Path, authoring_root: Path) -> list[dict[str, 
                 "source_mode": mode,
                 "source_sha256": source_digest,
                 "source_transparency": source_transparency,
+                "subject_review_attention": subject_review_attention,
+                "subject_print_readiness": subject_print_readiness,
                 "intake": intake,
                 "versions": versions,
             }
@@ -418,6 +466,12 @@ def generate_design(
                 f"use a new version ID for fit={fit!r}"
             )
         outputs: list[dict[str, Any]] = []
+        existing_print_readiness = existing_generation.get("print_readiness", {})
+        if not isinstance(existing_print_readiness, dict):
+            existing_print_readiness = {}
+        existing_print_reports = existing_print_readiness.get("prints", {})
+        if not isinstance(existing_print_reports, dict):
+            existing_print_reports = {}
         multiple = len(profile.targets) > 1
         for target in profile.targets:
             filename = (
@@ -445,6 +499,7 @@ def generate_design(
                     "transparency": existing_generation.get("transparency", {})
                     .get("prints", {})
                     .get(target.target_id, {}),
+                    "print_readiness": existing_print_reports.get(target.target_id),
                 }
             )
         preview_path = final_dir / f"{design_id}-preview.png"
@@ -466,6 +521,9 @@ def generate_design(
                 "width": preview_width,
                 "height": preview_height,
                 "mode": preview_mode,
+                "print_readiness": existing_print_readiness.get(
+                    "operator_preview"
+                ),
             },
             "outputs": outputs,
             "profile_previews": [
@@ -477,8 +535,12 @@ def generate_design(
                     "transparency": existing_generation.get("transparency", {}).get(
                         "profile_preview", {}
                     ),
+                    "print_readiness": existing_print_readiness.get(
+                        "profile_preview"
+                    ),
                 }
             ],
+            "print_readiness": existing_print_readiness,
             "warnings": list(existing_generation.get("warnings", [])),
             "reused": True,
         }
@@ -510,15 +572,20 @@ def generate_design(
         operator_preview = _preview(source)
         save_png(operator_preview, preview_path)
         operator_preview_transparency = _image_transparency_report(operator_preview)
+        operator_preview_readiness = print_readiness_report_for_path(
+            preview_path,
+            expected_size=operator_preview.size,
+            canvas_policy=canvas_policy,
+        )
+        operator_preview_warning = print_readiness_warning(
+            f"{design_id}/operator-preview", operator_preview_readiness
+        )
+        if operator_preview_warning:
+            warnings.append(operator_preview_warning)
         multiple = len(profile.targets) > 1
         first_target_image: Image.Image | None = None
         for target in profile.targets:
             scale = max(target.width / source_width, target.height / source_height)
-            if scale > 1:
-                warnings.append(
-                    f"{design_id}/{profile.profile_id}/{target.target_id} upscales "
-                    f"the source by {scale:.2f}x; manually inspect print sharpness"
-                )
             filename = (
                 f"{design_id}--{profile.profile_id}--{target.target_id}.png"
                 if multiple
@@ -537,6 +604,18 @@ def generate_design(
             if first_target_image is None:
                 first_target_image = rendered.copy()
             width, height, mode = image_info(path)
+            print_readiness = print_readiness_report_for_path(
+                path,
+                expected_size=(target.width, target.height),
+                canvas_policy=canvas_policy,
+                upscale_ratio=scale,
+            )
+            warning = print_readiness_warning(
+                f"{design_id}/{profile.profile_id}/{target.target_id}",
+                print_readiness,
+            )
+            if warning:
+                warnings.append(warning)
             outputs.append(
                 {
                     "profile_id": profile.profile_id,
@@ -547,6 +626,7 @@ def generate_design(
                     "height": height,
                     "mode": mode,
                     "transparency": _image_transparency_report(rendered),
+                    "print_readiness": print_readiness,
                 }
             )
         if first_target_image is None:  # ProductProfile validation prevents this.
@@ -569,6 +649,21 @@ def generate_design(
                 artifact=profile_preview_path,
             )
         save_png(profile_preview, profile_preview_path)
+        profile_preview_readiness = print_readiness_report_for_path(
+            profile_preview_path,
+            expected_size=(profile.preview_width, profile.preview_height),
+            canvas_policy=canvas_policy,
+            upscale_ratio=max(
+                profile.preview_width / first_target_image.width,
+                profile.preview_height / first_target_image.height,
+            ),
+        )
+        profile_preview_warning = print_readiness_warning(
+            f"{design_id}/{profile.profile_id}/profile-preview",
+            profile_preview_readiness,
+        )
+        if profile_preview_warning:
+            warnings.append(profile_preview_warning)
         profile_previews.append(
             {
                 "profile_id": profile.profile_id,
@@ -576,6 +671,7 @@ def generate_design(
                 "width": profile.preview_width,
                 "height": profile.preview_height,
                 "transparency": _image_transparency_report(profile_preview),
+                "print_readiness": profile_preview_readiness,
             }
         )
         generation_transparency = {
@@ -583,10 +679,18 @@ def generate_design(
             "profile_preview": profile_previews[0]["transparency"],
             "prints": {item["target_id"]: item["transparency"] for item in outputs},
         }
+        generation_print_readiness = {
+            "operator_preview": operator_preview_readiness,
+            "profile_preview": profile_preview_readiness,
+            "prints": {
+                item["target_id"]: item["print_readiness"] for item in outputs
+            },
+        }
     write_json(
         generation_path,
         {
             "schema": "pawmarvel-static-generation-v3",
+            "created_at": utc_now(),
             "design_id": design_id,
             "product_profile_id": profile.profile_id,
             "product_profile_sha256": profile_digest,
@@ -595,6 +699,7 @@ def generate_design(
             "fit": fit,
             "canvas_policy": canvas_policy,
             "transparency": generation_transparency,
+            "print_readiness": generation_print_readiness,
             "warnings": sorted(set(warnings)),
         },
     )
@@ -618,8 +723,10 @@ def generate_design(
             "width": preview_width,
             "height": preview_height,
             "mode": preview_mode,
+            "print_readiness": operator_preview_readiness,
         },
         "outputs": outputs,
         "profile_previews": profile_previews,
+        "print_readiness": generation_print_readiness,
         "warnings": sorted(set(warnings)),
     }

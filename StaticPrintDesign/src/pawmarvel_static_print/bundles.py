@@ -101,6 +101,78 @@ def _require_canvas_policy(path: Path, canvas_policy: str, label: str) -> None:
         )
 
 
+def _legacy_bundle_created_at(
+    exchange_root: Path,
+    *,
+    bundle_id: str,
+    design_id: str,
+    product_profile_id: str,
+    version_id: str,
+) -> str | None:
+    """Recover the timestamp used by bundles created before generation timestamps."""
+
+    releases = exchange_root / "releases"
+    if not releases.is_dir():
+        return None
+    for catalog_path in sorted(releases.glob("*/catalog.json")):
+        try:
+            catalog = read_json(catalog_path)
+        except StaticPrintError:
+            continue
+        created_at = catalog.get("created_at")
+        if (
+            catalog.get("schema") != "pawmarvel-static-release-catalog-v1"
+            or not isinstance(created_at, str)
+            or not created_at
+        ):
+            continue
+        entries = catalog.get("bundles")
+        if not isinstance(entries, list):
+            continue
+        if any(
+            isinstance(entry, dict)
+            and entry.get("bundle_id") == bundle_id
+            and entry.get("design_id") == design_id
+            and entry.get("product_profile_id") == product_profile_id
+            and entry.get("version_id") == version_id
+            for entry in entries
+        ):
+            return created_at
+    return None
+
+
+def _bundle_created_at(
+    *,
+    generation_path: Path,
+    exchange_root: Path,
+    bundle_id: str,
+    design_id: str,
+    product_profile_id: str,
+    version_id: str,
+    fallback: str,
+) -> str:
+    """Lock a stable bundle timestamp to the immutable generated product version."""
+
+    generation = read_json(generation_path)
+    created_at = generation.get("created_at")
+    if created_at is not None:
+        if not isinstance(created_at, str) or not created_at:
+            raise StaticPrintError(
+                f"generation created_at is invalid: {generation_path.resolve()}"
+            )
+        return created_at
+    created_at = _legacy_bundle_created_at(
+        exchange_root,
+        bundle_id=bundle_id,
+        design_id=design_id,
+        product_profile_id=product_profile_id,
+        version_id=version_id,
+    ) or fallback
+    generation["created_at"] = created_at
+    write_json(generation_path, generation)
+    return created_at
+
+
 def build_bundle(
     *,
     inputs_root: Path,
@@ -473,9 +545,9 @@ def prepare_release(
             raise StaticPrintError(
                 f"existing release draft is invalid: {exchange_catalog.resolve()}"
             )
-        created_at = existing_catalog["created_at"]
+        release_created_at = existing_catalog["created_at"]
     else:
-        created_at = utc_now()
+        release_created_at = utc_now()
     staging = exchange_root / ".staging" / release_id
     if staging.exists():
         shutil.rmtree(staging)
@@ -493,12 +565,32 @@ def prepare_release(
         }
         if progress:
             progress("bundle-start", details)
+        design_id = design_identity(selection.design_id).design_id
+        version_id = validate_version(selection.version_id)
+        bundle_id = bundle_id_for(design_id, selection.profile.profile_id)
+        generation_path = (
+            design_authoring_path(
+                authoring_root, design_id, inputs_root=inputs_root
+            )
+            / selection.profile.profile_id
+            / version_id
+            / "generation.json"
+        )
+        bundle_created_at = _bundle_created_at(
+            generation_path=generation_path,
+            exchange_root=exchange_root,
+            bundle_id=bundle_id,
+            design_id=design_id,
+            product_profile_id=selection.profile.profile_id,
+            version_id=version_id,
+            fallback=release_created_at,
+        )
         manifest_path = build_bundle(
             inputs_root=inputs_root,
             authoring_root=authoring_root,
             staging_root=staging,
             selection=selection,
-            created_at=created_at,
+            created_at=bundle_created_at,
         )
         manifest = read_json(manifest_path)
         relative = str(manifest_path.relative_to(staging)).replace("\\", "/")
@@ -521,7 +613,7 @@ def prepare_release(
     catalog = {
         "schema": "pawmarvel-static-release-catalog-v1",
         "release_id": release_id,
-        "created_at": created_at,
+        "created_at": release_created_at,
         "bundles": entries,
     }
     catalog_path = staging / "releases" / release_id / "catalog.json"

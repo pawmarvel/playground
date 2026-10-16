@@ -21,7 +21,24 @@ values, and optional `export KEY=value` syntax, but never evaluates shell code
 or prints secret values.
 
 The default subject model is `gpt-image-2.5-sunburst`; subject generation is a
-paid image-edit operation. New design intake uses a filename locally when it is
+paid image-edit operation. Launch-tier batches default to 50 image-request
+starts per minute with at most 50 image requests in flight. Starts are spaced
+evenly (1.2 seconds apart) rather than burst at once, which sustains the quota
+while reducing avoidable 429 responses. Configure a different account tier in
+the private settings with `STATIC_PRINT_IMAGE_REQUESTS_PER_MINUTE` and
+`STATIC_PRINT_IMAGE_MAX_CONCURRENCY`, then restart the server. Transient
+provider failures retry up to `STATIC_PRINT_IMAGE_MAX_ATTEMPTS` with
+exponential delay based on `STATIC_PRINT_IMAGE_RETRY_BASE_SECONDS`. A provider
+429 defers the shared queue, so already-waiting workers honor the provider's
+`Retry-After` value instead of creating a retry storm. Each generated
+subject also receives a low-detail
+semantic check with `STATIC_PRINT_SUBJECT_VALIDATION_MODEL` before it replaces
+the current preview. The check compares the seed and candidate for preserved
+emotional intent plus species-appropriate facial expression, mouth/tongue,
+pose, tail, and requested breed/coat/type. A mismatch receives one corrective
+retry; if that also fails, the current preview remains unchanged and the batch
+item fails for operator review. New
+design intake uses a filename locally when it is
 meaningful. Only an obvious machine/export filename makes one low-detail vision
 request for a descriptive design ID, using `gpt-5.4-mini` by default through
 `STATIC_PRINT_DESIGN_ID_MODEL`. Product rendering, meaningful-name intake,
@@ -105,10 +122,11 @@ cp "/path/to/candidate-design.png" \
 ```
 
 The seed is product-independent. It must be a readable PNG. Use the best
-available source and keep its intended transparency. The Holiday Selfie and
-Push Christmas Tree collections are opaque full-canvas designs: their source
-files should report no transparent pixels. Other collections may intentionally
-use transparent borders and are not forced opaque.
+available source and keep its intended transparency. The Holiday Selfie
+collection is opaque and should report no transparent pixels. The Push
+Christmas Tree collection uses transparent backgrounds and should report the
+`preserve-transparency` canvas policy. Other collections may intentionally use
+transparent borders and are not forced opaque.
 
 ## 3. Start the GUI
 
@@ -155,9 +173,16 @@ The transparency-background controls, reviewer identity, pending-change count,
 and batch-save button remain pinned at the top of the viewport while the
 reviewer scrolls through the active design list.
 
-Use the filter bar to narrow the current tab by intake collection, design ID or
-subject text, transparency result, review/workflow status, and current
-selection. The count shows the visible and total designs. **Clear filters**
+Use the filter bar to narrow the current tab by intake collection, exact
+subject, product, design ID text, transparency result, review/workflow status,
+and current selection. The subject dropdown lists only generated subjects
+present in the workspace and includes both the operator label and stable
+subject ID, so all designs for one subject can be reviewed together. In the
+**Graduated** and **Released** tabs, selecting a product focuses every subject
+row, product preview, print evidence, and development/release status on that
+one product profile. Designs whose selected product has not been generated
+remain visible as **Not generated**, making coverage gaps actionable. The count
+shows the visible and total designs. **Clear filters**
 restores the full tab. Operator selections are retained while filters change.
 
 The batch-action tray stays pinned above the design list while you scroll. Its
@@ -177,6 +202,28 @@ decision for the filtered selection. Approved subjects expose a separate
 cannot be confused. Switching workflow tabs clears the prior tab's card
 selection to prevent cross-pool actions. **Approve + queue products** combines
 the two safe local decisions and avoids selecting the same rows twice.
+
+The **Abandoned** tab also contains the independent **Authoring history
+cleanup** panel. It scans all lifecycle pools—not only abandoned seeds—for
+superseded local product-version directories. Generate the proposal, filter it
+by lifecycle pool, product, or design/subject text, inspect the exact versions
+and reclaimable size, select the desired design histories, and choose **Delete
+selected unused history**. Proposal generation is read-only. Execution hashes
+and rechecks every selected directory and refreshes release references before
+permanently deleting anything. A version is never proposed when it is the
+current local candidate or is referenced by the local/S3 release catalog.
+Source designs, generated subject previews, release bundles, and partial work
+are outside this cleanup's target scope.
+
+Cleanup plans and receipts are retained at
+`work/static-history-cleanup/{proposals,receipts}/<proposal-id>.json`. A
+proposal with an execution receipt cannot be reused, including after an
+interruption or partial failure; the receipt preserves completed targets and
+the current target, and the operator generates a fresh proposal for any
+remaining history. When S3 is configured but its authoritative catalog
+cannot be read, proposal generation or execution stops instead of assuming
+that a version is unreferenced. Deletion is irreversible, so use the displayed
+paths, versions, hashes, and byte counts as the review checkpoint.
 
 The graduated table is organized by workflow checkpoint:
 
@@ -252,15 +299,23 @@ table row. For a batch:
 3. Select catalog subjects, or choose **Select all subjects**.
 4. Optionally enter one improvement instruction that applies to this batch.
 5. Choose **Generate selected references × subjects** and confirm the displayed
-   maximum paid-call count.
+   base paid-call count. The dialog also warns that a semantic mismatch can add
+   at most one corrective paid image call for that work unit.
 
 Each missing reference/subject pair makes one paid OpenAI image-edit call using
-the approved seed as Image A. Existing previews are skipped by default, which
-makes adding coverage safe and avoids duplicate API cost. Enable replacement
-only for an intentional iteration; every selected existing preview will then be
+the approved seed as Image A. The worker pool processes independent pairs in
+parallel while the shared limiter spaces every initial or corrective image call
+at the configured rate. The operation log records the effective rate,
+concurrency, per-item completion, and any failures. A failed work unit does not
+discard successful siblings; correct its input and use **Resume** to retry only
+unfinished units. Existing previews are skipped by default, which makes adding
+coverage safe and avoids duplicate API cost. Enable replacement only for an
+intentional iteration; every selected existing preview will then be
 regenerated. The prompt preserves the complete seed design and replaces only
 the featured pet with a generic representative of the selected dog breed, cat
-group, or other configured subject.
+group, or other configured subject. A semantic-validation mismatch may make
+one additional paid corrective image call, and that retry uses the same
+50-images-per-minute quota.
 
 Outputs are stored at:
 
@@ -273,7 +328,25 @@ work/static-graduated-designs/<seed-design-id>/
 ```
 
 `subject-generation.json` records the seed digest, subject, model, quality,
-prompt, optional operator instruction, output digest, and generation time.
+prompt, explicit generation/species contract, semantic-validation attempts,
+optional operator instruction, output digest, generation time, and a
+deterministic `print_readiness` pixel report. Every GPT Image request includes
+an explicit production-print instruction: keep typography and intentional
+detail crisp, keep visible artwork interiors solid, constrain partial alpha to
+narrow antialiased edges, and avoid blur, halos, stray pixels, broad translucent
+washes, and transparent holes. The GUI and batch workflow use this same prompt;
+there is no browser-only shortcut. Marketing
+labels such as `Dog lover` are never used as the entity to generate; the private
+catalog supplies an unambiguous description such as `exactly one mixed-breed
+domestic dog`. Every machine-facing description must explicitly name its
+species. The prompt preserves emotional intent rather than blindly copying the
+source pet's anatomy: cats do not inherit dog-like panting or a casually
+protruding tongue, while dog mouth, ears, tail, and pose remain appropriate to
+the requested breed/type. A natural open feline mouth is allowed when the
+design context clearly represents meowing, hissing, yawning, grooming, licking,
+eating, or drinking. Ambiguous but plausible expressions are retained with an
+operator-review recommendation; species-inappropriate expressions fail and are
+retried. Validation checks these behaviors together with breed/coat identity.
 Replacing a subject preview invalidates its prior operator decision because
 decisions are keyed to the source-image digest.
 
@@ -282,6 +355,25 @@ decisions are keyed to the source-image digest.
 Review every generated subject against all useful background colors. Record
 **Approve subject**, **Needs rework**, or **Abandon subject** with an optional
 note.
+
+An orange **Animal behavior needs attention** panel identifies a borderline
+semantic result and explains why it needs human judgment. The label is stored
+against the exact preview digest and is repeated at the subject, product, and
+workflow checkpoints until the operator approves or abandons that preview.
+Choose **Review attention → Needs attention** to isolate all active reference,
+subject, or product warnings. Approval resolves the active warning but retains
+the reviewed label for traceability; regenerating the preview replaces the flag
+only when the new digest has its own validation evidence.
+
+An orange **Pixel preflight needs attention** panel means the saved generation
+did not pass deterministic print-readiness checks. The check verifies exact
+dimensions, visible pixels, the seed's opaque/transparent canvas policy, broad
+partial-alpha coverage, low-alpha fringe, and whether a product output was
+enlarged from its source. Expand the warning for measured percentages and the
+specific finding, inspect the PNG at 100% zoom, then regenerate or repair it
+before approval. This check cannot judge spelling, composition, subject
+accuracy, or whether painterly texture is intentional; operator visual review
+remains required.
 
 For batch review, filter the graduated table, choose **Select all filtered**,
 then use either **Approve selected subjects** or **Needs work for selected
@@ -440,6 +532,13 @@ The evidence view renders each PNG at its natural aspect ratio and shows the
 measured transparent-pixel and transparent-border percentages. Checkerboard
 space outside the image element is not treated as asset transparency. An
 `opaque-full-bleed` artifact must report zero for both measurements.
+Every newly generated operator preview, exact product preview, and print target
+also receives the same `print_readiness` report in `generation.json`. A failed
+report is shown inline as **Not print-ready**, appears under the **Needs
+attention** filter, and is copied into the batch operation warning log. Pixel
+warnings are advisory so intentional watercolor/translucent media can be
+accepted by an operator; existing hard canvas-contract violations remain
+blocking.
 `generation.json` pins one product profile and its canonical semantic digest,
 its local version, the exact subject-source digest, fit mode, and inferred
 canvas policy. Replacing a subject preview invalidates
@@ -477,6 +576,25 @@ In the operator workflow:
 3. Choose **Validate release** and inspect the plan.
 4. Choose **Validate and publish to S3**. Validation writes the assigned ID back
    into the field so the following publish uses the exact same draft.
+
+Validation checks the complete immutable S3 object plan before any upload.
+Objects that already exist with identical hashes are safe to reuse. A different
+hash under the same bundle version is rejected before the first write; generate
+the next product version rather than changing only the release ID. The bundle
+manifest creation time is pinned to the generated product version, so packaging
+the same version in a later release produces byte-identical bundle metadata.
+
+S3 preflight reads and immutable uploads use a bounded concurrent pool. The
+default is 16 workers, configured with
+`STATIC_PRINT_S3_UPLOAD_MAX_CONCURRENCY`. Assets upload first, bundle manifests
+second, and the release catalog commit marker last; the mutable discovery
+catalog is still conditionally updated only after every immutable object is
+verified. Throttling, timeouts, connection failures, and transient 5xx errors
+retry up to `STATIC_PRINT_S3_MAX_ATTEMPTS` with exponential delay based on
+`STATIC_PRINT_S3_RETRY_BASE_SECONDS`. Authentication, permission, immutable
+hash, and conditional-write conflicts fail immediately. Successfully uploaded
+immutable objects are verified and safely reused when the operator retries the
+release.
 
 After the publication receipt is recorded, the current subject pixels appear
 under **Released**, with the release ID, version, product profile, preview, and
@@ -572,6 +690,10 @@ disabled remains an application policy.
 This expert workflow is for artifacts that the current implementation cannot
 consume. It does not delete a valid bundle because it is old, retired, or no
 longer selected by the stable catalog.
+
+This is separate from the GUI history cleanup above. History cleanup removes
+valid but superseded private authoring versions; obsolete-artifact retirement
+handles files and S3 objects that no longer satisfy the current contract.
 
 Stop the GUI/server before cleanup. Run a read-only audit first; it prints every
 exact local path and S3 key with the rejection reason:

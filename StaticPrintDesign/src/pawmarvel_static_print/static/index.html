@@ -58,8 +58,14 @@
         <label>Collection
           <select id="collection-filter"><option value="">All collections</option></select>
         </label>
+        <label>Subject
+          <select id="subject-filter"><option value="">All subjects</option></select>
+        </label>
+        <label id="product-filter-control" class="hidden">Product
+          <select id="product-filter"><option value="">All products</option></select>
+        </label>
         <label>Design
-          <input id="design-filter" type="search" placeholder="Search design ID or subject">
+          <input id="design-filter" type="search" placeholder="Search design ID">
         </label>
         <label>Transparency
           <select id="transparency-filter">
@@ -83,6 +89,13 @@
             <option value="subject-pending">Subject decision pending</option>
             <option value="released">Released</option>
             <option value="unreleased">Not released</option>
+          </select>
+        </label>
+        <label id="attention-filter-control" class="hidden">Review attention
+          <select id="attention-filter">
+            <option value="">All attention states</option>
+            <option value="needs-attention">Needs attention</option>
+            <option value="no-attention">No active attention</option>
           </select>
         </label>
         <label id="selection-filter-control" class="hidden">Current selection
@@ -126,8 +139,46 @@
           </div>
         </details>
 
+        <details id="history-cleanup-controls" class="panel hidden">
+          <summary><h2>Authoring history cleanup · <span id="history-cleanup-stat">No proposal</span></h2></summary>
+          <p class="hint">Inventory superseded local product versions across every lifecycle pool. Current candidates, published versions, source designs, subject previews, release bundles, and in-progress work are protected.</p>
+          <div class="button-row">
+            <button id="generate-history-cleanup" type="button" class="secondary">Generate cleanup proposal</button>
+            <button id="select-history-cleanup-visible" type="button" class="secondary">Select all filtered</button>
+            <button id="clear-history-cleanup-selection" type="button" class="secondary">Clear selection</button>
+            <button id="execute-history-cleanup" type="button" class="danger">Delete selected unused history</button>
+          </div>
+          <div class="cleanup-filters">
+            <label>Pool
+              <select id="history-cleanup-pool-filter">
+                <option value="">All pools</option>
+                <option value="active">Active</option>
+                <option value="graduated">Graduated</option>
+                <option value="released">Released</option>
+                <option value="abandoned">Abandoned</option>
+                <option value="orphaned">Orphaned</option>
+              </select>
+            </label>
+            <label>Product
+              <select id="history-cleanup-product-filter"><option value="">All products</option></select>
+            </label>
+            <label>Design or subject
+              <input id="history-cleanup-design-filter" type="search" placeholder="Filter cleanup candidates">
+            </label>
+            <label>Selection
+              <select id="history-cleanup-selection-filter">
+                <option value="">All candidates</option>
+                <option value="selected">Selected</option>
+                <option value="unselected">Not selected</option>
+              </select>
+            </label>
+          </div>
+          <p id="history-cleanup-summary" class="hint">Generate a proposal before selecting any history.</p>
+          <div id="history-cleanup-proposal" class="history-cleanup-proposal"></div>
+        </details>
+
         <details id="subject-batch-controls" class="panel subject-production-control hidden">
-          <summary><h2>Batch subject-preview generation · <span id="subject-batch-stat">0 references × 0 subjects = 0 calls</span></h2></summary>
+          <summary><h2>Batch subject-preview generation · <span id="subject-batch-stat">0 references × 0 subjects = 0 base calls</span></h2></summary>
           <p id="subject-batch-selection" class="hint">No references or subjects selected.</p>
           <fieldset><legend>Subjects to generate</legend><div id="batch-subject-options" class="checks"></div></fieldset>
           <label>Optional regeneration instruction
@@ -141,7 +192,7 @@
             <button id="clear-subjects" type="button" class="secondary">Clear subjects</button>
             <button id="generate-subjects-batch" type="button">Generate selected references × subjects</button>
           </div>
-          <p class="hint">Subject generation uses paid image calls. Existing previews are protected unless replacement is explicitly enabled.</p>
+          <p class="hint">Subject generation uses paid image calls. The launch-tier scheduler starts up to 50 image requests per minute with up to 50 in flight. Semantic failures may add one rate-limited corrective image call. Existing previews are protected unless replacement is explicitly enabled.</p>
         </details>
 
         <details id="operator-controls" class="panel production-control hidden">
