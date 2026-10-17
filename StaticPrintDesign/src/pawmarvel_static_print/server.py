@@ -63,6 +63,7 @@ from .lifecycle import (
     move_seed,
     move_seeds,
     pool_root,
+    save_subject_generation_requirements,
     transparency_report,
 )
 from .operations import (
@@ -1914,6 +1915,9 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
             elif path == "/api/operator/import-collection":
                 if self._require("operator"):
                     self._import_collection(body)
+            elif path == "/api/operator/subject-generation-requirements":
+                if self._require("operator"):
+                    self._save_subject_generation_requirements(body)
             elif path == "/api/operator/generate-subjects":
                 if self._require("operator"):
                     self._generate_subjects(body)
@@ -2118,6 +2122,25 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
             result = import_review_collection(
                 self.server.config.work_root,
                 Path(raw_path.strip()),
+            )
+        self._json(HTTPStatus.OK, result)
+
+    def _save_subject_generation_requirements(
+        self, body: dict[str, Any]
+    ) -> None:
+        requirements = body.get("subject_generation_requirements", "")
+        if not isinstance(requirements, str):
+            raise StaticPrintError(
+                "subject_generation_requirements must be a string"
+            )
+        with self.server.intake_lock:
+            result = save_subject_generation_requirements(
+                self.server.config.inputs_root,
+                seed_design_id=str(body.get("seed_design_id", "")),
+                requirements=requirements,
+                expected_source_sha256=str(
+                    body.get("expected_source_sha256", "")
+                ),
             )
         self._json(HTTPStatus.OK, result)
 

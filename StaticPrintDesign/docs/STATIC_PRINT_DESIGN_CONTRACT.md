@@ -82,6 +82,13 @@ vision request for a theme-descriptive ID. A filename collision is resolved by
 prefixing the collection ID before adding `-1`, `-2`, and later suffixes.
 `intake.json` pins the resolved source path to that selected ID, so a refresh of
 the same candidate never changes its identity or incurs another naming request.
+It also carries the operator-authored `subject_generation_requirements` string:
+a private, persistent visual contract that the generator appends to every
+subject prompt after graduation. Re-import preserves this field. It is recorded
+again in `subject-generation.json` for reproducibility, but remains offline
+authoring provenance and does not change the FE bundle contract.
+The optional `[PET BREED]` token resolves to the selected subject catalog's
+generation description; provenance stores both the authored and resolved text.
 The ID becomes immutable once review begins; the naming model is not an FE
 dependency and its output is never used as a display label.
 
@@ -292,7 +299,7 @@ reactivates that bundle. Physical S3 deletion is outside the MVP GUI.
 work/
   static-design-inputs/<seed-design-id>/
     source-design.png
-    intake.json              # pins source path -> unique semantic seed ID
+    intake.json              # pins source/ID and persistent subject-generation rules
   static-graduated-designs/<seed-design-id>/
     source-design.png
     <subject-id>/

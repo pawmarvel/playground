@@ -875,10 +875,75 @@ function seedActions(design) {
   return actions;
 }
 
+function subjectGenerationRequirementsControl(design, { editable = false } = {}) {
+  const requirements = String(design.intake?.subject_generation_requirements || "").trim();
+  const panel = node("div", "feedback subject-generation-requirements");
+  const wrapper = editable ? node("details", "checkpoint-actions") : panel;
+  if (editable) {
+    wrapper.open = !requirements;
+    wrapper.append(node(
+      "summary",
+      "",
+      `Subject-generation design requirements · ${requirements ? "saved" : "not set"}`,
+    ));
+    wrapper.append(panel);
+  }
+  panel.append(node("h3", "", "Persistent subject-generation requirements"));
+  panel.append(node(
+    "p",
+    "hint",
+    editable
+      ? "Capture the seed-specific visual rules before graduation. They are automatically applied to every future subject preview; one-off regeneration instructions remain separate."
+      : "These seed-specific visual rules are automatically applied to every subject preview.",
+  ));
+  if (!editable) {
+    panel.append(node(
+      "p",
+      requirements ? "" : "hint",
+      requirements || "No persistent seed-specific requirements were recorded.",
+    ));
+    return wrapper;
+  }
+  const label = node("label", "", "Important design elements and constraints");
+  const textarea = node("textarea");
+  textarea.maxLength = 4000;
+  textarea.value = requirements;
+  textarea.placeholder = "Example: preserve only the black pet silhouette outline and solid-color holiday lights; every other pixel must be fully transparent.";
+  label.append(textarea);
+  const save = node("button", "secondary", "Save design requirements");
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    showStatus(`Saving subject-generation requirements · ${design.seed_design_id}`);
+    try {
+      await request("/api/operator/subject-generation-requirements", {
+        method: "POST",
+        body: JSON.stringify({
+          seed_design_id: design.seed_design_id,
+          subject_generation_requirements: textarea.value,
+          expected_source_sha256: design.source_sha256,
+        }),
+      });
+      showStatus(`Saved persistent subject-generation requirements · ${design.seed_design_id}`);
+      await loadState();
+    } catch (error) {
+      showStatus(`Could not save design requirements: ${error.message}`, true);
+    } finally {
+      save.disabled = false;
+    }
+  });
+  panel.append(label, save);
+  return wrapper;
+}
+
 function subjectGenerationControls(seed) {
   const panel = node("div", "feedback");
   panel.append(node("h3", "", "Generate subject previews"));
-  panel.append(node("p", "hint", "Paid image-edit calls. The approved seed is Image A; select all catalog subjects or only the coverage needed now."));
+  const hasRequirements = Boolean(String(seed.intake?.subject_generation_requirements || "").trim());
+  panel.append(node(
+    "p",
+    "hint",
+    `Paid image-edit calls. The approved seed is Image A; select all catalog subjects or only the coverage needed now. ${hasRequirements ? "The saved seed-specific requirements will be applied automatically." : "No seed-specific requirements are recorded."}`,
+  ));
   const checks = node("div", "checks subject-checks");
   const existing = new Set(
     currentState.designs
@@ -1392,6 +1457,13 @@ function referenceCheckpoint(seed, includeGeneration) {
     activeOnly: true,
   });
   if (attention) cell.append(attention);
+  const requirements = String(seed.intake?.subject_generation_requirements || "").trim();
+  if (requirements) {
+    const requirementsDetails = node("details", "checkpoint-actions");
+    requirementsDetails.append(node("summary", "", "Saved subject-generation requirements"));
+    requirementsDetails.append(node("p", "", requirements));
+    cell.append(requirementsDetails);
+  }
   if (includeGeneration) {
     const selection = node("label", "lifecycle-selection", "Select reference for batch subject generation");
     const checkbox = node("input");
@@ -1735,6 +1807,11 @@ function operatorCard(design) {
   const attention = reviewAttentionNotice(design, { activeOnly: true });
   if (attention) card.append(attention);
   if (!design.subject_id) {
+    if (design.pool === "active") {
+      card.append(subjectGenerationRequirementsControl(design, { editable: true }));
+    } else if (design.pool === "graduated" && String(design.intake?.subject_generation_requirements || "").trim()) {
+      card.append(subjectGenerationRequirementsControl(design));
+    }
     card.append(seedActions(design));
     if (design.pool === "graduated") card.append(subjectGenerationControls(design));
   } else if (design.pool === "graduated") {

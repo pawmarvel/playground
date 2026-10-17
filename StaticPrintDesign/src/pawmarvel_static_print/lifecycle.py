@@ -38,6 +38,7 @@ from .image_quality import (
 POOL_NAMES = {"active", "graduated", "abandoned"}
 OPAQUE_FULL_BLEED = "opaque-full-bleed"
 PRESERVE_TRANSPARENCY = "preserve-transparency"
+SUBJECT_GENERATION_REQUIREMENTS_MAX_LENGTH = 4000
 PRINT_QUALITY_PROMPT = (
     "Optimize the returned pixels for production printing at the requested canvas "
     "size: preserve crisp typography, line art, pattern edges, and intentional fine "
@@ -464,6 +465,11 @@ def import_review_collection(
             if recorded_canvas_policy in {OPAQUE_FULL_BLEED, PRESERVE_TRANSPARENCY}
             else inferred_canvas_policy
         )
+        subject_generation_requirements = (
+            str(existing_intake.get("subject_generation_requirements", "")).strip()
+            if existing_intake is not None
+            else ""
+        )
         if (
             canvas_policy == OPAQUE_FULL_BLEED
             and source_transparency["has_transparent_pixels"]
@@ -503,6 +509,7 @@ def import_review_collection(
                 "design_id": design_id,
                 "design_id_generation": proposal,
                 "canvas_policy": canvas_policy,
+                "subject_generation_requirements": subject_generation_requirements,
                 "source_transparency": source_transparency,
                 "imported_at": utc_now(),
             },
@@ -515,6 +522,57 @@ def import_review_collection(
             }
         )
     return result
+
+
+def save_subject_generation_requirements(
+    active_root: Path,
+    *,
+    seed_design_id: str,
+    requirements: str,
+    expected_source_sha256: str,
+) -> dict[str, Any]:
+    """Persist the seed-specific contract applied to every subject generation."""
+
+    seed_design_id = validate_id(seed_design_id, "seed design ID")
+    seed_root = (active_root / seed_design_id).resolve()
+    source = seed_root / "source-design.png"
+    intake_path = seed_root / "intake.json"
+    if not source.is_file():
+        raise StaticPrintError(
+            "active seed design does not exist; refresh the operator view and retry: "
+            f"design_id={seed_design_id!r}; source={source}"
+        )
+    if not intake_path.is_file():
+        raise StaticPrintError(
+            "active seed has no intake metadata; reload it through the collection "
+            f"intake workflow before saving generation requirements: {intake_path}"
+        )
+    normalized = requirements.strip()
+    if len(normalized) > SUBJECT_GENERATION_REQUIREMENTS_MAX_LENGTH:
+        raise StaticPrintError(
+            "subject generation requirements must not exceed "
+            f"{SUBJECT_GENERATION_REQUIREMENTS_MAX_LENGTH} characters; "
+            f"actual={len(normalized)}"
+        )
+    actual_digest = sha256_file(source)
+    expected_digest = expected_source_sha256.strip()
+    if expected_digest != actual_digest:
+        raise StaticPrintError(
+            "active seed changed after it was loaded; refresh before saving subject "
+            "generation requirements: "
+            f"design_id={seed_design_id!r}; expected_source_sha256={actual_digest}; "
+            f"actual_source_sha256={expected_digest or '<missing>'}"
+        )
+    intake = read_json(intake_path)
+    intake["subject_generation_requirements"] = normalized
+    intake["requirements_updated_at"] = utc_now()
+    write_json(intake_path, intake)
+    return {
+        "seed_design_id": seed_design_id,
+        "source_sha256": actual_digest,
+        "subject_generation_requirements": normalized,
+        "intake": str(intake_path),
+    }
 
 
 def load_subject_catalog(path: Path) -> tuple[dict[str, Any], tuple[Subject, ...]]:
@@ -1063,7 +1121,16 @@ def openai_subject_validator(
         "featured-pet role; ignore small decorative animals, printed patterns, and "
         "text. The required featured species is "
         f"{subject.subject_species}. The requested subject identity is: "
-        f"{subject.generation_description}. Determine whether Image B preserves Image "
+        f"{subject.generation_description}. The seed pet in Image A is intentionally "
+        "being replaced and may be a different breed, coat, type, or species. Judge "
+        "subject_identity_matches only by whether the principal subject in Image B "
+        "matches the requested subject identity above; never require it to retain "
+        "the seed pet's breed, coat, type, or species. The variant is not required "
+        "to prove that it depicts the same individual animal as Image A. If Image B "
+        "visibly matches the requested identity, subject_identity_matches must be "
+        "true; do not reject it because the replacement relationship cannot be "
+        "independently verified from the image pair. Determine whether Image B "
+        "preserves Image "
         "A's emotional intent while translating the face, mouth, tongue, pose, and "
         "tail into natural behavior and anatomy for the requested animal. For cats, "
         "dog-like panting or a copied casually protruding tongue is inappropriate. "
@@ -1247,7 +1314,8 @@ def generate_subject_variants(
     retry_sleeper: Callable[[float], None] = sleep,
 ) -> list[dict[str, Any]]:
     seed_design_id = validate_id(seed_design_id, "seed design ID")
-    seed = (graduated_root / seed_design_id / "source-design.png").resolve()
+    seed_root = (graduated_root / seed_design_id).resolve()
+    seed = seed_root / "source-design.png"
     if not seed.is_file():
         raise StaticPrintError(
             f"graduated seed design does not exist: {seed}; graduate the seed first"
@@ -1268,12 +1336,28 @@ def generate_subject_variants(
         raise StaticPrintError("provider_max_attempts must be positive")
     if provider_retry_base_seconds <= 0:
         raise StaticPrintError("provider_retry_base_seconds must be positive")
+    intake_path = seed_root / "intake.json"
+    intake = read_json(intake_path) if intake_path.is_file() else {}
+    requirements_value = intake.get("subject_generation_requirements", "")
+    if not isinstance(requirements_value, str):
+        raise StaticPrintError(
+            "subject_generation_requirements in intake metadata must be a string: "
+            f"{intake_path}"
+        )
+    subject_generation_requirements = requirements_value.strip()
+    if (
+        len(subject_generation_requirements)
+        > SUBJECT_GENERATION_REQUIREMENTS_MAX_LENGTH
+    ):
+        raise StaticPrintError(
+            "subject generation requirements must not exceed "
+            f"{SUBJECT_GENERATION_REQUIREMENTS_MAX_LENGTH} characters: {intake_path}"
+        )
     results: list[dict[str, Any]] = []
     seed_digest = sha256_file(seed)
     if validator is None and generator is openai_subject_generator:
         validator = openai_subject_validator
     for subject in selected:
-        seed_root = graduated_root / seed_design_id
         destination = seed_root / subject.subject_id
         final_output = destination / "source-design.png"
         if final_output.exists() and not force:
@@ -1292,6 +1376,21 @@ def generate_subject_variants(
         staging.mkdir(parents=True)
         output = staging / "source-design.png"
         prompt = subject_prompt(subject, canvas_policy=canvas_policy)
+        resolved_subject_generation_requirements = (
+            subject_generation_requirements.replace(
+                "[PET BREED]", subject.generation_description
+            )
+        )
+        if subject_generation_requirements:
+            prompt += (
+                "\n\nPersistent seed design requirements (mandatory for every "
+                "subject variant):\n"
+                f"{resolved_subject_generation_requirements}\n"
+                "Honor these requirements exactly. They may change how the seed's "
+                "pet pixels, alpha, outlines, colors, and interior areas are "
+                "reconstructed, but they must not change the requested subject "
+                "identity, exact text, canvas dimensions, or safety requirements."
+            )
         if instruction:
             prompt += (
                 "\n\nOperator improvement instruction: "
@@ -1471,6 +1570,10 @@ def generate_subject_variants(
             "output_transparency": output_transparency,
             "print_readiness": print_readiness,
             "prompt": generation_prompt,
+            "subject_generation_requirements": subject_generation_requirements,
+            "resolved_subject_generation_requirements": (
+                resolved_subject_generation_requirements
+            ),
             "subject_contract": {
                 "display_name": subject.display_name,
                 "subject_kind": subject.subject_kind,

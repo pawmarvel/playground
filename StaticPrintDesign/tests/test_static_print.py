@@ -67,6 +67,7 @@ from pawmarvel_static_print.lifecycle import (
     openai_design_id_generator,
     openai_subject_generator,
     openai_subject_validator,
+    save_subject_generation_requirements,
     subject_prompt,
     transparency_report,
 )
@@ -2595,6 +2596,11 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         self.assertFalse(request["store"])
         self.assertEqual(request["input"][0]["content"][1]["detail"], "low")
         self.assertEqual(request["input"][0]["content"][2]["detail"], "low")
+        validation_prompt = request["input"][0]["content"][0]["text"]
+        self.assertIn(
+            "never require it to retain the seed pet's breed, coat, type, or species",
+            validation_prompt,
+        )
         self.assertEqual(
             request["text"]["format"]["name"], "subject_preview_validation"
         )
@@ -2908,6 +2914,54 @@ class StaticPrintWorkflowTest(unittest.TestCase):
             retried["skipped"][0]["reason"], "already exists in graduated pool"
         )
 
+    def test_active_seed_requirements_are_saved_and_preserved_on_reimport(self) -> None:
+        collection = self.root / "Festive Lights"
+        collection.mkdir()
+        source = collection / "Festive Light Dog.png"
+        Image.new("RGBA", (40, 40), (0, 0, 0, 0)).save(source)
+        imported = import_review_collection(
+            self.root,
+            collection,
+            design_id_generator=lambda _: DesignIdProposal(
+                "festive-light-dog", "test"
+            ),
+        )
+        design_id = imported["imported"][0]["design_id"]
+        active = self.inputs / design_id
+        source_digest = hashlib.sha256(
+            (active / "source-design.png").read_bytes()
+        ).hexdigest()
+
+        saved = save_subject_generation_requirements(
+            self.inputs,
+            seed_design_id=design_id,
+            requirements=" Keep the interior fully transparent. ",
+            expected_source_sha256=source_digest,
+        )
+        self.assertEqual(
+            saved["subject_generation_requirements"],
+            "Keep the interior fully transparent.",
+        )
+        import_review_collection(
+            self.root,
+            collection,
+            design_id_generator=lambda _: self.fail(
+                "re-import must use the pinned design ID"
+            ),
+        )
+        intake = read_json(active / "intake.json")
+        self.assertEqual(
+            intake["subject_generation_requirements"],
+            "Keep the interior fully transparent.",
+        )
+        with self.assertRaisesRegex(StaticPrintError, "changed after it was loaded"):
+            save_subject_generation_requirements(
+                self.inputs,
+                seed_design_id=design_id,
+                requirements="updated",
+                expected_source_sha256="stale",
+            )
+
     def test_collection_reimport_enforces_recorded_opaque_canvas_policy(self) -> None:
         collection = self.root / "Holiday Selfie"
         collection.mkdir()
@@ -3164,6 +3218,73 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         self.assertTrue(transparency_report(output)["has_transparent_pixels"])
         provenance = read_json(output.parent / "subject-generation.json")
         self.assertEqual(provenance["canvas_policy"], "preserve-transparency")
+
+    def test_subject_generation_applies_persistent_seed_requirements(self) -> None:
+        destination = move_seed(
+            self.root,
+            seed_design_id="sample-design",
+            source="active",
+            target="graduated",
+        )
+        Image.new("RGBA", (100, 50), (0, 0, 0, 0)).save(
+            destination / "source-design.png"
+        )
+        (destination / "intake.json").write_text(
+            json.dumps(
+                {
+                    "schema": "pawmarvel-static-review-intake-v1",
+                    "canvas_policy": "preserve-transparency",
+                    "subject_generation_requirements": (
+                        "Draw [PET BREED] with only solid black contours and "
+                        "solid-color bulbs; "
+                        "the pet interior must be alpha zero."
+                    ),
+                }
+            ),
+            encoding="utf-8",
+        )
+        subject = Subject(
+            subject_id="dog-dachshund",
+            display_name="Dachshund",
+            subject_kind="dog-breed",
+            subject_species="dog",
+            generation_description="exactly one Dachshund dog",
+            hero_strategy="breed",
+            collection_path="/collections/dachshund-gifts",
+        )
+        prompts: list[str] = []
+
+        def fake_generator(source, selected, prompt, size):
+            prompts.append(prompt)
+            return Image.new("RGBA", size, (0, 0, 0, 0))
+
+        generate_subject_variants(
+            graduated_root=self.root / "static-graduated-designs",
+            seed_design_id="sample-design",
+            subjects=[subject],
+            generator=fake_generator,
+            instruction="Make the muzzle proportion breed-appropriate.",
+        )
+        self.assertIn("Persistent seed design requirements", prompts[0])
+        self.assertIn("Draw exactly one Dachshund dog", prompts[0])
+        self.assertNotIn("[PET BREED]", prompts[0])
+        self.assertIn("pet interior must be alpha zero", prompts[0])
+        self.assertIn("Operator improvement instruction", prompts[0])
+        provenance = read_json(
+            destination / "dog-dachshund/subject-generation.json"
+        )
+        self.assertEqual(
+            provenance["subject_generation_requirements"],
+            (
+                "Draw [PET BREED] with only solid black contours and "
+                "solid-color bulbs; "
+                "the pet interior must be alpha zero."
+            ),
+        )
+        self.assertIn(
+            "Draw exactly one Dachshund dog",
+            provenance["resolved_subject_generation_requirements"],
+        )
 
     def test_subject_variant_uses_nested_private_folders(self) -> None:
         nested = self.inputs / "holiday-patrol/dog-dachshund"

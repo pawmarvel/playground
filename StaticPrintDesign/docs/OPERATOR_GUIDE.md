@@ -99,15 +99,27 @@ work/static-design-inputs/<design-id>/
 ```
 
 `intake.json` records the selected design ID, naming method/model, collection,
-original local path, source digest, transparency evidence, and inferred canvas
-policy. A source with no transparent pixels is classified as
+original local path, source digest, transparency evidence, inferred canvas
+policy, and any persistent subject-generation requirements saved by the
+operator. A source with no transparent pixels is classified as
 `opaque-full-bleed`; a source containing any alpha transparency is classified
 as `preserve-transparency`. Review the assigned IDs shown in the completion
 message before collecting votes.
 
+Before graduating a seed, use **Persistent subject-generation requirements** on
+its active-review card to record the visual rules that every derived subject
+must obey. Capture only design-specific invariants such as required line work,
+solid colors, alpha regions, accessories, text, or elements that must never be
+added. This contract moves with the seed and is automatically included in every
+subject-generation call. Use **Optional generation instruction** later only for
+a one-off regeneration adjustment; it does not replace the persistent contract.
+Within the persistent requirements, `[PET BREED]` is replaced with the selected
+catalog subject's generation description before the image request is submitted.
+
 The source's resolved path pins its ID. Reloading a collection is idempotent:
 unchanged designs remain unchanged, modified active candidates retain their ID
-and are refreshed without another naming call, and designs already graduated
+and are refreshed without another naming call. Saved subject-generation
+requirements are preserved on re-import. Designs already graduated
 or abandoned are skipped. The original collection is never renamed or
 modified. Moving a source to a different path is treated as a new candidate.
 
