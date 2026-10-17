@@ -1,6 +1,7 @@
 {
   "schema": "pawmarvel-static-product-profile-v1",
   "product_profile_id": "tumbler-20oz",
+  "composition": "repeat-horizontal",
   "preview": {"width": 1080, "height": 811},
   "print_targets": [
     {"target_id": "2795x2100", "width": 2795, "height": 2100, "dpi": 300, "color_space": "sRGB", "background": "transparent"}

@@ -193,6 +193,13 @@ write feedback. Edits across several cards are queued and saved in one batch.
 Feedback is upserted per `(design_id, source_sha256, reviewer)`; saving against
 pixels changed since page load is rejected with a refresh instruction.
 
+The private UI collection is not part of bundle identity. Recorded intake
+metadata is authoritative; otherwise, two or more manually added seed IDs with
+a shared prefix of at least two segments are grouped under the largest matching
+sibling prefix, using the most specific prefix on a tie. This makes collections
+such as `holiday-ornament-*` filterable without rewriting historical inputs or
+changing the public FE catalog contract.
+
 Reviewer votes are advisory. Only the operator can move seed folders or record
 subject/product/publication decisions.
 
@@ -239,8 +246,8 @@ not rewritten.
 
 Every GPT Image subject request includes the same production-print pixel
 instruction whether invoked individually or through the GUI batch workflow.
-After every paid subject generation and every deterministic preview/print
-render, a shared local preflight measures exact canvas size, visible and opaque
+After every paid subject generation and every product preview/print render, a
+shared local preflight measures exact canvas size, visible and opaque
 pixel counts, partial/low alpha, canvas-policy compliance, and product upscale
 ratio. Reports and actionable warnings are private, digest-bound operator
 evidence in `subject-generation.json` and `generation.json`; they do not change
@@ -248,6 +255,14 @@ the FE bundle schema. A warning requires 100% zoom review and regeneration or
 repair when defects are visible. It is not a semantic or aesthetic classifier,
 so it does not replace human review and does not block intentional painterly
 transparency by itself.
+
+Print enlargement uses the privately configured Bria backend and records its
+native increase plus input/output dimensions. Alpha geometry remains owned by
+the approved subject source. Product profiles may select the default `cover`
+composition or `repeat-horizontal` for two-sided wrap products; composition is
+part of the canonical profile digest. These are private authoring choices. The
+public FE bundle remains `preview.png`, exact `print/<target-id>.png` assets,
+and the existing manifest contract.
 
 ### 5.4 Vendor or product-spec update
 
@@ -512,7 +527,8 @@ The MVP keeps one installable Python package and a build-free local web UI:
 | `lifecycle.py` | intake pools, seed movement, subject catalog and paid subject generation |
 | `image_quality.py` | shared deterministic alpha-band reports, product/process print recommendations, and operator warnings |
 | `reviews.py` | digest-bound reviewer/operator decisions and atomic batches |
-| `authoring.py` | deterministic product preview/print rendering and private provenance |
+| `authoring.py` | product composition, exact preview/print rendering, and private provenance |
+| `upscale.py` | bounded Bria print enhancement, alpha-geometry preservation, and retry handling |
 | `bundles.py` | immutable bundle/release construction and validation |
 | `catalog.py` | pure public discovery-catalog derivation, validation, and lifecycle transitions |
 | `publisher.py` | AWS reads, conditional immutable uploads, catalog replacement, verification |

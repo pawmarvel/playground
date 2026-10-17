@@ -17,9 +17,11 @@ from jsonschema import Draft202012Validator
 from PIL import Image, ImageChops, ImageDraw
 
 from pawmarvel_static_print.authoring import (
+    annotate_design_collections,
     discover_designs,
     generate_design,
     initialize_workspace,
+    render_target,
 )
 from pawmarvel_static_print.bundles import (
     BundleSelection,
@@ -170,6 +172,68 @@ class StaticPrintWorkflowTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_manual_design_collections_use_shared_seed_prefix(self) -> None:
+        ornament_ids = (
+            "holiday-ornament-oil-painting-head",
+            "holiday-ornament-water-color-head",
+            "holiday-ornament-watercolor-sausage",
+        )
+        mug_ids = (
+            "holiday-mug-merry-pawlidays-with-bruno",
+            "holiday-mug-mug-2",
+            "holiday-mug-mug-3",
+            "holiday-mug-mug-4",
+            "holiday-mug-mug-5",
+            "holiday-mug-mug-6",
+        )
+        designs = [
+            {
+                "design_id": seed_id,
+                "seed_design_id": seed_id,
+                "intake": None,
+            }
+            for seed_id in (*ornament_ids, *mug_ids)
+        ]
+        designs.append(
+            {
+                "design_id": f"{ornament_ids[0]}--subject-cat",
+                "seed_design_id": ornament_ids[0],
+                "intake": None,
+            }
+        )
+        annotate_design_collections(designs)
+        by_design = {item["design_id"]: item for item in designs}
+        for seed_id in ornament_ids:
+            self.assertEqual(by_design[seed_id]["collection_id"], "holiday-ornament")
+            self.assertEqual(
+                by_design[seed_id]["collection_source"], "shared-prefix"
+            )
+        for seed_id in mug_ids:
+            self.assertEqual(by_design[seed_id]["collection_id"], "holiday-mug")
+        self.assertEqual(
+            by_design[f"{ornament_ids[0]}--subject-cat"]["collection_id"],
+            "holiday-ornament",
+        )
+
+    def test_recorded_intake_collection_overrides_prefix_inference(self) -> None:
+        designs = [
+            {
+                "design_id": "holiday-ornament-one",
+                "seed_design_id": "holiday-ornament-one",
+                "intake": {"collection_id": "curated-holiday"},
+            },
+            {
+                "design_id": "holiday-ornament-two",
+                "seed_design_id": "holiday-ornament-two",
+                "intake": None,
+            },
+        ]
+        annotate_design_collections(designs)
+        self.assertEqual(designs[0]["collection_id"], "curated-holiday")
+        self.assertEqual(designs[0]["collection_source"], "intake")
+        self.assertEqual(designs[1]["collection_id"], "@manual")
+        self.assertEqual(designs[1]["collection_source"], "manual")
 
     def test_image_request_limiter_evenly_spaces_launch_tier_starts(self) -> None:
         current = [100.0]
@@ -1501,6 +1565,7 @@ class StaticPrintWorkflowTest(unittest.TestCase):
             manifest["preview"],
             {"path": "preview.png", "width": 64, "height": 48},
         )
+
         with (
             Image.open(profile_preview).convert("RGBA") as checkpoint_preview,
             Image.open(plan.bundle_manifests[0].parent / "preview.png").convert(
@@ -1568,6 +1633,89 @@ class StaticPrintWorkflowTest(unittest.TestCase):
             exchange_root=self.exchange,
         )
         self.assertEqual(manifest_bytes, later_release.bundle_manifests[0].read_bytes())
+
+    def test_repeat_horizontal_print_uses_enhanced_complete_copies(self) -> None:
+        design_id = self._subject_design()
+        source = self.inputs / "sample-design/cat/source-design.png"
+        transparent = Image.new("RGBA", (100, 50), (0, 0, 0, 0))
+        ImageDraw.Draw(transparent).rectangle(
+            (10, 5, 89, 44), fill=(220, 20, 50, 255)
+        )
+        transparent.save(source)
+        profile_path = self.root / "repeat-profile.json"
+        profile_path.write_text(
+            json.dumps(
+                {
+                    "schema": "pawmarvel-static-product-profile-v1",
+                    "product_profile_id": "repeat-product",
+                    "composition": "repeat-horizontal",
+                    "preview": {"width": 150, "height": 50},
+                    "print_targets": [
+                        {
+                            "target_id": "wide",
+                            "width": 300,
+                            "height": 100,
+                            "dpi": 300,
+                            "color_space": "sRGB",
+                            "background": "transparent",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        provider_calls: list[tuple[int, bool]] = []
+
+        def fake_bria(contents: bytes, increase: int, preserve_alpha: bool) -> bytes:
+            provider_calls.append((increase, preserve_alpha))
+            return contents
+
+        generated = generate_design(
+            inputs_root=self.inputs,
+            authoring_root=self.authoring,
+            design_id=design_id,
+            version_id="v000001",
+            profiles=[profile_path],
+            upscale_backend="bria",
+            normalize_print_alpha=True,
+            bria_provider=fake_bria,
+        )
+        self.assertEqual(provider_calls, [(2, True)])
+        self.assertEqual(generated["composition"], "repeat-horizontal")
+        self.assertTrue(generated["outputs"][0]["print_readiness"]["print_ready"])
+        generation = read_json(
+            self.authoring
+            / "sample-design/cat/repeat-product/v000001/generation.json"
+        )
+        self.assertEqual(
+            generation["render_pipeline"]["upscale"]["native_increase"], 2
+        )
+        with Image.open(generated["outputs"][0]["path"]) as output:
+            alpha = output.convert("RGBA").getchannel("A")
+            left = alpha.crop((0, 0, 150, 100)).getbbox()
+            right = alpha.crop((150, 0, 300, 100)).getbbox()
+        self.assertIsNotNone(left)
+        self.assertIsNotNone(right)
+
+    def test_repeat_horizontal_render_preserves_full_artwork_twice(self) -> None:
+        source = Image.new("RGBA", (100, 200), (0, 0, 0, 0))
+        ImageDraw.Draw(source).rectangle(
+            (0, 0, 99, 199), fill=(10, 20, 30, 255)
+        )
+        rendered = render_target(
+            source,
+            size=(300, 200),
+            fit="cover",
+            background="transparent",
+            composition="repeat-horizontal",
+        )
+        self.assertEqual(rendered.size, (300, 200))
+        self.assertIsNotNone(
+            rendered.getchannel("A").crop((0, 0, 150, 200)).getbbox()
+        )
+        self.assertIsNotNone(
+            rendered.getchannel("A").crop((150, 0, 300, 200)).getbbox()
+        )
 
     def test_legacy_generation_recovers_published_bundle_timestamp(self) -> None:
         profile = load_profile(self.profile_path)

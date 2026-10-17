@@ -18,10 +18,12 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .authoring import (
+    annotate_design_collections,
     design_canvas_policy,
     discover_designs,
     generate_design,
     initialize_workspace,
+    render_scale,
 )
 from .bundles import BundleSelection, prepare_release
 from .core import (
@@ -220,6 +222,29 @@ def _positive_float_setting(
             f"actual={value}; environment={environment_key}"
         )
     return value
+
+
+def _boolean_setting(
+    body: dict[str, Any],
+    *,
+    request_key: str,
+    environment_key: str,
+    default: bool,
+) -> bool:
+    raw = body.get(request_key)
+    if raw is None:
+        raw = os.environ.get(environment_key, "true" if default else "false")
+    if isinstance(raw, bool):
+        return raw
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise StaticPrintError(
+        f"{request_key} must be true or false; actual={raw!r}; "
+        f"environment={environment_key}"
+    )
 
 
 def _subject_retry_settings(body: dict[str, Any]) -> tuple[int, float]:
@@ -1243,6 +1268,7 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
             for design in discover_designs(root, config.authoring_root):
                 design["pool"] = pool
                 designs.append(design)
+        annotate_design_collections(designs)
         feedback = list_feedback(config.database)
         decisions = list_operator_decisions(config.database) if operator else {}
         profiles = discover_profiles(config.profiles_root)
@@ -1416,6 +1442,29 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                         if isinstance(recorded_print_readiness, dict)
                         else {}
                     )
+                    render_source_width = design["source_width"]
+                    render_source_height = design["source_height"]
+                    render_pipeline = (
+                        generation.get("render_pipeline")
+                        if isinstance(generation, dict)
+                        else None
+                    )
+                    if isinstance(render_pipeline, dict):
+                        upscale = render_pipeline.get("upscale")
+                        output_size = (
+                            upscale.get("output_size")
+                            if isinstance(upscale, dict)
+                            else None
+                        )
+                        if (
+                            isinstance(output_size, dict)
+                            and isinstance(output_size.get("width"), int)
+                            and output_size["width"] > 0
+                            and isinstance(output_size.get("height"), int)
+                            and output_size["height"] > 0
+                        ):
+                            render_source_width = output_size["width"]
+                            render_source_height = output_size["height"]
                     recorded_print_reports = generation_print_readiness.get("prints")
                     print_readiness_reports = (
                         recorded_print_reports
@@ -1443,9 +1492,10 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                             path=print_path,
                             expected_size=(target.width, target.height),
                             canvas_policy=design["canvas_policy"],
-                            upscale_ratio=max(
-                                target.width / design["source_width"],
-                                target.height / design["source_height"],
+                            upscale_ratio=render_scale(
+                                (render_source_width, render_source_height),
+                                (target.width, target.height),
+                                profile.composition,
                             ),
                             product_profile_id=profile.profile_id,
                         )
@@ -1516,6 +1566,8 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                         and generation.get("product_profile_sha256")
                         == product_profile_sha256(profile)
                         and generation.get("fit") == "cover"
+                        and generation.get("composition", "cover")
+                        == profile.composition
                         and generation.get("canvas_policy") == design["canvas_policy"]
                         and isinstance(
                             generation_transparency.get("profile_preview"), dict
@@ -2498,6 +2550,21 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
     def _generate_locked(self, body: dict[str, Any], *, resume: bool = False) -> None:
         profiles = discover_profiles(self.server.config.profiles_root)
         plans = _generation_plans(body.get("plans"), set(profiles))
+        upscale_backend = str(
+            body.get("upscale_backend")
+            or os.environ.get("STATIC_PRINT_UPSCALE_BACKEND", "deterministic")
+        ).strip()
+        if upscale_backend not in {"deterministic", "bria"}:
+            raise StaticPrintError(
+                "upscale_backend must be deterministic or bria; "
+                f"actual={upscale_backend!r}; environment=STATIC_PRINT_UPSCALE_BACKEND"
+            )
+        normalize_print_alpha = _boolean_setting(
+            body,
+            request_key="normalize_print_alpha",
+            environment_key="STATIC_PRINT_NORMALIZE_ALPHA",
+            default=False,
+        )
         if self.server.config.s3_bucket:
             published, _ = self.server.s3_publications(
                 force=True,
@@ -2565,6 +2632,7 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                 "version_id": plan["version_id"],
                 "source_sha256": source_digests[plan["design_id"]],
                 "fit": "cover",
+                "composition": profiles[plan["product_profile_id"]].composition,
                 "canvas_policy": canvas_policies[plan["design_id"]],
             }
             mismatches = {
@@ -2605,7 +2673,11 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
             kind="product-generation",
             label="Batch product preview and print generation",
             items=item_labels,
-            request={"plans": plans},
+            request={
+                "plans": plans,
+                "upscale_backend": upscale_backend,
+                "normalize_print_alpha": normalize_print_alpha,
+            },
             resume=resume,
         )
         completed_items = {
@@ -2630,6 +2702,8 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                         profiles=[profiles[plan["product_profile_id"]]],
                         fit="cover",
                         operation_id=operation_id,
+                        upscale_backend=upscale_backend,
+                        normalize_print_alpha=normalize_print_alpha,
                     )
                 except Exception as exc:
                     self.server.update_operation(

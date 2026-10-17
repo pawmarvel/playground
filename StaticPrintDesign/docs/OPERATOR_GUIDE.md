@@ -9,7 +9,7 @@ python3 -m venv .venv
 .venv/bin/pawmarvel-static-print init-workspace
 
 cp static-print.env.example work/static-print.env
-# Edit access codes, OPENAI_API_KEY, model, AWS profile, and S3 values.
+# Edit access codes, API credentials, model, AWS profile, and S3 values.
 ```
 
 `work/static-print.env` is private and ignored by Git. Every `serve` and
@@ -41,9 +41,16 @@ item fails for operator review. New
 design intake uses a filename locally when it is
 meaningful. Only an obvious machine/export filename makes one low-detail vision
 request for a descriptive design ID, using `gpt-5.4-mini` by default through
-`STATIC_PRINT_DESIGN_ID_MODEL`. Product rendering, meaningful-name intake,
-re-importing an already assigned source, and preview background switching are
-local and have no API cost. To use `$AWS_PROFILE` in a separate manual AWS CLI
+`STATIC_PRINT_DESIGN_ID_MODEL`. Meaningful-name intake, re-importing an already
+assigned source, and preview background switching are local and have no API
+cost. Exact-size and downsampled product rendering is also local. When a print
+target enlarges source pixels, the default `STATIC_PRINT_UPSCALE_BACKEND=bria`
+sends the approved subject PNG to Bria for a paid 2× or 4× enhancement before
+exact rendering. Configure `BRIA_API_TOKEN` in the private file. Set the
+backend to `deterministic` only for local tests: enlargement then remains
+flagged as not print-ready. `STATIC_PRINT_NORMALIZE_ALPHA=true` removes
+near-invisible fringe and makes near-opaque pixels solid without flattening
+meaningful alpha `32-249`. To use `$AWS_PROFILE` in a separate manual AWS CLI
 command, source the file into that shell first:
 
 ```bash
@@ -173,9 +180,13 @@ The transparency-background controls, reviewer identity, pending-change count,
 and batch-save button remain pinned at the top of the viewport while the
 reviewer scrolls through the active design list.
 
-Use the filter bar to narrow the current tab by intake collection, exact
-subject, product, design ID text, transparency result, review/workflow status,
-and current selection. The subject dropdown lists only generated subjects
+Use the filter bar to narrow the current tab by collection, exact subject,
+product, design ID text, transparency result, review/workflow status, and
+current selection. A collection recorded by `intake.json` is authoritative.
+For manually added seeds without intake metadata, the GUI groups two or more
+distinct seed IDs by their shared multi-segment prefix—for example,
+`holiday-ornament-*` appears as `holiday-ornament`. Ungrouped manual seeds
+remain under **Manual intake**. The subject dropdown lists only generated subjects
 present in the workspace and includes both the operator label and stable
 subject ID, so all designs for one subject can be reviewed together. In the
 **Graduated** and **Released** tabs, selecting a product focuses every subject
@@ -524,12 +535,16 @@ used the former subject-level version directory are intentionally not release
 candidates; rerun each unpublished subject/profile plan to create its granular
 directory and exact checkpoint preview. Published S3 bundles are unaffected.
 
-Static product generation always uses `cover`: it fills every preview and
-print canvas at the profile's exact pixel dimensions, center-cropping overflow
-when source and target aspect ratios differ. It never stretches pixels. Review
-the crop shown for every target before publication. For an opaque full-bleed
-source, generation also rejects any preview or print output containing alpha
-transparency. Transparent-art sources skip that test by design.
+Static product generation always emits the profile's exact pixel dimensions
+without stretching. The default profile composition is `cover`, which
+center-crops overflow when source and target aspect ratios differ. A profile
+may instead declare `composition: repeat-horizontal`; this places two complete,
+contained copies in equal left/right cells for a two-sided wrap. The tumbler
+profile uses this mode so portrait mug designs retain their complete title and
+lower banner on both sides. Review every composition before publication. For an
+opaque full-bleed source, generation also rejects any preview or print output
+containing alpha transparency. Transparent-art sources skip that test by
+design.
 
 Inspect every preview and exact print target. Generate the subject/profile again
 when needed; the GUI assigns its next version automatically. Published bytes
@@ -567,8 +582,9 @@ tolerance and still requires vendor cut-line/white-ink confirmation. These are
 PawMarvel preflight limits, not a substitute for the vendor proof. Near-opaque
 pixels alone never fail the alpha check.
 `generation.json` pins one product profile and its canonical semantic digest,
-its local version, the exact subject-source digest, fit mode, and inferred
-canvas policy. Replacing a subject preview invalidates
+its local version, the exact subject-source digest, fit/composition mode,
+inferred canvas policy, alpha-normalization choice, and enhancement provenance.
+Replacing a subject preview invalidates
 its older local print candidates and requires a new version for each affected
 profile, preventing stale pixels from being published under new provenance.
 Editing preview dimensions, print targets, DPI, color space, background, or

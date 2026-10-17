@@ -8,6 +8,11 @@
   "properties": {
     "schema": {"const": "pawmarvel-static-product-profile-v1"},
     "product_profile_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "composition": {
+      "type": "string",
+      "enum": ["cover", "repeat-horizontal"],
+      "default": "cover"
+    },
     "preview": {
       "type": "object",
       "additionalProperties": false,

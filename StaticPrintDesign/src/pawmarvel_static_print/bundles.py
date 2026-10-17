@@ -210,6 +210,7 @@ def build_bundle(
         or generation.get("version_id") != version_id
         or generation.get("source_sha256") != sha256_file(source)
         or generation.get("fit") != "cover"
+        or generation.get("composition", "cover") != profile.composition
         or generation.get("canvas_policy") != canvas_policy
     ):
         raise StaticPrintError(

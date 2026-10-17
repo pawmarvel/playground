@@ -4,6 +4,7 @@ import os
 import secrets
 import shutil
 import tempfile
+from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ from .core import (
     write_json,
 )
 from .image_quality import print_readiness_report_for_path, print_readiness_warning
+from .upscale import BriaProvider, upscale_for_print
 
 PREVIEW_MAX_EDGE = 1080
 OPAQUE_FULL_BLEED = "opaque-full-bleed"
@@ -68,6 +70,62 @@ def initialize_workspace(root: Path) -> dict[str, str]:
     for path in paths.values():
         path.mkdir(parents=True, exist_ok=True)
     return {key: str(path.resolve()) for key, path in paths.items()}
+
+
+def annotate_design_collections(
+    designs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Add a stable UI collection without changing design or bundle identity.
+
+    Intake metadata is authoritative. Manually added seeds fall back to the
+    largest sibling group sharing a prefix of at least two ID segments; the
+    longest prefix wins when candidate groups have equal membership.
+    """
+
+    explicit_by_seed: dict[str, str] = {}
+    seed_ids: set[str] = set()
+    for design in designs:
+        seed_id = str(design["seed_design_id"])
+        seed_ids.add(seed_id)
+        intake = design.get("intake")
+        collection_id = (
+            intake.get("collection_id") if isinstance(intake, dict) else None
+        )
+        if isinstance(collection_id, str) and collection_id:
+            explicit_by_seed[seed_id] = collection_id
+
+    manual_seed_ids = seed_ids - set(explicit_by_seed)
+    prefix_members: dict[str, set[str]] = defaultdict(set)
+    for seed_id in manual_seed_ids:
+        segments = seed_id.split("-")
+        for length in range(2, len(segments)):
+            prefix_members["-".join(segments[:length])].add(seed_id)
+
+    inferred_by_seed: dict[str, str] = {}
+    for seed_id in manual_seed_ids:
+        candidates = [
+            (prefix, members)
+            for prefix, members in prefix_members.items()
+            if seed_id in members and len(members) >= 2
+        ]
+        if candidates:
+            inferred_by_seed[seed_id] = max(
+                candidates,
+                key=lambda item: (len(item[1]), len(item[0].split("-"))),
+            )[0]
+
+    for design in designs:
+        seed_id = str(design["seed_design_id"])
+        if seed_id in explicit_by_seed:
+            design["collection_id"] = explicit_by_seed[seed_id]
+            design["collection_source"] = "intake"
+        elif seed_id in inferred_by_seed:
+            design["collection_id"] = inferred_by_seed[seed_id]
+            design["collection_source"] = "shared-prefix"
+        else:
+            design["collection_id"] = "@manual"
+            design["collection_source"] = "manual"
+    return designs
 
 
 def discover_designs(inputs_root: Path, authoring_root: Path) -> list[dict[str, Any]]:
@@ -374,8 +432,37 @@ def render_target(
     size: tuple[int, int],
     fit: str,
     background: str,
+    composition: str = "cover",
 ) -> Image.Image:
     rgba = source.convert("RGBA")
+    if composition == "repeat-horizontal":
+        canvas = _background(size, background)
+        cell_edges = (0, size[0] // 2, size[0])
+        for left, right in zip(cell_edges, cell_edges[1:]):
+            cell_size = (right - left, size[1])
+            scale = min(cell_size[0] / rgba.width, cell_size[1] / rgba.height)
+            copy_size = (
+                max(1, round(rgba.width * scale)),
+                max(1, round(rgba.height * scale)),
+            )
+            repeated = (
+                rgba.convert("RGBa")
+                .resize(copy_size, Image.Resampling.LANCZOS)
+                .convert("RGBA")
+            )
+            canvas.alpha_composite(
+                repeated,
+                (
+                    left + (cell_size[0] - repeated.width) // 2,
+                    (cell_size[1] - repeated.height) // 2,
+                ),
+            )
+        return canvas
+    if composition != "cover":
+        raise StaticPrintError(
+            "composition must be cover or repeat-horizontal; "
+            f"actual={composition!r}"
+        )
     if fit == "cover":
         return ImageOps.fit(
             rgba,
@@ -394,6 +481,19 @@ def render_target(
     return canvas
 
 
+def render_scale(
+    source_size: tuple[int, int],
+    target_size: tuple[int, int],
+    composition: str,
+) -> float:
+    source_width, source_height = source_size
+    target_width, target_height = target_size
+    if composition == "repeat-horizontal":
+        widest_cell = target_width - target_width // 2
+        return min(widest_cell / source_width, target_height / source_height)
+    return max(target_width / source_width, target_height / source_height)
+
+
 def _preview(source: Image.Image) -> Image.Image:
     preview = source.convert("RGBA")
     if max(preview.size) > PREVIEW_MAX_EDGE:
@@ -401,6 +501,17 @@ def _preview(source: Image.Image) -> Image.Image:
             (PREVIEW_MAX_EDGE, PREVIEW_MAX_EDGE), Image.Resampling.LANCZOS
         )
     return preview
+
+
+def _normalize_print_alpha(source: Image.Image) -> Image.Image:
+    """Remove near-invisible fringe and normalize visually solid model output."""
+
+    rgba = source.convert("RGBA")
+    alpha = rgba.getchannel("A").point(
+        lambda value: 0 if 0 < value < 32 else 255 if value >= 250 else value
+    )
+    rgba.putalpha(alpha)
+    return rgba
 
 
 def generate_design(
@@ -412,13 +523,21 @@ def generate_design(
     profiles: Iterable[Path | ProductProfile],
     fit: str = "cover",
     operation_id: str | None = None,
+    upscale_backend: str = "deterministic",
+    normalize_print_alpha: bool = False,
+    bria_provider: BriaProvider | None = None,
 ) -> dict[str, Any]:
     design_id = design_identity(design_id).design_id
     version_id = validate_version(version_id)
     if fit not in {"contain", "cover"}:
         raise StaticPrintError(f"fit must be contain or cover; actual={fit!r}")
+    if upscale_backend not in {"deterministic", "bria"}:
+        raise StaticPrintError(
+            "upscale_backend must be deterministic or bria; "
+            f"actual={upscale_backend!r}"
+        )
     source_path = design_source_path(inputs_root, design_id).resolve()
-    source_width, source_height, _ = require_png(source_path, "source design")
+    require_png(source_path, "source design")
     loaded_profiles = [
         item if isinstance(item, ProductProfile) else load_profile(item)
         for item in profiles
@@ -461,6 +580,26 @@ def generate_design(
             raise StaticPrintError(
                 f"version {version_id!r} already uses fit={existing_generation.get('fit')!r}; "
                 f"use a new version ID for fit={fit!r}"
+            )
+        if existing_generation.get("composition", "cover") != profile.composition:
+            raise StaticPrintError(
+                f"version {version_id!r} already uses a different composition; "
+                f"expected={profile.composition!r}; "
+                f"actual={existing_generation.get('composition', 'cover')!r}; "
+                "use a new version ID"
+            )
+        render_pipeline = existing_generation.get("render_pipeline") or {}
+        expected_pipeline = {
+            "upscale_backend": upscale_backend,
+            "normalize_print_alpha": normalize_print_alpha,
+        }
+        if any(
+            render_pipeline.get(key) != value
+            for key, value in expected_pipeline.items()
+        ):
+            raise StaticPrintError(
+                f"version {version_id!r} already uses a different render pipeline; "
+                f"expected={expected_pipeline}; actual={render_pipeline}; use a new version ID"
             )
         outputs: list[dict[str, Any]] = []
         existing_print_readiness = existing_generation.get("print_readiness", {})
@@ -512,6 +651,7 @@ def generate_design(
             "product_profile_id": profile.profile_id,
             "version_id": version_id,
             "fit": fit,
+            "composition": profile.composition,
             "canvas_policy": existing_generation.get("canvas_policy"),
             "preview": {
                 "path": str(preview_path.resolve()),
@@ -566,6 +706,32 @@ def generate_design(
         canvas_policy = _design_canvas_policy(inputs_root, design_id, source)
         if canvas_policy == OPAQUE_FULL_BLEED:
             source = source.convert("RGB").convert("RGBA")
+        elif normalize_print_alpha:
+            source = _normalize_print_alpha(source)
+        required_scale = max(
+            render_scale(
+                source.size,
+                (target.width, target.height),
+                profile.composition,
+            )
+            for target in profile.targets
+        )
+        if upscale_backend == "bria":
+            render_source, upscale_provenance = upscale_for_print(
+                source,
+                required_scale=required_scale,
+                preserve_alpha=canvas_policy == PRESERVE_TRANSPARENCY,
+                provider=bria_provider,
+            )
+        else:
+            render_source = source
+            upscale_provenance = {
+                "backend": "deterministic",
+                "native_increase": 1,
+                "preserve_alpha": canvas_policy == PRESERVE_TRANSPARENCY,
+                "source_size": {"width": source.width, "height": source.height},
+                "output_size": {"width": source.width, "height": source.height},
+            }
         operator_preview = _preview(source)
         save_png(operator_preview, preview_path)
         operator_preview_transparency = _image_transparency_report(operator_preview)
@@ -583,7 +749,11 @@ def generate_design(
         multiple = len(profile.targets) > 1
         first_target_image: Image.Image | None = None
         for target in profile.targets:
-            scale = max(target.width / source_width, target.height / source_height)
+            scale = render_scale(
+                render_source.size,
+                (target.width, target.height),
+                profile.composition,
+            )
             filename = (
                 f"{design_id}--{profile.profile_id}--{target.target_id}.png"
                 if multiple
@@ -591,11 +761,14 @@ def generate_design(
             )
             path = output_dir / filename
             rendered = render_target(
-                source,
+                render_source,
                 size=(target.width, target.height),
                 fit=fit,
                 background=target.background,
+                composition=profile.composition,
             )
+            if canvas_policy == PRESERVE_TRANSPARENCY and normalize_print_alpha:
+                rendered = _normalize_print_alpha(rendered)
             if canvas_policy == OPAQUE_FULL_BLEED:
                 _require_opaque_full_bleed(rendered, design_id=design_id, artifact=path)
             save_png(rendered, path, dpi=target.dpi)
@@ -697,7 +870,13 @@ def generate_design(
             "version_id": version_id,
             "source_sha256": source_digest,
             "fit": fit,
+            "composition": profile.composition,
             "canvas_policy": canvas_policy,
+            "render_pipeline": {
+                "upscale_backend": upscale_backend,
+                "normalize_print_alpha": normalize_print_alpha,
+                "upscale": upscale_provenance,
+            },
             "transparency": generation_transparency,
             "print_readiness": generation_print_readiness,
             "warnings": sorted(set(warnings)),
@@ -717,6 +896,7 @@ def generate_design(
         "product_profile_id": profile.profile_id,
         "version_id": version_id,
         "fit": fit,
+        "composition": profile.composition,
         "canvas_policy": canvas_policy,
         "preview": {
             "path": str(preview_path.resolve()),

@@ -481,12 +481,17 @@ function printReadinessBadge(report) {
 }
 
 function intakeBadge(design) {
-  if (!design.intake) return null;
-  return node("span", "badge", `collection: ${design.intake.collection_id}`);
+  const collection = designCollection(design);
+  if (collection === "@manual") return null;
+  const badge = node("span", "badge", `collection: ${collection}`);
+  badge.title = design.collection_source === "shared-prefix"
+    ? "Collection inferred from the shared design-ID prefix"
+    : "Collection recorded during design intake";
+  return badge;
 }
 
 function designCollection(design) {
-  return design.intake?.collection_id || "@manual";
+  return design.collection_id || design.intake?.collection_id || "@manual";
 }
 
 function reviewAttentionItems(design, { kinds = null, productProfileId = null, activeOnly = false } = {}) {
@@ -544,7 +549,7 @@ function filteredDesigns(items) {
     if (collection && designCollection(design) !== collection) return false;
     if (subject && design.subject_id !== subject) return false;
     if (product && !design.subject_id) return false;
-    const searchable = `${design.design_id} ${design.seed_design_id} ${design.subject_id || ""} ${design.intake?.collection_id || "manual"}`.toLocaleLowerCase();
+    const searchable = `${design.design_id} ${design.seed_design_id} ${design.subject_id || ""} ${designCollection(design)}`.toLocaleLowerCase();
     if (query && !searchable.includes(query)) return false;
     if (transparency && design.transparency?.result !== transparency) return false;
     if (attention === "needs-attention" && !design.needs_review_attention) return false;

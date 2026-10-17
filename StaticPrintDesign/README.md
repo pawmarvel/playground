@@ -18,6 +18,9 @@ The operator can:
 - review generated pixels in the local GUI, including deterministic
   print-readiness warnings for dimensions, alpha solidity, canvas policy, and
   enlargement risk;
+- enhance enlarged print targets through the configured Bria backend and use
+  profile-owned composition such as two-sided tumbler wraps without changing
+  the FE bundle contract;
 - generate a guarded proposal and reclaim superseded local authoring history
   without touching current candidates, source assets, or released versions; and
 - publish immutable static bundles and release history plus a stable discovery

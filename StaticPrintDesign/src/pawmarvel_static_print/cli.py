@@ -93,6 +93,18 @@ def _load_environment(path: Path) -> tuple[str, ...]:
     return tuple(loaded)
 
 
+def _environment_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "true" if default else "false")
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise StaticPrintError(
+        f"{name} must be true or false; actual={raw!r}"
+    )
+
+
 def _require_approved_subject(work: Path, design_id: str) -> None:
     identity = design_identity(design_id)
     if identity.subject_id is None:
@@ -159,6 +171,17 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--version-id", required=True)
     generate.add_argument("--product-profile", type=_path, required=True)
     generate.add_argument("--fit", choices=("cover",), default="cover")
+    generate.add_argument(
+        "--upscale-backend",
+        choices=("deterministic", "bria"),
+        help="print enhancement backend; defaults to STATIC_PRINT_UPSCALE_BACKEND",
+    )
+    generate.add_argument(
+        "--normalize-print-alpha",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="normalize near-transparent fringe and near-opaque pixels",
+    )
     generate.add_argument("--work-root", type=_path, default=PROJECT_ROOT / "work")
 
     publish = subparsers.add_parser("publish")
@@ -257,7 +280,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "generate":
             work = args.work_root.resolve()
+            _load_environment(work / "static-print.env")
             _require_approved_subject(work, args.design_id)
+            upscale_backend = args.upscale_backend or os.environ.get(
+                "STATIC_PRINT_UPSCALE_BACKEND", "deterministic"
+            )
+            normalize_setting = (
+                args.normalize_print_alpha
+                if args.normalize_print_alpha is not None
+                else _environment_bool("STATIC_PRINT_NORMALIZE_ALPHA", False)
+            )
             result = generate_design(
                 inputs_root=work / "static-graduated-designs",
                 authoring_root=work / "static-authoring",
@@ -265,6 +297,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 version_id=args.version_id,
                 profiles=[args.product_profile.resolve()],
                 fit=args.fit,
+                upscale_backend=upscale_backend,
+                normalize_print_alpha=normalize_setting,
             )
             print(json.dumps(result, indent=2))
             return 0

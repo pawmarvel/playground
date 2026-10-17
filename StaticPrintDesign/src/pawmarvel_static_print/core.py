@@ -40,6 +40,7 @@ class ProductProfile:
     preview_width: int
     preview_height: int
     targets: tuple[PrintTarget, ...]
+    composition: str
     path: Path
 
 
@@ -172,7 +173,7 @@ def sha256_file(path: Path) -> str:
 def product_profile_sha256(profile: ProductProfile) -> str:
     """Hash the semantic profile contract, independent of JSON formatting."""
 
-    value = {
+    value: dict[str, Any] = {
         "product_profile_id": profile.profile_id,
         "preview": {
             "width": profile.preview_width,
@@ -200,6 +201,10 @@ def product_profile_sha256(profile: ProductProfile) -> str:
             for target in profile.targets
         ],
     }
+    # `cover` is the historical default and is omitted to preserve the semantic
+    # digest of existing released profiles. Non-default composition is explicit.
+    if profile.composition != "cover":
+        value["composition"] = profile.composition
     encoded = json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
@@ -284,6 +289,12 @@ def load_profile(path: Path) -> ProductProfile:
             f"actual={value.get('schema')!r}"
         )
     profile_id = validate_id(value.get("product_profile_id"), "product profile ID")
+    composition = value.get("composition", "cover")
+    if composition not in {"cover", "repeat-horizontal"}:
+        raise StaticPrintError(
+            "product profile composition must be cover or repeat-horizontal: "
+            f"path={resolved}; actual={composition!r}"
+        )
     raw_preview = value.get("preview")
     if not isinstance(raw_preview, dict) or set(raw_preview) != {"width", "height"}:
         raise StaticPrintError(
@@ -367,6 +378,7 @@ def load_profile(path: Path) -> ProductProfile:
         preview_width=preview_width,
         preview_height=preview_height,
         targets=tuple(targets),
+        composition=composition,
         path=resolved,
     )
 
