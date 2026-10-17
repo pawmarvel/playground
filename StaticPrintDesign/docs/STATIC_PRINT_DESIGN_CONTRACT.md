@@ -510,7 +510,7 @@ The MVP keeps one installable Python package and a build-free local web UI:
 | --- | --- |
 | `core.py` | IDs, profiles, canonical profile digests, hashes, safe JSON/image primitives |
 | `lifecycle.py` | intake pools, seed movement, subject catalog and paid subject generation |
-| `image_quality.py` | shared deterministic pixel/alpha print-readiness reports and operator warnings |
+| `image_quality.py` | shared deterministic alpha-band reports, product/process print recommendations, and operator warnings |
 | `reviews.py` | digest-bound reviewer/operator decisions and atomic batches |
 | `authoring.py` | deterministic product preview/print rendering and private provenance |
 | `bundles.py` | immutable bundle/release construction and validation |

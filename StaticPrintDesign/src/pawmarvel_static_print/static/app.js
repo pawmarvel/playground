@@ -388,14 +388,96 @@ function artifactTransparencyBadge(report, canvasPolicy) {
 
 function printReadinessBadge(report) {
   if (!report) return null;
-  if (report.print_ready) {
-    return node("span", "badge pass", "Pixel preflight passed");
+  const processReports = Array.isArray(report.process_reports) ? report.process_reports : [];
+  const productReports = Array.isArray(report.product_reports) ? report.product_reports : [];
+  const productReport = report.product_report && typeof report.product_report === "object"
+    ? report.product_report
+    : null;
+  const compatibility = report.product_compatibility && typeof report.product_compatibility === "object"
+    ? report.product_compatibility
+    : null;
+  const groupedReports = Array.isArray(compatibility?.groups) ? compatibility.groups : [];
+  const displayedReports = productReport
+    ? [productReport]
+    : groupedReports.length
+      ? groupedReports
+    : productReports.length
+      ? productReports
+      : processReports;
+  if (!report.alpha_summary && !displayedReports.length) {
+    if (report.print_ready) return node("span", "badge pass", "Pixel preflight passed");
+    const finding = [...(report.failures || []), ...(report.warnings || [])][0]
+      || "Inspect pixels at 100% zoom before approval";
+    const badge = node("span", "badge attention", "Not print-ready · operator follow-up");
+    badge.title = finding;
+    return badge;
   }
-  const finding = [...(report.failures || []), ...(report.warnings || [])][0]
-    || "Inspect pixels at 100% zoom before approval";
-  const badge = node("span", "badge attention", "Not print-ready · operator follow-up");
-  badge.title = finding;
-  return badge;
+
+  const failedProcesses = displayedReports.filter(item => item.pass === false);
+  const failedProfiles = Array.isArray(compatibility?.review_product_profile_ids)
+    ? compatibility.review_product_profile_ids
+    : [];
+  const details = node("details", "print-readiness-report");
+  let label = "Pixel preflight passed";
+  let badgeClass = "pass";
+  if (!report.print_ready) {
+    label = "Not print-ready · operator follow-up";
+    badgeClass = "attention";
+  } else if (!productReport && failedProcesses.length) {
+    label = `Pixel preflight passed · ${failedProfiles.length || failedProcesses.length} product profile(s) need review`;
+    badgeClass = "warn";
+  } else if (productReport) {
+    label = `${productReport.pass ? "PASS" : "FAIL"} · ${productReport.product_profile_id || productReport.label}`;
+    badgeClass = productReport.pass ? "pass" : "attention";
+  }
+  const summary = node("summary", "", "");
+  summary.append(node("span", `badge ${badgeClass}`, label));
+  details.append(summary);
+  if (report.alpha_summary) {
+    details.append(node("p", "meta alpha-summary", report.alpha_summary));
+  }
+  const alphaCategories = Array.isArray(report.alpha_categories)
+    ? report.alpha_categories
+    : [];
+  if (alphaCategories.length) {
+    const list = node("ul", "alpha-category-reports");
+    for (const category of alphaCategories) {
+      const breakdown = category.breakdown;
+      const spatial = breakdown && category.category === "high-risk-fringe"
+        ? ` Boundary ${breakdown.boundary_visible_percent}% (${breakdown.boundary_share_percent}% of fringe); interior ${breakdown.interior_visible_percent}%.`
+        : "";
+      list.append(node(
+        "li",
+        category.assessment === "acceptable" ? "pass" : "warn",
+        `${category.category} · alpha ${category.alpha_range} · ${category.visible_percent}% of visible pixels.${spatial} ${category.recommendation}`,
+      ));
+    }
+    details.append(list);
+  }
+  if (!productReport && compatibility?.summary) {
+    details.append(node("p", "meta product-compatibility-summary", compatibility.summary));
+  }
+  if (displayedReports.length) {
+    const list = node("ul", "print-process-reports");
+    for (const item of displayedReports) {
+      const profiles = Array.isArray(item.product_profile_ids)
+        ? ` · ${item.product_profile_ids.join(", ")}`
+        : "";
+      list.append(node(
+        "li",
+        item.pass ? "pass" : "fail",
+        `${item.product_profile_id || item.label || item.print_process}${profiles}: ${item.summary}`,
+      ));
+    }
+    details.append(list);
+  }
+  const findings = [...(report.failures || []), ...(report.warnings || [])];
+  if (findings.length) {
+    const list = node("ul", "print-readiness-findings");
+    for (const finding of findings) list.append(node("li", "", finding));
+    details.append(list);
+  }
+  return details;
 }
 
 function intakeBadge(design) {
@@ -1540,10 +1622,7 @@ function workflowTable(seeds, subjects, { released = false } = {}) {
       if (!grouped.has(seed.seed_design_id)) grouped.set(seed.seed_design_id, []);
     }
   }
-  const rowCount = [...grouped.values()].reduce(
-    (total, variants) => total + Math.max(variants.length, 1),
-    0,
-  );
+  const rowCount = workflowRowCount(seeds, subjects, { includeEmptySeeds: !released });
   section.append(node("h2", "section-title", `${title} · ${rowCount}`));
   for (const [seedId, variants] of grouped) {
     const seed = seedById.get(seedId);
@@ -1570,6 +1649,14 @@ function workflowTable(seeds, subjects, { released = false } = {}) {
   }
   table.append(thead, tbody); wrapper.append(table); section.append(wrapper);
   return section;
+}
+
+function workflowRowCount(seeds, subjects, { includeEmptySeeds = true } = {}) {
+  const seedIdsWithSubjects = new Set(subjects.map(item => item.seed_design_id));
+  const emptySeedRows = includeEmptySeeds
+    ? seeds.filter(seed => !seedIdsWithSubjects.has(seed.seed_design_id)).length
+    : 0;
+  return subjects.length + emptySeedRows;
 }
 
 function operatorCard(design) {
@@ -1846,6 +1933,15 @@ function updateBatchToolbar() {
     ? [...selectedSubjectIds].filter(id => poolIds.has(id))
     : [...selectedLifecycleSeeds].filter(id => poolIds.has(id));
   $("review-batch-selection").textContent = compactSelection("Designs", reviewSelection);
+  const filteredSubjectCount = activeOperatorTab === "graduated"
+    ? filteredDesigns(currentOperatorPoolItems()).filter(design => design.subject_id).length
+    : 0;
+  $("select-visible").classList.toggle("hidden", activeOperatorTab === "graduated");
+  $("select-filtered-subject-previews").classList.toggle("hidden", activeOperatorTab !== "graduated");
+  $("select-filtered-subject-previews").disabled = filteredSubjectCount === 0;
+  $("select-filtered-subject-previews").textContent = (
+    `Select all ${filteredSubjectCount} filtered subject preview${filteredSubjectCount === 1 ? "" : "s"}`
+  );
   $("graduate-selected").classList.toggle("hidden", activeOperatorTab !== "active");
   $("abandon-selected").classList.toggle("hidden", activeOperatorTab !== "active");
   $("restore-selected").classList.toggle("hidden", activeOperatorTab !== "abandoned");
@@ -1904,6 +2000,16 @@ function selectAllFiltered() {
     }
   }
   render();
+}
+
+function selectAllFilteredSubjectPreviews() {
+  const designIds = filteredDesigns(currentOperatorPoolItems())
+    .filter(design => design.subject_id)
+    .map(design => design.design_id);
+  selectedSubjectIds.clear();
+  for (const designId of designIds) selectedSubjectIds.add(designId);
+  render();
+  showStatus(`Selected ${designIds.length} currently filtered subject preview(s) for batch review.`);
 }
 
 function clearCurrentSelection() {
@@ -2104,7 +2210,8 @@ function render() {
       || !seedsWithAnySubject.has(seed.seed_design_id)
   );
   $("active-tab-count").textContent = active.length;
-  $("graduated-tab-count").textContent = pendingSeeds.length + graduatedSubjects.length;
+  const graduatedRowCount = workflowRowCount(pendingSeeds, graduatedSubjects);
+  $("graduated-tab-count").textContent = graduatedRowCount;
   $("released-tab-count").textContent = releasedSubjects.length;
   $("abandoned-tab-count").textContent = abandoned.length;
   document.querySelectorAll(".workflow-tab").forEach(button => {
@@ -2137,7 +2244,10 @@ function render() {
     ]);
     const tableSeeds = graduatedSeeds.filter(seed => neededSeedIds.has(seed.seed_design_id));
     designs.append(workflowTable(tableSeeds, visibleSubjects));
-    updateFilterCount(visibleSeeds.length + visibleSubjects.length, pendingSeeds.length + graduatedSubjects.length);
+    updateFilterCount(
+      workflowRowCount(tableSeeds, visibleSubjects),
+      graduatedRowCount,
+    );
   } else if (activeOperatorTab === "released") {
     const visibleSubjects = filteredDesigns(releasedSubjects);
     const neededSeedIds = new Set(visibleSubjects.map(item => item.seed_design_id));
@@ -2334,6 +2444,7 @@ $("clear-filters").addEventListener("click", () => {
   render();
 });
 $("select-visible").addEventListener("click", selectAllFiltered);
+$("select-filtered-subject-previews").addEventListener("click", selectAllFilteredSubjectPreviews);
 $("clear-selection").addEventListener("click", clearCurrentSelection);
 $("graduate-selected").addEventListener("click", () => transitionSelected("graduate"));
 $("abandon-selected").addEventListener("click", () => transitionSelected("abandon"));

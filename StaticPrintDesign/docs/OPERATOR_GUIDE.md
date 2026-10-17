@@ -196,8 +196,11 @@ then batch **Approve and graduate** or abandon the selection. In **Abandoned**,
 the same toolbar batch-restores selected seeds. File-moving batch actions
 preflight the complete selection before moving anything. In **Graduated
 workflow**, every generated subject preview has a **Select for batch approval**
-checkbox; use **Approve selected subjects** to record one atomic operator
-decision for the filtered selection. Approved subjects expose a separate
+checkbox. Apply the desired filters, choose **Select all filtered subject
+previews**, then use **Approve selected subjects** to record one atomic operator
+decision for exactly that visible result. This action replaces the earlier
+subject selection so a hidden row cannot be approved accidentally. Approved
+subjects expose a separate
 **Select for print generation** checkbox, so approval and rendering selections
 cannot be confused. Switching workflow tabs clears the prior tab's card
 selection to prevent cross-pool actions. **Approve + queue products** combines
@@ -366,16 +369,20 @@ the reviewed label for traceability; regenerating the preview replaces the flag
 only when the new digest has its own validation evidence.
 
 An orange **Pixel preflight needs attention** panel means the saved generation
-did not pass deterministic print-readiness checks. The check verifies exact
-dimensions, visible pixels, the seed's opaque/transparent canvas policy, broad
-partial-alpha coverage, low-alpha fringe, and whether a product output was
-enlarged from its source. Expand the warning for measured percentages and the
-specific finding, inspect the PNG at 100% zoom, then regenerate or repair it
-before approval. This check cannot judge spelling, composition, subject
-accuracy, or whether painterly texture is intentional; operator visual review
-remains required.
+failed an intrinsic check such as exact dimensions, visible pixels, or the
+seed's opaque/transparent canvas policy. A **Product alpha compatibility needs
+attention** panel is narrower: the subject itself passed, but one or more print
+profiles need review. Expand it to see the one-line alpha summary for
+near-opaque, meaningful-translucency, and high-risk-fringe pixels, followed by
+grouped PASS/REVIEW results for apparel, sublimation, paper/canvas, and sticker
+profiles. Near-opaque pixels are accepted; meaningful translucency and fringe
+are evaluated with process-specific thresholds. Inspect failed target products
+at 100% zoom before product approval. These checks cannot judge spelling,
+composition, subject accuracy, vendor-specific behavior, or whether painterly
+texture is intentional; operator visual review remains required.
 
-For batch review, filter the graduated table, choose **Select all filtered**,
+For batch review, filter the graduated table, choose **Select all filtered
+subject previews**,
 then use either **Approve selected subjects** or **Needs work for selected
 subjects**. **Approve + queue products** records the approvals and carries the
 same selection directly into product generation, avoiding a second selection
@@ -539,6 +546,26 @@ attention** filter, and is copied into the batch operation warning log. Pixel
 warnings are advisory so intentional watercolor/translucent media can be
 accepted by an operator; existing hard canvas-contract violations remain
 blocking.
+
+Expand the pixel-preflight badge to see its one-line alpha summary and the
+product/process recommendations. The report separates these bands instead of
+treating every non-opaque pixel alike:
+
+| Alpha band | Meaning | Default recommendation |
+| --- | --- | --- |
+| `250-254` near-opaque | Visually solid model output | Accept; optional final-export normalization to `255` |
+| `32-249` meaningful translucency | Fade, shadow, wash, or broad antialiasing | Evaluate against the selected print process |
+| `1-31` high-risk fringe | Nearly invisible pixels | Boundary pixels within two pixels of transparency are usually antialiasing; interior low-alpha pixels are more likely to be a wash, hole, or dirty pixel |
+
+Each configured product row reports **PASS** or **FAIL** with its print process,
+measured percentages, limits, and a short reason. The high-risk total is split
+into **boundary fringe** and **interior low-alpha** so ordinary silhouette
+antialiasing is not treated like a broad translucent region. DTG/DTF apparel is intentionally stricter because a
+white underbase can expose a pale halo. Dye-sublimation and opaque paper/canvas
+allow bounded intentional translucency. Sticker output uses an intermediate
+tolerance and still requires vendor cut-line/white-ink confirmation. These are
+PawMarvel preflight limits, not a substitute for the vendor proof. Near-opaque
+pixels alone never fail the alpha check.
 `generation.json` pins one product profile and its canonical semantic digest,
 its local version, the exact subject-source digest, fit mode, and inferred
 canvas policy. Replacing a subject preview invalidates

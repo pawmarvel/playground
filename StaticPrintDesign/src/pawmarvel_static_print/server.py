@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import mimetypes
 import os
@@ -45,7 +46,11 @@ from .history_cleanup import (
     execute_history_cleanup,
     latest_cleanup_state,
 )
-from .image_quality import print_readiness_warning
+from .image_quality import (
+    PRINT_READINESS_SCHEMA,
+    print_readiness_report_for_path,
+    print_readiness_warning,
+)
 from .lifecycle import (
     OPAQUE_FULL_BLEED,
     PRESERVE_TRANSPARENCY,
@@ -661,6 +666,8 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
         self.s3_status_cache: dict[str, Any] | None = None
         self.s3_checked_at = 0.0
         self.s3_refresh_thread: Thread | None = None
+        self.print_readiness_cache_lock = Lock()
+        self.print_readiness_cache: dict[tuple[Any, ...], dict[str, Any]] = {}
         self.workspace_lock = None
         super().__init__(address, StaticPrintHandler)
         try:
@@ -789,6 +796,82 @@ class StaticPrintHTTPServer(ThreadingHTTPServer):
             self.config.database,
             operation_id=operation_id,
         )
+
+    def current_print_readiness(
+        self,
+        recorded: Any,
+        *,
+        path: Path,
+        expected_size: tuple[int, int],
+        canvas_policy: str,
+        upscale_ratio: float,
+        product_profile_id: str | None,
+    ) -> dict[str, Any] | None:
+        """Upgrade a legacy saved report once per unchanged local artifact."""
+
+        if not isinstance(recorded, dict):
+            return None
+        if recorded.get("schema") == PRINT_READINESS_SCHEMA:
+            return recorded
+        if not path.is_file():
+            return recorded
+        stat = path.stat()
+        key = (
+            str(path.resolve()),
+            stat.st_mtime_ns,
+            stat.st_size,
+            expected_size,
+            canvas_policy,
+            round(upscale_ratio, 8),
+            product_profile_id,
+            PRINT_READINESS_SCHEMA,
+        )
+        with self.print_readiness_cache_lock:
+            cached = self.print_readiness_cache.get(key)
+        if cached is not None:
+            return cached
+        encoded_key = json.dumps(key, separators=(",", ":"), default=list)
+        cache_path = (
+            self.config.work_root
+            / "cache/print-readiness-v2"
+            / f"{hashlib.sha256(encoded_key.encode('utf-8')).hexdigest()}.json"
+        )
+        if cache_path.is_file():
+            try:
+                cached_record = read_json(cache_path)
+            except (OSError, StaticPrintError):
+                cached_record = None
+            if (
+                isinstance(cached_record, dict)
+                and cached_record.get("schema")
+                == "pawmarvel-static-print-readiness-cache-v1"
+                and cached_record.get("key") == json.loads(encoded_key)
+                and isinstance(cached_record.get("report"), dict)
+                and cached_record["report"].get("schema")
+                == PRINT_READINESS_SCHEMA
+            ):
+                current = cached_record["report"]
+                with self.print_readiness_cache_lock:
+                    self.print_readiness_cache[key] = current
+                return current
+        current = print_readiness_report_for_path(
+            path,
+            expected_size=expected_size,
+            canvas_policy=canvas_policy,
+            upscale_ratio=upscale_ratio,
+            product_profile_id=product_profile_id,
+        )
+        with self.print_readiness_cache_lock:
+            self.print_readiness_cache[key] = current
+        write_json(
+            cache_path,
+            {
+                "schema": "pawmarvel-static-print-readiness-cache-v1",
+                "key": json.loads(encoded_key),
+                "report": current,
+            },
+        )
+        return current
 
     @property
     def publication_cache_path(self) -> Path:
@@ -1234,9 +1317,34 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                         }
                     )
                 subject_print_readiness = design.get("subject_print_readiness")
+                if isinstance(subject_print_readiness, dict):
+                    subject_print_readiness = self.server.current_print_readiness(
+                        subject_print_readiness,
+                        path=Path(design["source"]),
+                        expected_size=(
+                            design["source_width"],
+                            design["source_height"],
+                        ),
+                        canvas_policy=design["canvas_policy"],
+                        upscale_ratio=1.0,
+                        product_profile_id=None,
+                    )
+                    design["subject_print_readiness"] = subject_print_readiness
+                product_compatibility = (
+                    subject_print_readiness.get("product_compatibility")
+                    if isinstance(subject_print_readiness, dict)
+                    else None
+                )
+                compatibility_needs_review = bool(
+                    isinstance(product_compatibility, dict)
+                    and product_compatibility.get("review_product_profile_ids")
+                )
                 if (
                     isinstance(subject_print_readiness, dict)
-                    and subject_print_readiness.get("print_ready") is False
+                    and (
+                        subject_print_readiness.get("print_ready") is False
+                        or compatibility_needs_review
+                    )
                 ):
                     resolved = bool(
                         current_decision
@@ -1251,6 +1359,13 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                             "kind": "print-quality",
                             "active": not resolved,
                             "label": (
+                                "Product alpha compatibility reviewed"
+                                if resolved
+                                else "Product alpha compatibility needs attention"
+                            )
+                            if compatibility_needs_review
+                            and subject_print_readiness.get("print_ready") is True
+                            else (
                                 "Pixel preflight reviewed"
                                 if resolved
                                 else "Pixel preflight needs attention"
@@ -1313,12 +1428,31 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                         if isinstance(recorded_print_transparency, dict)
                         else {}
                     )
+                    version_root = self.server.config.authoring_root / asset_base
                     print_assets = []
+                    runtime_print_reports: dict[str, dict[str, Any] | None] = {}
                     for target in profile.targets:
                         filename = (
                             f"{design_id}--{profile.profile_id}.png"
                             if len(profile.targets) == 1
                             else f"{design_id}--{profile.profile_id}--{target.target_id}.png"
+                        )
+                        print_path = version_root / filename
+                        runtime_report = self.server.current_print_readiness(
+                            print_readiness_reports.get(target.target_id),
+                            path=print_path,
+                            expected_size=(target.width, target.height),
+                            canvas_policy=design["canvas_policy"],
+                            upscale_ratio=max(
+                                target.width / design["source_width"],
+                                target.height / design["source_height"],
+                            ),
+                            product_profile_id=profile.profile_id,
+                        )
+                        runtime_print_reports[target.target_id] = (
+                            runtime_report
+                            if isinstance(runtime_report, dict)
+                            else None
                         )
                         print_assets.append(
                             {
@@ -1330,11 +1464,49 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                                 "transparency": print_transparency.get(
                                     target.target_id
                                 ),
-                                "print_readiness": print_readiness_reports.get(
+                                "print_readiness": runtime_print_reports[
                                     target.target_id
-                                ),
+                                ],
                             }
                         )
+                    profile_preview_name = f"{profile.profile_id}.png"
+                    profile_preview_path = (
+                        version_root / "profile-previews" / profile_preview_name
+                    )
+                    first_target = profile.targets[0]
+                    runtime_profile_report = self.server.current_print_readiness(
+                        generation_print_readiness.get("profile_preview"),
+                        path=profile_preview_path,
+                        expected_size=(
+                            profile.preview_width,
+                            profile.preview_height,
+                        ),
+                        canvas_policy=design["canvas_policy"],
+                        upscale_ratio=max(
+                            profile.preview_width / first_target.width,
+                            profile.preview_height / first_target.height,
+                        ),
+                        product_profile_id=profile.profile_id,
+                    )
+                    report_pairs = [
+                        (f"{profile.profile_id} preview", runtime_profile_report),
+                        *[
+                            (
+                                f"{profile.profile_id}/{target.target_id}",
+                                runtime_print_reports.get(target.target_id),
+                            )
+                            for target in profile.targets
+                        ],
+                    ]
+                    runtime_warnings = [
+                        warning
+                        for artifact_label, report in report_pairs
+                        if isinstance(report, dict)
+                        for warning in [
+                            print_readiness_warning(artifact_label, report)
+                        ]
+                        if warning
+                    ]
                     expected = {item["filename"] for item in print_assets}
                     current_generation = (
                         isinstance(generation, dict)
@@ -1358,7 +1530,6 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                         and expected <= set(version["prints"])
                         and version["preview"]
                     ):
-                        profile_preview_name = f"{profile.profile_id}.png"
                         exact_preview = profile_preview_name in version.get(
                             "profile_previews", []
                         )
@@ -1378,30 +1549,14 @@ class StaticPrintHandler(BaseHTTPRequestHandler):
                                     "transparency": generation_transparency[
                                         "profile_preview"
                                     ],
-                                    "print_readiness": generation_print_readiness.get(
-                                        "profile_preview"
-                                    ),
+                                    "print_readiness": runtime_profile_report,
                                 },
                                 "canvas_policy": design["canvas_policy"],
                                 "prints": print_assets,
-                                "warnings": list(generation.get("warnings", []))
-                                if isinstance(generation, dict)
-                                else [],
+                                "warnings": runtime_warnings,
                             }
                         )
-                        for artifact_label, report in [
-                            (
-                                f"{profile.profile_id} preview",
-                                generation_print_readiness.get("profile_preview"),
-                            ),
-                            *[
-                                (
-                                    f"{profile.profile_id}/{target.target_id}",
-                                    print_readiness_reports.get(target.target_id),
-                                )
-                                for target in profile.targets
-                            ],
-                        ]:
+                        for artifact_label, report in report_pairs:
                             if (
                                 isinstance(report, dict)
                                 and report.get("print_ready") is False

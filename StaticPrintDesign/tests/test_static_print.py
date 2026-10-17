@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageDraw
 
 from pawmarvel_static_print.authoring import (
     discover_designs,
@@ -47,7 +47,11 @@ from pawmarvel_static_print.history_cleanup import (
     execute_history_cleanup,
     latest_cleanup_state,
 )
-from pawmarvel_static_print.image_quality import print_readiness_report
+from pawmarvel_static_print.image_quality import (
+    print_readiness_report,
+    print_readiness_report_for_path,
+    print_readiness_warning,
+)
 from pawmarvel_static_print.lifecycle import (
     OPAQUE_FULL_BLEED,
     DesignIdProposal,
@@ -369,6 +373,79 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         self.assertTrue(status["refreshing"])
         thread_type.return_value.start.assert_called_once_with()
         self.assertIs(server.s3_refresh_thread, thread_type.return_value)
+
+    def test_legacy_product_readiness_is_upgraded_once_per_unchanged_asset(
+        self,
+    ) -> None:
+        image = self.root / "legacy-product.png"
+        Image.new("RGBA", (20, 20), (50, 60, 70, 253)).save(image)
+        server = object.__new__(StaticPrintHTTPServer)
+        server.config = SimpleNamespace(work_root=self.root)
+        server.print_readiness_cache_lock = Lock()
+        server.print_readiness_cache = {}
+        legacy = {"schema": "pawmarvel-static-print-readiness-v1"}
+
+        with patch(
+            "pawmarvel_static_print.server.print_readiness_report_for_path",
+            wraps=print_readiness_report_for_path,
+        ) as reporter:
+            first = server.current_print_readiness(
+                legacy,
+                path=image,
+                expected_size=(20, 20),
+                canvas_policy="opaque-full-bleed",
+                upscale_ratio=1.0,
+                product_profile_id="coffee-mug-11oz",
+            )
+            second = server.current_print_readiness(
+                legacy,
+                path=image,
+                expected_size=(20, 20),
+                canvas_policy="opaque-full-bleed",
+                upscale_ratio=1.0,
+                product_profile_id="coffee-mug-11oz",
+            )
+
+        self.assertEqual(first["schema"], "pawmarvel-static-print-readiness-v2")
+        self.assertEqual(first, second)
+        reporter.assert_called_once()
+
+    def test_design_discovery_does_not_recalculate_legacy_subject_readiness(
+        self,
+    ) -> None:
+        graduated = self.root / "static-graduated-designs"
+        subject_root = graduated / "sample-design/cat"
+        subject_root.mkdir(parents=True)
+        source = subject_root / "source-design.png"
+        Image.new("RGBA", (20, 20), (50, 60, 70, 253)).save(source)
+        (subject_root / "subject-generation.json").write_text(
+            json.dumps(
+                {
+                    "output_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                    "output_transparency": {"result": "transparent-background"},
+                    "print_readiness": {
+                        "schema": "pawmarvel-static-print-readiness-v1"
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with patch(
+            "pawmarvel_static_print.authoring.print_readiness_report_for_path"
+        ) as reporter:
+            discovered = discover_designs(graduated, self.authoring)
+
+        subject = next(
+            item
+            for item in discovered
+            if item["design_id"] == "sample-design--subject-cat"
+        )
+        self.assertEqual(
+            subject["subject_print_readiness"]["schema"],
+            "pawmarvel-static-print-readiness-v1",
+        )
+        reporter.assert_not_called()
 
     def test_s3_network_refresh_does_not_hold_status_cache_lock(self) -> None:
         server = object.__new__(StaticPrintHTTPServer)
@@ -2432,6 +2509,136 @@ class StaticPrintWorkflowTest(unittest.TestCase):
             any("enlarged" in item for item in warning_report["warnings"])
         )
 
+    def test_print_readiness_separates_alpha_bands_and_product_recommendations(
+        self,
+    ) -> None:
+        pixels = (
+            [(0, 0, 0, 0)]
+            + [(40, 50, 60, 253)] * 945
+            + [(40, 50, 60, 100)] * 26
+            + [(40, 50, 60, 10)] * 22
+            + [(40, 50, 60, 255)] * 6
+        )
+        image = Image.new("RGBA", (100, 10))
+        image.putdata(pixels)
+
+        generic = print_readiness_report(
+            image,
+            expected_size=(100, 10),
+            canvas_policy="preserve-transparency",
+        )
+        self.assertTrue(generic["print_ready"])
+        self.assertIn("near-opaque=94.595% (acceptable)", generic["alpha_summary"])
+        self.assertIn("boundary=", generic["alpha_summary"])
+        self.assertIn("interior=", generic["alpha_summary"])
+        self.assertEqual(
+            [item["category"] for item in generic["alpha_categories"]],
+            [
+                "near-opaque",
+                "meaningful-translucency",
+                "high-risk-fringe",
+            ],
+        )
+        process_results = {
+            item["print_process"]: item["pass"]
+            for item in generic["process_reports"]
+        }
+        self.assertFalse(process_results["dtg-dtf-apparel"])
+        self.assertTrue(process_results["dye-sublimation"])
+        self.assertTrue(process_results["paper-canvas"])
+        self.assertFalse(process_results["sticker"])
+        product_results = {
+            item["product_profile_id"]: item["pass"]
+            for item in generic["product_reports"]
+        }
+        self.assertFalse(product_results["mens-tee-house-style"])
+        self.assertTrue(product_results["coffee-mug-11oz"])
+        self.assertTrue(product_results["poster-modern-portrait"])
+        self.assertFalse(product_results["sticker"])
+        self.assertEqual(generic["product_compatibility"]["status"], "review")
+        self.assertIn(
+            "coffee-mug-11oz",
+            generic["product_compatibility"]["pass_product_profile_ids"],
+        )
+        self.assertIn(
+            "mens-tee-house-style",
+            generic["product_compatibility"]["review_product_profile_ids"],
+        )
+        compatibility_warning = print_readiness_warning("subject preview", generic)
+        self.assertIsNotNone(compatibility_warning)
+        self.assertIn("passed intrinsic pixel checks", compatibility_warning)
+        self.assertIn("coffee-mug-11oz", compatibility_warning)
+        self.assertIn("mens-tee-house-style", compatibility_warning)
+
+        shirt = print_readiness_report(
+            image,
+            expected_size=(100, 10),
+            canvas_policy="preserve-transparency",
+            product_profile_id="mens-tee-house-style",
+        )
+        self.assertFalse(shirt["print_ready"])
+        self.assertEqual(shirt["product_report"]["status"], "fail")
+        self.assertIn("white underbase", shirt["product_report"]["summary"])
+
+        mug = print_readiness_report(
+            image,
+            expected_size=(100, 10),
+            canvas_policy="preserve-transparency",
+            product_profile_id="coffee-mug-11oz",
+        )
+        self.assertTrue(mug["print_ready"])
+        self.assertEqual(mug["product_report"]["status"], "pass")
+        self.assertIsNone(print_readiness_warning("mug preview", mug))
+
+    def test_product_alpha_report_distinguishes_boundary_from_interior_fringe(
+        self,
+    ) -> None:
+        boundary = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(boundary)
+        draw.rectangle((24, 24, 75, 75), fill=(50, 60, 70, 10))
+        draw.rectangle((25, 25, 74, 74), fill=(50, 60, 70, 255))
+        boundary_report = print_readiness_report(
+            boundary,
+            expected_size=(100, 100),
+            canvas_policy="preserve-transparency",
+            product_profile_id="coffee-mug-11oz",
+        )
+        self.assertTrue(boundary_report["product_report"]["pass"])
+        boundary_pixels = boundary_report["alpha_categories"][2]["breakdown"]
+        self.assertGreater(boundary_pixels["boundary_visible_percent"], 7)
+        self.assertEqual(boundary_pixels["interior_visible_percent"], 0)
+
+        interior = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(interior)
+        draw.rectangle((25, 25, 74, 74), fill=(50, 60, 70, 255))
+        draw.rectangle((40, 40, 59, 59), fill=(50, 60, 70, 10))
+        interior_report = print_readiness_report(
+            interior,
+            expected_size=(100, 100),
+            canvas_policy="preserve-transparency",
+            product_profile_id="coffee-mug-11oz",
+        )
+        self.assertFalse(interior_report["product_report"]["pass"])
+        interior_pixels = interior_report["alpha_categories"][2]["breakdown"]
+        self.assertEqual(interior_pixels["boundary_visible_percent"], 0)
+        self.assertGreater(interior_pixels["interior_visible_percent"], 15)
+
+    def test_near_opaque_pixels_do_not_fail_apparel_preflight(self) -> None:
+        image = Image.new("RGBA", (20, 20), (40, 50, 60, 253))
+        image.putpixel((0, 0), (0, 0, 0, 0))
+        report = print_readiness_report(
+            image,
+            expected_size=(20, 20),
+            canvas_policy="preserve-transparency",
+            product_profile_id="unisex-tee-crewneck-hoodie-tanks",
+        )
+        self.assertTrue(report["print_ready"])
+        self.assertEqual(report["product_report"]["status"], "pass")
+        self.assertEqual(
+            report["pixel_percent"]["meaningful_translucency_visible"], 0.0
+        )
+        self.assertEqual(report["pixel_percent"]["high_risk_fringe_visible"], 0.0)
+
     def test_cat_validator_allows_borderline_expression_for_operator_review(self) -> None:
         source = self.root / "cat-seed.png"
         output = self.root / "cat-subject.png"
@@ -3090,11 +3297,19 @@ class StaticPrintWorkflowTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('id="subject-filter"', html)
         self.assertIn('id="product-filter"', html)
+        self.assertIn('id="select-filtered-subject-previews"', html)
         self.assertIn("design.subject_id !== subject", javascript)
         self.assertIn("function activeProductFilter()", javascript)
         self.assertIn("function visibleProductProfiles()", javascript)
         self.assertIn("item.product_profile_id === activeProductFilter()", javascript)
         self.assertIn("function printReadinessBadge(report)", javascript)
+        self.assertIn("alpha-category-reports", javascript)
+        self.assertIn("function selectAllFilteredSubjectPreviews()", javascript)
+        self.assertIn("function workflowRowCount(seeds, subjects", javascript)
+        self.assertIn(
+            '$("graduated-tab-count").textContent = graduatedRowCount',
+            javascript,
+        )
         self.assertIn("Not print-ready", javascript)
         self.assertIn('id="history-cleanup-controls"', html)
         self.assertIn("function renderHistoryCleanup()", javascript)

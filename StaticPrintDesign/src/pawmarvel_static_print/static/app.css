@@ -66,6 +66,13 @@ details.panel > summary h2 { display: inline; margin: 0; font-size: 1rem; }
 .badge.ready { color: #174c85; background: #dfeafa; }
 .badge.warn { color: #8a4d00; background: #fff0d8; }
 .badge.attention { color: #7a3100; background: #ffe1b3; border: 1px solid #df8b26; font-weight: 850; }
+.print-readiness-report { margin: .4rem 0; }
+.print-readiness-report summary { cursor: pointer; list-style-position: outside; }
+.print-readiness-report .alpha-summary { margin: .5rem 0 .25rem; }
+.print-process-reports, .print-readiness-findings, .alpha-category-reports { margin: .35rem 0 .2rem; padding-left: 1.2rem; }
+.print-process-reports .pass { color: #0d5d36; }
+.print-process-reports .fail, .print-readiness-findings, .alpha-category-reports .warn { color: #7a3100; }
+.alpha-category-reports .pass { color: #0d5d36; }
 .review-attention { display: grid; gap: .3rem; padding: .6rem; border: 2px solid #df8b26; border-radius: 9px; background: #fff8eb; }
 .review-attention .badge { width: fit-content; }
 .review-attention-reason { margin: 0; color: #65330b; font-size: .8rem; line-height: 1.35; }

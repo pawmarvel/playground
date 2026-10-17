@@ -29,10 +29,7 @@ from .core import (
     validate_version,
     write_json,
 )
-from .image_quality import (
-    print_readiness_report_for_path,
-    print_readiness_warning,
-)
+from .image_quality import print_readiness_report_for_path, print_readiness_warning
 
 PREVIEW_MAX_EDGE = 1080
 OPAQUE_FULL_BLEED = "opaque-full-bleed"
@@ -576,6 +573,7 @@ def generate_design(
             preview_path,
             expected_size=operator_preview.size,
             canvas_policy=canvas_policy,
+            product_profile_id=profile.profile_id,
         )
         operator_preview_warning = print_readiness_warning(
             f"{design_id}/operator-preview", operator_preview_readiness
@@ -609,6 +607,7 @@ def generate_design(
                 expected_size=(target.width, target.height),
                 canvas_policy=canvas_policy,
                 upscale_ratio=scale,
+                product_profile_id=profile.profile_id,
             )
             warning = print_readiness_warning(
                 f"{design_id}/{profile.profile_id}/{target.target_id}",
@@ -657,6 +656,7 @@ def generate_design(
                 profile.preview_width / first_target_image.width,
                 profile.preview_height / first_target_image.height,
             ),
+            product_profile_id=profile.profile_id,
         )
         profile_preview_warning = print_readiness_warning(
             f"{design_id}/{profile.profile_id}/profile-preview",
